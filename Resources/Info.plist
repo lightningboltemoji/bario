@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  bario.app — the bundle the bar runs from (.agents/knowledge/09-live-reload-and-bundle.md).
+
+  The bundle exists so Screen Recording permission attaches to a stable bundle identifier rather
+  than to whichever terminal launched the binary — grant it to a terminal and you have granted it
+  to everything that terminal ever runs. It is also the only way macOS will show the Location
+  prompt the wifi module needs for an SSID.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>bario</string>
+	<key>CFBundleDisplayName</key>
+	<string>bario</string>
+	<key>CFBundleExecutable</key>
+	<string>bario</string>
+	<key>CFBundleIdentifier</key>
+	<string>zip.tanner.bario</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- Placeholders. `make app` stamps both from git: the version from the tag, the build from the
+	     commit count, and `barioVersion` reads the first back at runtime. A bundle assembled outside
+	     a checkout keeps these and says, correctly, that it is no release. -->
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<!-- An accessory app: no Dock icon, no menu of its own. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Without this key macOS never shows the prompt, and the wifi module stays SSID-less. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>macOS requires Location Services before it will tell an app the name of the Wi-Fi network you are on. bario uses it only for that, and only if your bar shows {ssid}.</string>
+</dict>
+</plist>

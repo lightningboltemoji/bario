@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tannercollin/bario/schema/content.json",
+  "title": "bario content",
+  "description": "What a module hands back. The same document travels over the socket, through WASM linear memory and out of built-in Swift modules. The running enforcement point is BarioKit's decoder, which rejects exactly what this schema rejects and reports the JSON path.",
+
+  "$defs": {
+    "classList": {
+      "description": "A class name, several separated by spaces, or a list of them.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+
+    "decoration": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "class": { "$ref": "#/$defs/classList" }
+      }
+    },
+
+    "node": {
+      "description": "Exactly one kind key, plus the optional hooks the stylesheet addresses it by. A kind key that is not built in names a node type registered by a renderer module; its payload is passed to that renderer untouched.",
+      "type": "object",
+      "allOf": [{ "$ref": "#/$defs/decoration" }],
+      "oneOf": [
+        { "required": ["text"] },
+        { "required": ["icon"] },
+        { "required": ["meter"] },
+        { "required": ["graph"] },
+        { "required": ["row"] },
+        { "required": ["column"] },
+        { "required": ["spacer"] },
+        { "required": ["canvas"] },
+        { "required": ["raster"] },
+        {
+          "not": {
+            "anyOf": [
+              { "required": ["text"] }, { "required": ["icon"] }, { "required": ["meter"] },
+              { "required": ["graph"] }, { "required": ["row"] }, { "required": ["column"] },
+              { "required": ["spacer"] }, { "required": ["canvas"] }, { "required": ["raster"] }
+            ]
+          },
+          "minProperties": 1
+        }
+      ],
+      "properties": {
+        "text": {
+          "description": "One run of text; style controls font, colour and weight.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "properties": { "value": { "type": "string" } }, "required": ["value"] }
+          ]
+        },
+        "icon": {
+          "description": "An SF Symbol name, or a file. A string containing a slash or leading ~ is a file.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "properties": { "file": { "type": "string" } }, "required": ["file"] },
+            { "type": "object", "properties": { "symbol": { "type": "string" } }, "required": ["symbol"] },
+            { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] }
+          ]
+        },
+        "meter": {
+          "description": "A horizontal fill, e.g. battery or volume.",
+          "oneOf": [
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            {
+              "type": "object",
+              "properties": {
+                "value": { "type": "number", "minimum": 0, "maximum": 1 },
+                "width": { "type": "number", "exclusiveMinimum": 0 }
+              },
+              "required": ["value"]
+            }
+          ]
+        },
+        "graph": {
+          "description": "A sparkline. Values are scaled to `max`, or to the largest value present.",
+          "oneOf": [
+            { "type": "array", "items": { "type": "number" } },
+            {
+              "type": "object",
+              "properties": {
+                "values": { "type": "array", "items": { "type": "number" } },
+                "width": { "type": "number", "exclusiveMinimum": 0 },
+                "max": { "type": "number" }
+              },
+              "required": ["values"]
+            }
+          ]
+        },
+        "row": { "$ref": "#/$defs/container" },
+        "column": { "$ref": "#/$defs/container" },
+        "spacer": {
+          "description": "Flexible space inside a row.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "number" },
+            { "type": "object", "properties": { "grow": { "type": "number" } } }
+          ]
+        },
+        "canvas": {
+          "description": "A vector display list painted by the host. See DESIGN.md section 9.1 for the op set.",
+          "type": "object",
+          "properties": {
+            "width": { "type": "number" },
+            "height": { "type": "number" },
+            "ops": { "type": "array" }
+          },
+          "required": ["ops"]
+        },
+        "raster": {
+          "description": "Premultiplied BGRA pixels supplied by the module. Copies per frame; the expensive one.",
+          "type": "object",
+          "properties": {
+            "width": { "type": "number" },
+            "height": { "type": "number" },
+            "source": {
+              "description": "A {ptr, len} pair into WASM memory, a shared-memory path, or inline PNG bytes."
+            }
+          },
+          "required": ["width", "source"]
+        }
+      }
+    },
+
+    "container": {
+      "description": "A row or column. The array form is children with default gap and alignment.",
+      "oneOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        {
+          "type": "object",
+          "properties": {
+            "gap": { "type": "number" },
+            "align": { "enum": ["start", "center", "end", "stretch", "baseline"] },
+            "children": { "type": "array", "items": { "$ref": "#/$defs/node" } }
+          }
+        }
+      ]
+    }
+  },
+
+  "type": "object",
+  "properties": {
+    "content": { "$ref": "#/$defs/node" },
+    "classes": {
+      "description": "State classes on the item itself, in the waybar sense: #battery.charging.",
+      "$ref": "#/$defs/classList"
+    },
+    "tooltip": { "type": "string" },
+    "visible": { "type": "boolean", "default": true }
+  }
+}

@@ -1,0 +1,26 @@
+# Build and tast every pull request. Pushes to main are covered by `release.yml`, which runs the
+# same two commands before it publishes anything — there is no point building main twice.
+name: ci
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test

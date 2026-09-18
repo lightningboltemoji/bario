@@ -1,0 +1,55 @@
+# 08 — `exec`
+
+DESIGN.md §3, tier 2: the escape hatch that makes everything else optional. Two shapes, as
+waybar has them.
+
+- **Interval.** Run the command every `interval`, read its stdout, write it to the store.
+- **Watch.** `interval="watch"`: keep the command running and read lines as they arrive. Each
+  line is one update. This is how a spaces indicator from AeroSpace or yabai works.
+
+```kdl
+item "spaces" module="exec" interval="watch" {
+  command "aerospace" "list-workspaces" "--monitor" "focused" "--format" "%{workspace}"
+}
+item "weather" module="exec" interval="10m" {
+  command "curl -s 'wttr.in/Vancouver?format=%t'"
+}
+```
+
+`command` as a list is an argv, executed directly. `command` as one string goes through
+`/bin/sh -c`, because that is what people write and what `on-click="exec …"` will need in
+increment 15.
+
+## What the output means
+
+Stdout is either plain text or, if it parses, JSON, which is written into the store as-is
+(§3). Precisely:
+
+- a JSON **object** is merged into the item's subtree, so any key the script invents is
+  addressable from a format string;
+- anything else — plain text, a JSON array, a bare number — lands under `text`, which is also
+  the default format, so `echo hello` is a working module;
+- waybar's own keys keep their meaning when they appear: `text`, `alt`, `tooltip`,
+  `percentage`, and `class` (a string or a list) becomes the item's state classes. Adopting
+  that vocabulary means existing waybar scripts work unchanged.
+
+Every run also writes `exit-code`, and `stderr` when there was any. A non-zero exit adds the
+`.error` class and puts stderr in the tooltip rather than replacing the last good content —
+the same rule modules follow everywhere else.
+
+## Not taking the bar down
+
+- Interval runs get a budget (`timeout`, default 10s); over it, the process is terminated,
+  then killed, and the item goes `.stale`.
+- A watched process that exits is restarted with exponential backoff from 0.5s to 30s, and
+  the backoff resets once it has run for a while. A command that cannot start at all becomes
+  one `.error` bubble, not a restart storm.
+- `stop()` terminates the process group, so a watched `sh -c` does not leave its child behind.
+- The environment is inherited plus `BARIO_ITEM`, so one script can serve several items.
+
+## Tests
+
+Plain text, JSON object, waybar-shaped JSON with classes, a non-zero exit, a command that
+does not exist, a watched command emitting several lines, and a watched command that exits
+being restarted. All of them run real `/bin/sh`, because the point of this module is that it
+runs real commands.
