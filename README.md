@@ -16,7 +16,7 @@ a customizable menu bar overlay for macOS
 - WASM-based plugin system allows custom data providers and item renderers
 - Disappears as your mouse gets close, to keep the default menu bar immediately usable at all times
 
-<img width="369" height="35" alt="Screenshot 2026-09-17 at 9 07 37 PM" src="https://github.com/user-attachments/assets/0288b209-f55a-4512-a537-b407aeb25756" />
+<img width="369" height="35" alt="Screenshot 2026-09-17 at 9 07 37 PM" src="https://github.com/user-attachments/assets/f70a07cf-1cc9-4bf6-b2d6-a5b277f6f3bb" />
 
 ## Install
 
