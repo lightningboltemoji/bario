@@ -94,17 +94,25 @@ struct ExecTests {
           command "for i in 1 2 3; do echo line-$i; sleep 0.05; done"
         }
         """)
+        // Subscribe rather than sample the store: every line the module writes is delivered, so a
+        // machine too busy to be read in time cannot miss one — nor, once the finished command
+        // has been restarted, see line-1 again and take it for the last line that arrived.
+        let changes = await store.changes(matching: name)
         await module.start()
-        var seen: [String] = []
-        // Three lines, 50ms apart, out of a shell this test had to spawn: quick, unless the
-        // machine is busy. The loop leaves as soon as it has them, so the ceiling only costs
-        // anything on a run that was going to fail anyway.
-        for _ in 0..<200 {
-            try? await Task.sleep(nanoseconds: 30_000_000)
-            if let text = await store.value(at: "\(name).text")?.stringValue,
-               seen.last != text { seen.append(text) }
-            if seen.count >= 3 { break }
+        let reader = Task {
+            var seen: [String] = []
+            for await change in changes {
+                if let text = change.value["text"]?.stringValue, seen.last != text {
+                    seen.append(text)
+                }
+                if seen.last == "line-3" { break }
+            }
+            return seen
         }
+        // A ceiling, so a line that never arrives fails this test rather than hanging it.
+        let ceiling = Task { try? await Task.sleep(nanoseconds: 5_000_000_000); reader.cancel() }
+        let seen = await reader.value
+        ceiling.cancel()
         await module.stop()
         #expect(seen.contains("line-1"))
         #expect(seen.last == "line-3")
