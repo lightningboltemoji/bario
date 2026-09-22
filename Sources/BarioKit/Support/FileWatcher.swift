@@ -20,6 +20,9 @@ public final class FileWatcher: @unchecked Sendable {
         self.onChange = onChange
         lastStamp = FileWatcher.stamp(of: url)
         arm()
+        // The file itself can appear while arming runs, in the window the directory watch does
+        // not cover yet. A stamp check settles it, and reports nothing if nothing moved.
+        schedule()
     }
 
     deinit {
@@ -81,25 +84,33 @@ public final class FileWatcher: @unchecked Sendable {
 
     /// The directory catches a file appearing for the first time, and an atomic replace. When the
     /// file's own directory is not there either, the nearest ancestor that *is* stands in for it,
-    /// and its first event re-arms onto whatever now exists furthest down — so the watch follows
+    /// and its events move the watch down as the rest of the path appears — so the watch follows
     /// `~/.config/bario` into being, which is what a first run actually does. Standing in higher
     /// up is noisier, but `schedule()` still only reports a file whose stamp moved.
     private func armDirectory() {
-        directorySource?.cancel()
-        directorySource = nil
-        guard let directory = FileWatcher.nearestExistingDirectory(of: url) else { return }
-        let fd = open(directory.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: queue)
-        source.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.rearm(watching: directory)
-            self.schedule()
+        // Arm, then look again. Choosing a directory and watching it are not one step, and a
+        // directory created in between sends its event to nobody: the watch would sit on an
+        // ancestor of the real parent for good, which is `mkdir -p ~/.config/bario` exactly.
+        // Looking again once the source is live cannot miss it — either nothing moved, or we go
+        // round and arm what did.
+        while true {
+            directorySource?.cancel()
+            directorySource = nil
+            guard let directory = FileWatcher.nearestExistingDirectory(of: url) else { return }
+            let fd = open(directory.path, O_EVTONLY)
+            guard fd >= 0 else { return }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: queue)
+            source.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.rearm(watching: directory)
+                self.schedule()
+            }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            directorySource = source
+            if FileWatcher.nearestExistingDirectory(of: url) == directory { return }
         }
-        source.setCancelHandler { close(fd) }
-        source.resume()
-        directorySource = source
     }
 
     /// The nearest directory at or above the file's own that exists right now, or nil if even the

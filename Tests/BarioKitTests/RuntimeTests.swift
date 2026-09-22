@@ -312,10 +312,10 @@ struct ModuleHostTests {
     @Test("a module that never finishes starting holds up nothing else, and not the next reload")
     @MainActor
     func stuckStart() async throws {
-        ModuleRegistry.register("stuck-start-test") { _ in StuckStartModule() }
+        let stuck = StuckStartModule()
+        ModuleRegistry.register("stuck-start-test") { _ in stuck }
         let host = ModuleHost()
         let config = try ConfigLoader.parse(#"bar { item "stuck" module="stuck-start-test"; item "t" module="text" text="hi" }"#)
-        let started = Date()
         await host.load(config.bars[0].items)
         await host.renderPending()
         #expect(host.state(for: "t")?.result.content == .text("hi"))
@@ -323,10 +323,11 @@ struct ModuleHostTests {
         await host.load(next.bars[0].items)
         await host.renderPending()
         #expect(host.state(for: "t")?.result.content == .text("bye"))
-        // The stuck module sleeps for a minute, so anything short of that says we did not wait
-        // for it. The bound is loose on purpose: every `@MainActor` test in the run shares this
-        // thread, and on a small CI runner the lines above can sit descheduled for seconds.
-        #expect(Date().timeIntervalSince(started) < 10)
+        // Both loads came back, and the start they were not waiting for is still in there. Asking
+        // the module beats timing the loads: this test shares the main actor with every other
+        // `@MainActor` test in the run, so the lines above can sit descheduled for seconds
+        // through no fault of the host's.
+        #expect(await stuck.finishedStarting == false)
         await host.shutdown()
     }
 
@@ -355,7 +356,8 @@ struct ModuleHostTests {
         await host.load(config.bars[0].items)
         let start = Date()
         await host.firstPolls(within: 0.1)
-        #expect(Date().timeIntervalSince(start) < 5)
+        // Anything well short of the poll's own minute says the deadline is what ended the wait.
+        #expect(Date().timeIntervalSince(start) < 30)
         await host.renderPending()
         #expect(host.state(for: "p")?.result.content == nil)
         await host.shutdown()
@@ -381,8 +383,16 @@ actor ReadsOtherModule: Module {
 
 /// A module whose `start` does not come back for a very long time.
 actor StuckStartModule: Module {
+    /// Still false is the proof that nobody waited: a minute is longer than any test run. Being
+    /// cancelled does not count as finishing — that is the host retiring this module, which is
+    /// the opposite of waiting for it.
+    private(set) var finishedStarting = false
+
     func start() async {
-        try? await Task.sleep(nanoseconds: 60_000_000_000)
+        do {
+            try await Task.sleep(nanoseconds: 60_000_000_000)
+            finishedStarting = true
+        } catch {}
     }
 
     func render(_ state: StateReader) async throws -> RenderResult {

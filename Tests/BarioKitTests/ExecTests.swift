@@ -96,7 +96,10 @@ struct ExecTests {
         """)
         await module.start()
         var seen: [String] = []
-        for _ in 0..<40 {
+        // Three lines, 50ms apart, out of a shell this test had to spawn: quick, unless the
+        // machine is busy. The loop leaves as soon as it has them, so the ceiling only costs
+        // anything on a run that was going to fail anyway.
+        for _ in 0..<200 {
             try? await Task.sleep(nanoseconds: 30_000_000)
             if let text = await store.value(at: "\(name).text")?.stringValue,
                seen.last != text { seen.append(text) }

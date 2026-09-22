@@ -167,6 +167,8 @@ public final class SocketServer: @unchecked Sendable {
         private let lock = NSLock()
         private var topics: [SocketTopic] = []
         private var closed = false
+        /// The request being handled, so the next one can queue behind it. Queue-confined.
+        private var pending: Task<Void, Never>?
 
         init(fd: Int32, queue: DispatchQueue, handler: @escaping Handler,
              onClose: @escaping (Connection) -> Void) {
@@ -243,7 +245,13 @@ public final class SocketServer: @unchecked Sendable {
             }
 
             let handler = self.handler
-            Task { [weak self] in
+            // One at a time, in the order they arrived. Two lines can come off the socket in a
+            // single read, and a task each would let the second be answered first — a client that
+            // writes `set` and then `get` is entitled to read its own write back. `pending` is
+            // only ever touched here, on the queue the read source runs on.
+            let previous = pending
+            pending = Task { [weak self] in
+                await previous?.value
                 let reply = await handler(request)
                 // No id means no reply: a one-shot `set` is a write and a close.
                 guard request.id != nil else { return }

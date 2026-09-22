@@ -158,8 +158,10 @@ struct SocketServerTests {
 
         /// Reads one line, waiting up to `timeout` seconds — on a thread that is not the
         /// cooperative pool's, because the reply comes from a task that needs one. See
-        /// Blocking.swift.
-        func line(timeout: Double = 2) async -> JSONValue? {
+        /// Blocking.swift. `BarioService` is the main actor's, so that reply also waits behind
+        /// every `@MainActor` test in the run: the timeout is for a busy machine, not for a
+        /// round trip, which takes a millisecond.
+        func line(timeout: Double = 15) async -> JSONValue? {
             await offPool { self.blockingLine(timeout: timeout) }
         }
 
