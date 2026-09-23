@@ -35,7 +35,7 @@ SHELL   := /bin/bash
 LD_NOISE = ld: warning: search path '$(DEVDIR)/Developer/.*' not found
 QUIET    = 2> >(grep -vE "$(LD_NOISE)" >&2)
 
-.PHONY: build release test clean app install uninstall print-version
+.PHONY: build release test clean app zip dist install uninstall print-version
 build:
 	swift build $(QUIET)
 
@@ -47,7 +47,7 @@ test:
 
 clean:
 	swift package clean
-	rm -rf $(BUNDLE)
+	rm -rf $(DIST)
 
 # --- Version -------------------------------------------------------------------------------------
 # The git tag is the only version authority; nothing in the tree carries a number. A tagged commit
@@ -77,8 +77,13 @@ print-version:
 # at all still gets a bundle that runs, so that failure is a warning rather than an error;
 # `CODESIGN_IDENTITY` overrides it with a Developer ID, which brings the hardened runtime and a
 # secure timestamp with it, and is asked for deliberately enough that failing it should fail.
+#
+# The bundle is `Bario.app` while the executable inside it stays `bario`: the file name is what Finder
+# and the Homebrew cask show, the executable is what a script calls. It is built into $(DIST), the one
+# directory the release workflow reads from.
 APP_NAME := bario
-BUNDLE   := .build/$(APP_NAME).app
+DIST     := dist
+BUNDLE   := $(DIST)/Bario.app
 CONTENTS := $(BUNDLE)/Contents
 RELEASE  := .build/release
 
@@ -103,14 +108,28 @@ app: release
 	@codesign --force --sign "$(CODESIGN_IDENTITY)" $(SIGN_FLAGS) $(BUNDLE) $(SIGN_FALLBACK)
 	@echo "built $(BUNDLE) — version $(VERSION) ($(BUILD))"
 
+# --- The release archive -------------------------------------------------------------------------
+# `ditto`, not `zip`: a bundle carries symlinks, xattrs and a signature that plain zip mangles, and
+# it is the format `notarytool` takes. `zip` does not depend on `app` because notarization runs
+# between them and a re-sign would discard the stapled ticket — `make dist` is the ordinary path.
+ZIP_NAME ?= $(APP_NAME)-$(VERSION).zip
+ZIP      := $(DIST)/$(ZIP_NAME)
+
+zip:
+	rm -f $(ZIP)
+	ditto -c -k --keepParent $(BUNDLE) $(ZIP)
+	@shasum -a 256 $(ZIP)
+
+dist: app zip
+
 # Into /Applications, because that is where a permission grant should point: TCC records the
 # bundle's path alongside its identity, so granting from a build directory breaks the moment it
 # is cleaned.
 install: app
-	rm -rf /Applications/$(APP_NAME).app
+	rm -rf /Applications/Bario.app
 	cp -R $(BUNDLE) /Applications/
-	@echo "installed /Applications/$(APP_NAME).app"
-	@echo "run it with: open -a $(APP_NAME)  (or /Applications/$(APP_NAME).app/Contents/MacOS/$(APP_NAME) --run)"
+	@echo "installed /Applications/Bario.app"
+	@echo "run it with: open -a Bario  (or /Applications/Bario.app/Contents/MacOS/$(APP_NAME) --run)"
 
 uninstall:
-	rm -rf /Applications/$(APP_NAME).app
+	rm -rf /Applications/Bario.app
