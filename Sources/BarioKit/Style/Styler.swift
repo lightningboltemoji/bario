@@ -135,11 +135,7 @@ public struct Styler: Sendable {
     }
 
     private func itemStyle(_ config: ItemConfig, path: [StyleNode], parentStyle: Style) -> Style {
-        var style = cascade.style(for: path, inheriting: parentStyle, inline: inlineRules(config)).style
-        if let width = config.sizing.width { style.width = width }
-        if let min = config.sizing.minWidth { style.minWidth = min }
-        if let max = config.sizing.maxWidth { style.maxWidth = max }
-        return style
+        cascade.style(for: path, inheriting: parentStyle, inline: inlineRules(config)).style
     }
 
     private func inlineRules(_ config: ItemConfig) -> [Declaration] {

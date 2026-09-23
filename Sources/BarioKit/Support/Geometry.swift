@@ -1,7 +1,6 @@
 import CoreGraphics
 
-/// Edge insets in points, in CSS order, shared by the config (`padding 0 8`) and the
-/// stylesheet (`padding: 2pt 9pt`).
+/// Edge insets in points, in CSS order: the stylesheet's `padding: 2pt 9pt`.
 public struct Insets: Sendable, Hashable {
     public var top: Double
     public var right: Double

@@ -9,6 +9,7 @@ public struct Style: Sendable, Hashable {
     public var borderWidth: Double = 0
     public var borderColor: Color = .none
     public var borderRadius: Corners = .zero
+    public var cornerShape: CornerShapes = .round
     public var minWidth: Double?
     public var maxWidth: Double?
     public var width: Double?
@@ -102,6 +103,7 @@ public struct Style: Sendable, Hashable {
         case .borderWidth: borderWidth = try CSSValue.length(value, at: position)
         case .borderColor: borderColor = try CSSValue.color(value, at: position)
         case .borderRadius: borderRadius = try CSSValue.corners(value, at: position)
+        case .cornerShape: cornerShape = try CSSValue.cornerShapes(value, at: position)
         case .minWidth: minWidth = try CSSValue.length(value, at: position)
         case .maxWidth: maxWidth = try CSSValue.length(value, at: position)
         case .width: width = try CSSValue.length(value, at: position)
@@ -137,7 +139,7 @@ public struct Style: Sendable, Hashable {
 extension StyleProperty {
     /// What `transition` can move. Everything else snaps.
     public static let animatable: [StyleProperty] = [
-        .padding, .margin, .borderWidth, .borderColor, .borderRadius, .opacity, .gap, .background,
+        .padding, .margin, .borderWidth, .borderColor, .borderRadius, .cornerShape, .opacity, .gap, .background,
         .color, .letterSpacing, .fill, .track, .strokeWidth, .fontSize, .fontWeight,
         .iconSize, .iconColor, .shadow, .transform,
     ]
@@ -155,6 +157,7 @@ extension Style {
         case .borderWidth: borderWidth = lerp(a.borderWidth, borderWidth, t)
         case .borderColor: borderColor = Color.blend(a.borderColor, borderColor, t)
         case .borderRadius: borderRadius = lerp(a.borderRadius, borderRadius, t)
+        case .cornerShape: cornerShape = lerp(a.cornerShape, cornerShape, t)
         case .opacity: opacity = lerp(a.opacity, opacity, t)
         case .gap: gap = lerp(a.gap, gap, t)
         case .background: background = Background.blend(a.background, background, t)
@@ -195,6 +198,7 @@ extension Style {
         case .borderWidth: return borderWidth != other.borderWidth
         case .borderColor: return borderColor != other.borderColor
         case .borderRadius: return borderRadius != other.borderRadius
+        case .cornerShape: return cornerShape != other.cornerShape
         case .opacity: return opacity != other.opacity
         case .gap: return gap != other.gap
         case .background: return background != other.background
@@ -221,6 +225,7 @@ extension Style {
         case .borderWidth: borderWidth = other.borderWidth
         case .borderColor: borderColor = other.borderColor
         case .borderRadius: borderRadius = other.borderRadius
+        case .cornerShape: cornerShape = other.cornerShape
         case .opacity: opacity = other.opacity
         case .gap: gap = other.gap
         case .background: background = other.background
@@ -272,6 +277,17 @@ func lerp(_ a: Corners, _ b: Corners, _ t: Double) -> Corners {
     Corners(topLeft: lerp(a.topLeft, b.topLeft, t), topRight: lerp(a.topRight, b.topRight, t),
             bottomRight: lerp(a.bottomRight, b.bottomRight, t),
             bottomLeft: lerp(a.bottomLeft, b.bottomLeft, t))
+}
+
+/// Corner shapes move through convexity, K / (1 + |K|), which is finite at square and notch
+/// and puts round, squircle and bevel at even-feeling steps.
+func lerp(_ a: CornerShapes, _ b: CornerShapes, _ t: Double) -> CornerShapes {
+    func convexity(_ k: Double) -> Double { k.isInfinite ? (k > 0 ? 1 : -1) : k / (1 + abs(k)) }
+    func shape(_ c: Double) -> Double { abs(c) >= 1 ? (c > 0 ? .infinity : -.infinity) : c / (1 - abs(c)) }
+    func mix(_ a: Double, _ b: Double) -> Double { shape(lerp(convexity(a), convexity(b), t)) }
+    return CornerShapes(topLeft: mix(a.topLeft, b.topLeft), topRight: mix(a.topRight, b.topRight),
+                        bottomRight: mix(a.bottomRight, b.bottomRight),
+                        bottomLeft: mix(a.bottomLeft, b.bottomLeft))
 }
 
 extension Color {

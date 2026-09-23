@@ -38,11 +38,6 @@ public enum DisplayFilter: Sendable, Hashable {
 
 public struct BarConfig: Sendable, Equatable {
     public var display: DisplayFilter = .any
-    /// nil means "whatever the stylesheet says". Writing either in the config wins over the
-    /// stylesheet, because a value written in the file you are editing should be the one that
-    /// takes effect.
-    public var padding: Insets?
-    public var gap: Double?
     /// nil means "this display's menu bar height".
     public var height: Double?
     public var align: Align = .center
@@ -110,7 +105,6 @@ public struct ItemConfig: Sendable, Equatable {
     /// A content tree written in the config, for `text` and `data` items: what a `text` item
     /// shows, and what a `data` item shows until something is pushed to it.
     public var content: Node?
-    public var gap: Double?
     public var align: Align?
     /// The whole config node as JSON — what the module receives from `init(config)`.
     public var options: JSONValue = .object([:])
@@ -131,9 +125,6 @@ public struct ItemConfig: Sendable, Equatable {
 }
 
 public struct Sizing: Sendable, Equatable {
-    public var width: Double?
-    public var minWidth: Double?
-    public var maxWidth: Double?
     public var grow: Double = 0
     public var shrink: Double = 1
 }

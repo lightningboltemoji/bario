@@ -60,7 +60,7 @@ struct AnimatorTests {
 
     func scene(opacity: Double, transition: String = "opacity 100ms linear",
                width: Double = 40, radius: Double = 0) throws -> Scene {
-        try bar(#"item "a" module="text" width=\#(width)"#, style: """
+        try bar(#"item "a" module="text" style="width: \#(width)pt""#, style: """
         item { opacity: \(opacity); border-radius: \(radius)pt; transition: \(transition) }
         """, content: ["a": .text("a")])
     }
@@ -214,8 +214,8 @@ struct AnimatorTests {
         var animator = Animator()
         func scene(_ width: Double) throws -> Scene {
             try bar("""
-                item "x" module="text" width=\(width)
-                group "g" { item "a" module="text" width=40; item "b" module="text" width=40; }
+                item "x" module="text" style="width: \(width)pt"
+                group "g" { item "a" module="text" style="width: 40pt"; item "b" module="text" style="width: 40pt"; }
                 """, content: ["x": .text("x"), "a": .text("a"), "b": .text("b")])
         }
         animator.retarget(try scene(40), at: start)
@@ -231,8 +231,8 @@ struct AnimatorTests {
     func verticalFrame() throws {
         var animator = Animator()
         let content: [String: Node?] = ["a": .text("a")]
-        animator.retarget(try bar(#"item "a" module="text" width=40"#, content: content), at: start)
-        let target = try bar(#"item "a" module="text" width=40"#, style: "item { padding: 4pt 0 }",
+        animator.retarget(try bar(#"item "a" module="text" style="width: 40pt""#, content: content), at: start)
+        let target = try bar(#"item "a" module="text" style="width: 40pt""#, style: "item { padding: 4pt 0 }",
                              content: content)
         animator.retarget(target, at: start)
 

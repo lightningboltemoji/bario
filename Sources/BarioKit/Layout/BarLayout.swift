@@ -28,8 +28,8 @@ public struct BarLayout: Sendable {
                           notch: config.notch == .avoid ? display.notchInStrip : nil,
                           hole: config.hole)
 
-        let content = (config.padding ?? bar.style.padding).inset(bounds)
-        let gap = config.gap ?? bar.style.gap
+        let content = bar.style.padding.inset(bounds)
+        let gap = bar.style.gap
         // Measure everything first: the split, the drops and the flex pass all need naturals.
         let measured = bar.items.map(measure)
 
@@ -82,7 +82,7 @@ public struct BarLayout: Sendable {
             break
         case .group:
             let inner = item.children.map(measure)
-            let gap = item.config.gap ?? item.style.gap
+            let gap = item.style.gap
             measured.children = inner
             measured.natural = CGSize(
                 width: inner.reduce(0) { $0 + $1.natural.width } + gap * Double(max(0, inner.count - 1)),
@@ -91,7 +91,10 @@ public struct BarLayout: Sendable {
             if let content = item.content {
                 let node = measureNode(content)
                 measured.node = node
-                measured.natural = node.frame.size
+                // At least a line tall, as a CSS line box is, so an icon-only item stands as
+                // tall as its text neighbours. The content keeps its own size, centred.
+                measured.natural = CGSize(width: node.frame.width,
+                                          height: max(node.frame.height, metrics.lineHeight(style)))
             }
         }
 
@@ -275,8 +278,7 @@ public struct BarLayout: Sendable {
         let inner = item.style.padding.inset(item.frame.insetBy(dx: border, dy: border))
 
         if measured.item.isGroup {
-            let childGap = measured.config.gap ?? item.style.gap
-            item.children = place(measured.children, in: inner, gap: childGap,
+            item.children = place(measured.children, in: inner, gap: item.style.gap,
                                   align: measured.config.align ?? .stretch)
             return
         }

@@ -88,10 +88,9 @@ public enum ConfigLoader {
         var counter = 0
         for child in node.children {
             switch child.name {
-            case "padding":
-                bar.padding = try insets(child)
-            case "gap":
-                bar.gap = try number(child, "gap")
+            case _ where styling.contains(child.name):
+                throw movedToStylesheet(child.name, child.arguments.map(\.value), selector: "bar",
+                                        at: child.position)
             case "height":
                 bar.height = try number(child, "height")
             case "align":
@@ -105,7 +104,7 @@ public enum ConfigLoader {
                 bar.items.append(try parseItem(child, ordinal: counter))
             default:
                 throw KDLError("'\(child.name)' is not something a bar contains; expected "
-                               + "padding, gap, height, align, hole, notch, item, group or spacer",
+                               + "height, align, hole, notch, item, group or spacer",
                                at: child.position)
             }
         }
@@ -182,12 +181,11 @@ public enum ConfigLoader {
             case "module", "display": continue         // handled above
             case "format": item.format = try string(property)
             case "priority": item.priority = try integer(property)
-            case "width": item.sizing.width = try double(property)
-            case "min-width": item.sizing.minWidth = try double(property)
-            case "max-width": item.sizing.maxWidth = try double(property)
             case "grow": item.sizing.grow = try double(property)
             case "shrink": item.sizing.shrink = try double(property)
-            case "gap": item.gap = try double(property)
+            case _ where styling.contains(property.name):
+                throw movedToStylesheet(property.name, [property.value], selector: "#\(item.name)",
+                                        at: property.position)
             case "align":
                 guard let raw = property.value.stringValue, let align = Align(rawValue: raw) else {
                     throw KDLError("align is one of \(Align.allNames)", at: property.position)
@@ -208,7 +206,9 @@ public enum ConfigLoader {
 
         for child in node.children {
             switch child.name {
-            case "gap" where !item.children.isEmpty: item.gap = try number(child, "gap")
+            case "gap" where !item.children.isEmpty:
+                throw movedToStylesheet(child.name, child.arguments.map(\.value), selector: "#\(item.name)",
+                                        at: child.position)
             case "content":
                 guard item.moduleName != nil else {
                     throw KDLError("only an item has content; a \(node.name) is laid out, not rendered",
@@ -227,6 +227,21 @@ public enum ConfigLoader {
             }
         }
         return item
+    }
+
+    // MARK: - Styling
+
+    /// How things look is the stylesheet's, where it cascades, transitions and follows
+    /// `@media`. A value here would override all of that, so these are errors that say where
+    /// the value goes instead.
+    private static let styling: Set<String> = ["padding", "gap", "width", "min-width", "max-width"]
+
+    private static func movedToStylesheet(_ name: String, _ values: [KDLValue], selector: String,
+                                          at position: KDLPosition) -> KDLError {
+        let value = values.map { $0.doubleValue.map { "\(KDLValue.number($0).literal)pt" } ?? $0.literal }
+        let css = value.isEmpty ? "…" : value.joined(separator: " ")
+        return KDLError("\(name) is styling, so it goes in style.css: \(selector) { \(name): \(css) }",
+                        at: position)
     }
 
     // MARK: - Scalars
@@ -254,20 +269,6 @@ public enum ConfigLoader {
             return value * scale
         }
         return Double(text)
-    }
-
-    private static func insets(_ node: KDLNode) throws -> Insets {
-        let values = try node.arguments.map { argument -> Double in
-            guard let value = argument.value.doubleValue else {
-                throw KDLError("padding takes numbers, found \(argument.value.literal)", at: argument.position)
-            }
-            return value
-        }
-        guard let insets = Insets(values: values) else {
-            throw KDLError("padding takes 1 to 4 numbers (all, vertical horizontal, …), found \(values.count)",
-                           at: node.position)
-        }
-        return insets
     }
 
     private static func number(_ node: KDLNode, _ name: String) throws -> Double {
@@ -327,8 +328,6 @@ extension Align {
 public let defaultConfigKDL = """
 // bario's built-in default. Copy this to ~/.config/bario/config.kdl and make it yours.
 bar {
-  padding 0 8
-  gap 6
   hole radius=40 feather=0 proximity=80 click="reveal"
 
   item "app" module="front-app" priority=10 format="{name}" max-length=28

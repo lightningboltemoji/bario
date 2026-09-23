@@ -19,8 +19,6 @@ struct ConfigTests {
         let config = try ConfigLoader.parse(defaultConfigKDL)
         #expect(config.bars.count == 1)
         let bar = config.bars[0]
-        #expect(bar.gap == 6)
-        #expect(bar.padding == Insets(top: 0, right: 8, bottom: 0, left: 8))
         #expect(bar.hole.radius == 40)
         #expect(bar.items.map(\.name) == ["app", "spacer-2", "notch-3", "spacer-4", "clock", "status"])
         #expect(bar.items[0].priority == 10)
@@ -32,8 +30,6 @@ struct ConfigTests {
     func designExample() throws {
         let config = try ConfigLoader.parse("""
         bar {
-          padding 0 8
-          gap 6
           hole radius=40 feather=0 proximity=80 click="reveal"
           item "app" module="front-app" priority=10 format="{name}"
           item "spaces" module="exec" interval="watch" {
@@ -114,15 +110,14 @@ struct ConfigTests {
         #expect(config.bars[0].items[0].interval == .seconds(5))
     }
 
-    @Test("padding takes the CSS shorthand")
-    func padding() throws {
-        func insets(_ args: String) throws -> Insets? {
-            try ConfigLoader.parse("bar { padding \(args)\n item \"a\" module=\"clock\" }").bars[0].padding
-        }
-        #expect(try insets("4") == Insets(4))
-        #expect(try insets("1 2") == Insets(top: 1, right: 2, bottom: 1, left: 2))
-        #expect(try insets("1 2 3") == Insets(top: 1, right: 2, bottom: 3, left: 2))
-        #expect(try insets("1 2 3 4") == Insets(top: 1, right: 2, bottom: 3, left: 4))
+    @Test("styling in the config is an error that says where it goes")
+    func styling() throws {
+        #expect(message("bar { padding 0 8 }").contains("style.css: bar { padding: 0pt 8pt }"))
+        #expect(message("bar { gap 6 }").contains("style.css: bar { gap: 6pt }"))
+        #expect(message(#"bar { item "a" module="clock" width=40 }"#).contains("#a { width: 40pt }"))
+        #expect(message(#"bar { item "a" module="clock" max-width=80 }"#).contains("#a { max-width: 80pt }"))
+        #expect(message(#"bar { group "g" gap=2 { item "a" module="clock" } }"#).contains("#g { gap: 2pt }"))
+        #expect(message(#"bar { group "g" { gap 2; item "a" module="clock" } }"#).contains("#g { gap: 2pt }"))
     }
 
     @Test("bar-level notch policy is distinct from the notch marker")

@@ -7,10 +7,11 @@ enum Outline: Equatable {
     case square
     /// One radius, on the corners named.
     case rounded(CGFloat, CACornerMask)
-    /// Radii that differ: a path, already clamped to the rectangle.
-    case path(Corners)
+    /// Radii that differ, or corners that are not circular arcs: a path, already clamped to
+    /// the rectangle.
+    case path(Corners, CornerShapes)
 
-    init(_ corners: Corners, in rect: CGRect) {
+    init(_ corners: Corners, _ shapes: CornerShapes = .round, in rect: CGRect) {
         let limit = max(0, min(rect.width, rect.height) / 2)
         func clamp(_ value: Double) -> Double { min(max(0, value), limit) }
         let clamped = Corners(topLeft: clamp(corners.topLeft), topRight: clamp(corners.topRight),
@@ -21,8 +22,8 @@ enum Outline: Equatable {
             self = .square
             return
         }
-        guard nonZero.count == 1 else {
-            self = .path(clamped)
+        guard nonZero.count == 1, shapes.isRound(on: clamped) else {
+            self = .path(clamped, shapes)
             return
         }
         // y runs up, so CSS's top is the layer's max y.
@@ -47,11 +48,11 @@ enum Outline: Equatable {
             assign(layer, \.cornerRadius, radius)
             assign(layer, \.maskedCorners, corners)
             mask = nil
-        case .path(let corners):
+        case .path(let corners, let shapes):
             assign(layer, \.cornerRadius, 0)
             let shape = mask ?? factory.make(CAShapeLayer.self)
             shape.place(rect)
-            let path = RoundedRect.path(in: rect, corners: corners)
+            let path = RoundedRect.path(in: rect, corners: corners, shapes: shapes)
             if shape.path != path { shape.path = path }
             mask = shape
         }
@@ -103,9 +104,9 @@ final class Chrome {
             return
         }
         let colors = context.resolver.with(current: context.resolver.resolve(style.color))
-        let outline = Outline(style.borderRadius, in: rect)
+        let outline = Outline(style.borderRadius, style.cornerShape, in: rect)
         applyShadow(shadows ? style.shadow : nil, rect: rect, corners: style.borderRadius,
-                    colors: colors, factory: &factory)
+                    shapes: style.cornerShape, colors: colors, factory: &factory)
 
         var strokeWidth = 0.0
         var strokeColor: CGColor?
@@ -123,11 +124,11 @@ final class Chrome {
                   border: strokedByFill ? (strokeWidth, strokeColor) : (0, nil),
                   context: context, factory: &factory)
 
-        if !strokedByFill, let strokeColor, case .path(let corners) = outline {
+        if !strokedByFill, let strokeColor, case .path(let corners, let shapes) = outline {
             let layer = border ?? factory.make(CAShapeLayer.self)
             layer.place(rect)
             let path = RoundedRect.path(in: rect.insetBy(dx: strokeWidth / 2, dy: strokeWidth / 2),
-                                        corners: corners)
+                                        corners: corners, shapes: shapes)
             if layer.path != path { layer.path = path }
             if layer.fillColor != nil { layer.fillColor = nil }
             if layer.strokeColor != strokeColor { layer.strokeColor = strokeColor }
@@ -138,7 +139,7 @@ final class Chrome {
         }
     }
 
-    private func applyShadow(_ spec: Shadow?, rect: CGRect, corners: Corners,
+    private func applyShadow(_ spec: Shadow?, rect: CGRect, corners: Corners, shapes: CornerShapes,
                              colors: ColorResolver, factory: inout LayerFactory) {
         guard let spec else {
             shadow = nil
@@ -148,7 +149,7 @@ final class Chrome {
         let rgba = colors.resolve(spec.color)
         let layer = shadow ?? factory.make()
         layer.place(rect)
-        let shape = RoundedRect.path(in: rect, corners: corners)
+        let shape = RoundedRect.path(in: rect, corners: corners, shapes: shapes)
         if layer.shadowPath != shape { layer.shadowPath = shape }
         if layer.shadowColor != rgba.cgColor { layer.shadowColor = rgba.cgColor }
         assign(layer, \.shadowOpacity, 1)

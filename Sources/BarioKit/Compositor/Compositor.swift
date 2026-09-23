@@ -237,8 +237,8 @@ public final class Compositor {
             record.clip = clip
             clip.place(box)
             assign(clip, \.masksToBounds, true)
-            Outline(item.style.borderRadius, in: box).apply(to: clip, in: box, mask: &record.clipMask,
-                                                            factory: &factory)
+            Outline(item.style.borderRadius, item.style.cornerShape, in: box)
+                .apply(to: clip, in: box, mask: &record.clipMask, factory: &factory)
             let style = contrasted(item.style, in: item.frame, walk: walk)
             clip.updateSublayers([apply(content, path: [], inheriting: style, item: name,
                                         walk: &walk, report: &report)])

@@ -282,9 +282,10 @@ bar {
 }
 ```
 
-Per item: `width` (fixed), `min-width`, `max-width`, `grow` (flex-grow, 0 by default; a
-`spacer` is an empty item with `grow=1`), `shrink`, `priority`. Groups are rows and take
-`gap` and `align`.
+Per item in the config: `grow` (flex-grow, 0 by default; a `spacer` is an empty item with
+`grow=1`), `shrink`, `priority`, and `align` on groups, which are rows. Sizes are the
+stylesheet's (section 7): `width` (fixed), `min-width`, `max-width` on items, and `padding` and
+`gap` on the bar and groups.
 
 Measurement: text via CoreText, icons at the font's point size, meters and graphs at their
 declared width. An item's natural width is its content plus padding plus border. Then a
@@ -330,8 +331,15 @@ to write a stylesheet. `~/Library/Application Support/bario/` is checked second.
 
 ### The style language
 
-A CSS subset, parsed by us. Not a browser engine: no layout properties in the stylesheet
-(layout is config), a fixed property list, and a fixed selector grammar.
+A CSS subset, parsed by us. Not a browser engine: no flow properties in the stylesheet (what
+is on the bar, in what order, and how it grows and shrinks is config), a fixed property list,
+and a fixed selector grammar.
+
+The line between the files: the config says what the bar holds and how it behaves; every
+length that is about looks (padding, gap, widths, radii) is the stylesheet's, and only the
+stylesheet's. A size in the config would win over the cascade and so switch off exactly what
+the stylesheet is for: `transition`, `:hover`, `@media`, a theme. So `bar { padding 0 8 }` in
+the config is an error that names the rule to write in `style.css` instead.
 
 To be precise about what "supporting CSS" means, since there is no engine to borrow: the bar
 is Swift and AppKit, composited by Core Animation and drawn with CoreGraphics and CoreText
@@ -366,7 +374,7 @@ Properties:
 
 | group | properties |
 |---|---|
-| box | `padding`, `margin`, `border` (width, color), `border-radius` (per corner), `min-width`, `max-width`, `opacity` |
+| box | `padding`, `margin`, `gap`, `border` (width, color), `border-radius` (per corner), `width`, `min-width`, `max-width`, `opacity` |
 | background | `background`: a colour, a gradient, `backdrop` (the captured desktop, i.e. an invisible bar) or `backdrop blur(20pt) saturate(1.2)` |
 | text | `font` (family, size, weight, e.g. `12pt "SF Pro Text" medium`, `system-ui`, `monospace`), `color`, `font-weight`, `letter-spacing`, `text-transform` |
 | icon | `icon-size`, `icon-color`, `icon-weight` (SF Symbol weight), `icon-rendering` (`monochrome`, `hierarchical`, `palette`, `multicolor`) |
@@ -940,8 +948,6 @@ fallback if the KDL parser situation in Swift turns out worse than expected.
 ```kdl
 // ~/.config/bario/config.kdl
 bar {
-  padding 0 8
-  gap 6
   hole radius=40 feather=0 proximity=80 click="reveal"
 
   item "app" module="front-app" priority=10 format="{name}"

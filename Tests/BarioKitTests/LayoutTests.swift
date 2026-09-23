@@ -343,6 +343,20 @@ struct SceneLayoutTests {
         #expect(content.children[2].frame.w == 24)
     }
 
+    @Test("an icon-only item is a line tall, with the icon centred at its own size")
+    func iconOnlyItemHeight() throws {
+        let scene = try scene(#"bar { item "logo" module="text"; item "label" module="text" }"#,
+                              css: "item { padding: 2pt 4pt } icon { icon-size: 10pt }",
+                              content: ["logo": .icon("apple.logo"), "label": .text("abc")])
+        let logo = scene.rows[0].items[0]
+        let label = scene.rows[0].items[1]
+        #expect(logo.frame.h == label.frame.h)
+        #expect(logo.frame.h == 14 + 4)
+        guard let icon = logo.content else { Issue.record("no content"); return }
+        #expect(icon.frame.h == 10)
+        #expect(icon.frame.cy == logo.frame.cy)
+    }
+
     @Test("styles reach inside the content tree")
     func contentStyling() throws {
         let tree = Node.row([.text("x", classes: ["pct"])])

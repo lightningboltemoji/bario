@@ -89,7 +89,7 @@ struct FileWatcherTests {
 
         // And once it exists, it is watched like any other file.
         try? await Task.sleep(nanoseconds: 300_000_000)
-        try "bar { gap 2 }".write(to: file, atomically: true, encoding: .utf8)
+        try "bar { height 30 }".write(to: file, atomically: true, encoding: .utf8)
         #expect(await counter.waitFor(2) >= 2)
     }
 

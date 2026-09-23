@@ -308,6 +308,29 @@ struct StyleTests {
         #expect(half.color == .rgba(RGBA(r: 0.5, g: 0.5, b: 0.5, a: 1)))
     }
 
+    @Test("corner-shape takes keywords and superellipse(), one to four of them")
+    func cornerShape() throws {
+        let node = [StyleNode(type: "item")]
+        #expect(try style("item { corner-shape: squircle }", node).cornerShape == CornerShapes(2))
+        #expect(try style("item { corner-shape: round bevel }", node).cornerShape
+                == CornerShapes(topLeft: 1, topRight: 0, bottomRight: 1, bottomLeft: 0))
+        #expect(try style("item { corner-shape: superellipse(3) notch superellipse(-infinity) scoop }", node)
+                    .cornerShape == CornerShapes(topLeft: 3, topRight: -.infinity, bottomRight: -.infinity,
+                                                 bottomLeft: -1))
+        #expect(try style("item { }", node).cornerShape == .round)
+        #expect(message("item { corner-shape: blob }").contains("not a corner shape"))
+    }
+
+    @Test("corner shapes interpolate through convexity, reaching square and notch")
+    func cornerShapeBlend() throws {
+        let a = try style("item { corner-shape: round }", [StyleNode(type: "item")])
+        let b = try style("item { corner-shape: square }", [StyleNode(type: "item")])
+        #expect(Style.interpolated(from: a, to: a, t: 0.5).cornerShape == .round)
+        #expect(Style.interpolated(from: a, to: b, t: 1).cornerShape == CornerShapes(.infinity))
+        let half = Style.interpolated(from: a, to: b, t: 0.5).cornerShape.topLeft
+        #expect(half > 2 && half.isFinite)
+    }
+
     @Test("symbolic colours blend symbolically, so system colours still animate")
     func symbolicBlend() throws {
         let blended = Color.blend(.system("labelColor"), .accent, 0.25)

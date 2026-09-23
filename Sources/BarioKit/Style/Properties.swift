@@ -85,6 +85,41 @@ public struct Corners: Sendable, Hashable {
     public var isZero: Bool { topLeft == 0 && topRight == 0 && bottomRight == 0 && bottomLeft == 0 }
 }
 
+/// CSS Borders 4 `corner-shape`: each corner's curve as a superellipse parameter. 1 is a
+/// circular arc, 2 a squircle, 0 a straight bevel, negatives the concave mirror of their
+/// positive, and ±infinity a square corner or a square notch.
+public struct CornerShapes: Sendable, Hashable {
+    public var topLeft: Double
+    public var topRight: Double
+    public var bottomRight: Double
+    public var bottomLeft: Double
+
+    public static let round = CornerShapes(1)
+
+    public static let keywords: [String: Double] = [
+        "round": 1, "squircle": 2, "square": .infinity,
+        "bevel": 0, "scoop": -1, "notch": -.infinity,
+    ]
+
+    public init(topLeft: Double, topRight: Double, bottomRight: Double, bottomLeft: Double) {
+        self.topLeft = topLeft; self.topRight = topRight
+        self.bottomRight = bottomRight; self.bottomLeft = bottomLeft
+    }
+
+    public init(_ all: Double) { self.init(topLeft: all, topRight: all, bottomRight: all, bottomLeft: all) }
+
+    public init?(values: [Double]) {
+        guard let c = Corners(values: values) else { return nil }
+        self.init(topLeft: c.topLeft, topRight: c.topRight, bottomRight: c.bottomRight, bottomLeft: c.bottomLeft)
+    }
+
+    /// The shapes that are not circular arcs on the corners that have a radius to show them.
+    func isRound(on corners: Corners) -> Bool {
+        (corners.topLeft <= 0 || topLeft == 1) && (corners.topRight <= 0 || topRight == 1)
+            && (corners.bottomRight <= 0 || bottomRight == 1) && (corners.bottomLeft <= 0 || bottomLeft == 1)
+    }
+}
+
 // MARK: - Background
 
 public struct Backdrop: Sendable, Hashable {
@@ -251,6 +286,7 @@ public enum StyleProperty: String, Sendable, CaseIterable {
     case borderWidth = "border-width"
     case borderColor = "border-color"
     case borderRadius = "border-radius"
+    case cornerShape = "corner-shape"
     case minWidth = "min-width"
     case maxWidth = "max-width"
     case width
@@ -391,6 +427,28 @@ enum CSSValue {
             throw CSSError("'\(components.text)' needs 1 to 4 lengths", at: position)
         }
         return corners
+    }
+
+    /// `corner-shape: squircle`, `round round bevel bevel`, `superellipse(3)`.
+    static func cornerShapes(_ components: [CSSComponent], at position: CSSPosition) throws -> CornerShapes {
+        let values = try components.map { component -> Double in
+            if let name = component.identValue, let k = CornerShapes.keywords[name] { return k }
+            if case .function("superellipse", let args) = component, args.count == 1, args[0].count == 1 {
+                if let k = args[0][0].numberValue, args[0][0].unit == nil { return k }
+                switch args[0][0].identValue {
+                case "infinity": return .infinity
+                case "-infinity": return -.infinity
+                default: break
+                }
+            }
+            let names = CornerShapes.keywords.keys.sorted().joined(separator: ", ")
+            throw CSSError("'\(component.text)' is not a corner shape; they are \(names) "
+                           + "and superellipse(<number>)", at: position)
+        }
+        guard let shapes = CornerShapes(values: values) else {
+            throw CSSError("'\(components.text)' needs 1 to 4 corner shapes", at: position)
+        }
+        return shapes
     }
 
     // MARK: Colour

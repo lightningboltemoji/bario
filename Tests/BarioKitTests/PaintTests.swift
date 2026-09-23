@@ -58,6 +58,30 @@ struct RoundedRectTests {
         #expect(path.contains(CGPoint(x: 19, y: 19)))     // square top-right
         #expect(!path.contains(CGPoint(x: 0.5, y: 19.5))) // rounded top-left
     }
+
+    @Test("a squircle corner sits between the arc and the square corner, a scoop inside the chord")
+    func cornerShapes() {
+        let rect = CGRect(x: 0, y: 0, width: 20, height: 20)
+        func path(_ k: Double) -> CGPath { RoundedRect.path(in: rect, corners: Corners(10), shapes: CornerShapes(k)) }
+        // Along the diagonal out of the bottom-left corner, the arc crosses at 10 - 10/√2 ≈ 2.93,
+        // the n = 4 superellipse at 10 - 10/2^¼ ≈ 1.59.
+        #expect(path(2).contains(CGPoint(x: 2.2, y: 2.2)))
+        #expect(!path(1).contains(CGPoint(x: 2.2, y: 2.2)))
+        #expect(!path(2).contains(CGPoint(x: 1.2, y: 1.2)))
+        #expect(path(.infinity).contains(CGPoint(x: 0.2, y: 0.2)))
+        // Bevel is the chord through (5, 5); scoop and notch cut in past it.
+        #expect(path(0).contains(CGPoint(x: 5.2, y: 5.2)) && !path(0).contains(CGPoint(x: 4.8, y: 4.8)))
+        #expect(!path(-1).contains(CGPoint(x: 6, y: 6)))
+        #expect(!path(-.infinity).contains(CGPoint(x: 9, y: 9)))
+        let notched = RoundedRect.path(in: CGRect(x: 0, y: 0, width: 40, height: 40), corners: Corners(10),
+                                       shapes: CornerShapes(-.infinity))
+        #expect(notched.contains(CGPoint(x: 11, y: 11)) && !notched.contains(CGPoint(x: 9, y: 9)))
+        // Every shape stays inside the rectangle.
+        let shapes: [Double] = [-.infinity, -2, -1, 0, 1, 2, 5, .infinity]
+        for k in shapes {
+            #expect(rect.insetBy(dx: -0.001, dy: -0.001).contains(path(k).boundingBoxOfPath))
+        }
+    }
 }
 
 @Suite("Pixels")
@@ -146,7 +170,7 @@ struct PainterTests {
 
     @Test("content never spills out of its bubble")
     func clipping() throws {
-        let image = try paint(#"bar { item "a" module="text" max-width=20; item "b" module="text" }"#, css: """
+        let image = try paint(#"bar { item "a" module="text" style="max-width: 20pt"; item "b" module="text" }"#, css: """
         bar { padding: 0; gap: 10pt; background: none }
         item { padding: 0; background: none; color: rgb(255, 0, 0); font: 20pt system-ui bold }
         """, content: ["a": .text("MMMMMMMMMM"), "b": .text("")])

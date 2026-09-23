@@ -164,8 +164,6 @@ struct KDLTests {
         let nodes = try KDL.parse("""
         // ~/.config/bario/config.kdl
         bar {
-          padding 0 8
-          gap 6
           hole radius=40 feather=0 proximity=80 click="reveal"
 
           item "app" module="front-app" priority=10 format="{name}"
@@ -194,9 +192,9 @@ struct KDLTests {
         """)
         #expect(nodes.map(\.name) == ["bar", "renderer"])
         let bar = nodes[0]
-        #expect(bar.children.map(\.name) == ["padding", "gap", "hole", "item", "item", "spacer",
+        #expect(bar.children.map(\.name) == ["hole", "item", "item", "spacer",
                                              "notch", "spacer", "item", "group", "item", "item"])
-        #expect(bar.child(named: "padding")?.arguments.map(\.value) == [.number(0), .number(8)])
+        #expect(bar.child(named: "hole")?.property("radius")?.value == .number(40))
         #expect(bar.children(named: "group").first?.children.count == 3)
         #expect(bar.children(named: "item").last?.property("hidden-until-set")?.value == .bool(true))
         #expect(nodes[1].property("path")?.value == .string("~/.config/bario/renderers/ring.wasm"))
