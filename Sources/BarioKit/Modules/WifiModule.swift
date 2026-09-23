@@ -14,7 +14,7 @@ public actor WifiModule: Module {
 
     public init(context: ModuleContext) {
         self.context = context
-        self.renderer = FormatRenderer(format: context.format ?? "{icon}", fallback: "ssid")
+        self.renderer = FormatRenderer(context, format: "{icon}", fallback: "ssid")
         if case .seconds(let seconds)? = context.interval { interval = seconds } else { interval = 5 }
         // Only ask for Location Services if the format actually wants an SSID.
         self.wantsSSID = (context.format ?? "").contains("{ssid")
@@ -38,7 +38,7 @@ public actor WifiModule: Module {
             ?? (state.value("ssid-denied")?.boolValue == true
                 ? "Wi-Fi network names need Location Services (System Settings → Privacy)"
                 : nil)
-        return RenderResult(content: renderer.render(state), classes: classes, tooltip: tooltip)
+        return RenderResult(content: try renderer.render(state), classes: classes, tooltip: tooltip)
     }
 
     static func requestLocationOnce() {

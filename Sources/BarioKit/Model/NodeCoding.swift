@@ -71,13 +71,27 @@ extension Node: Codable {
 
         case "graph":
             let v = try payload()
-            if let a = v.arrayValue { return .graph(Graph(values: a.compactMap(\.doubleValue))) }
+            // A null is a gap; anything else that is not a number is one too.
+            func points(_ values: [JSONValue]) -> [Double?] { values.map { $0.isNull ? nil : $0.doubleValue } }
+            if let a = v.arrayValue { return .graph(Graph(values: points(a))) }
             guard let values = v["values"]?.arrayValue else {
                 throw bad("graph needs \"values\", an array of numbers")
             }
-            return .graph(Graph(values: values.compactMap(\.doubleValue),
+            func option<T: RawRepresentable & CaseIterable>(_ name: String, _ fallback: T) throws -> T
+            where T.RawValue == String {
+                guard let raw = v[name]?.stringValue else { return fallback }
+                guard let value = T(rawValue: raw) else {
+                    let names = T.allCases.map(\.rawValue).joined(separator: ", ")
+                    throw bad("graph \(name) is one of \(names); got \"\(raw)\"")
+                }
+                return value
+            }
+            return .graph(Graph(values: points(values),
                                 width: v["width"]?.doubleValue,
-                                max: v["max"]?.doubleValue))
+                                max: v["max"]?.doubleValue,
+                                floor: v["floor"]?.doubleValue,
+                                kind: try option("kind", GraphKind.line),
+                                scroll: try option("scroll", GraphScroll.step)))
 
         case "row", "column":
             let container = try Node.decodeContainer(from: c, key: key, path: path)
@@ -148,9 +162,12 @@ extension Node: Codable {
             if let w = m.width { o["width"] = .number(w) }
             try c.encode(JSONValue.object(o), forKey: key)
         case .graph(let g):
-            var o: [String: JSONValue] = ["values": .array(g.values.map(JSONValue.number))]
+            var o: [String: JSONValue] = ["values": .array(g.values.map { $0.map(JSONValue.number) ?? .null })]
             if let w = g.width { o["width"] = .number(w) }
             if let m = g.max { o["max"] = .number(m) }
+            if let f = g.floor { o["floor"] = .number(f) }
+            if g.kind != .line { o["kind"] = .string(g.kind.rawValue) }
+            if g.scroll != .step { o["scroll"] = .string(g.scroll.rawValue) }
             try c.encode(JSONValue.object(o), forKey: key)
         case .row(let container), .column(let container):
             var nested = c.nestedContainer(keyedBy: Key.self, forKey: key)

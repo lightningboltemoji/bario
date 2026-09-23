@@ -16,6 +16,9 @@ enum LeafRole: Equatable {
     case pixels
     /// Two layers; the value is a width.
     case meter
+    /// A smooth graph: a raster one step wider than the node, sliding inside a layer that
+    /// clips to it.
+    case scroller
     case nothing
 
     init(_ node: SceneNode, style: Style) {
@@ -24,7 +27,8 @@ enum LeafRole: Equatable {
         case .text: self = .coverage
         case .icon: self = style.iconRendering == .monochrome ? .coverage : .image
         case .meter: self = .meter
-        case .graph, .canvas: self = .image
+        case .graph(let graph): self = graph.scroll == .smooth ? .scroller : .image
+        case .canvas: self = .image
         case .raster: self = .pixels
         case .custom:
             if node.displayList != nil { self = .image }

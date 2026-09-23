@@ -222,7 +222,7 @@ public enum ConfigLoader {
                     throw KDLError("item \"\(item.name)\" has both format= and content; it shows one or "
                                    + "the other", at: child.position)
                 }
-                item.content = try child.children[0].content()
+                (item.content, item.template) = try child.children[0].contentOrTemplate()
             default: continue
             }
         }

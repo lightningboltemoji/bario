@@ -5,6 +5,8 @@ import IOKit.ps
 /// A module that renders its state through a format string, which is nearly all of them.
 /// Subclassing is not available to actors, so this is a helper the modules hold.
 struct FormatRenderer: Sendable {
+    var content: Node?
+    var contentTemplate: ContentTemplate?
     var template: FormatString?
     var fallbackSlot: String
 
@@ -13,7 +15,17 @@ struct FormatRenderer: Sendable {
         fallbackSlot = fallback
     }
 
-    func render(_ state: StateReader) -> Node? {
+    /// The item's own `content` block wins over its format, and the format over the module's
+    /// default: every module that shows a format also shows a content tree, templated or not.
+    init(_ context: ModuleContext, format: String, fallback: String) {
+        self.init(format: context.format ?? format, fallback: fallback)
+        content = context.content
+        contentTemplate = context.template
+    }
+
+    func render(_ state: StateReader) throws -> Node? {
+        if let content { return content }
+        if let contentTemplate { return try contentTemplate.render(state) }
         if let template { return template.render(state) }
         return state.value(fallbackSlot).flatMap(\.stringValue).map { Node.text($0) }
     }
@@ -28,7 +40,7 @@ public actor FrontAppModule: Module {
 
     public init(context: ModuleContext) {
         self.context = context
-        self.renderer = FormatRenderer(format: context.format ?? "{name}", fallback: "name")
+        self.renderer = FormatRenderer(context, format: "{name}", fallback: "name")
         self.maxLength = context.config["max-length"]?.intValue
     }
 
@@ -57,7 +69,7 @@ public actor FrontAppModule: Module {
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {
-        RenderResult(content: renderer.render(state))
+        RenderResult(content: try renderer.render(state))
     }
 
     static func patch(for app: NSRunningApplication?, limit: Int?) -> JSONValue {
@@ -83,7 +95,7 @@ public actor BatteryModule: Module {
 
     public init(context: ModuleContext) {
         self.context = context
-        self.renderer = FormatRenderer(format: context.format ?? "{icon} {pct}%", fallback: "pct")
+        self.renderer = FormatRenderer(context, format: "{icon} {pct}%", fallback: "pct")
         self.lowThreshold = context.double("low", default: 20) ?? 20
     }
 
@@ -118,7 +130,7 @@ public actor BatteryModule: Module {
         if percent <= lowThreshold { classes.append("low") }
         let tooltip = state.value("time-remaining")?.intValue
             .map { "\(Humanise.duration(minutes: $0)) remaining" }
-        return RenderResult(content: renderer.render(state), classes: classes, tooltip: tooltip)
+        return RenderResult(content: try renderer.render(state), classes: classes, tooltip: tooltip)
     }
 
     /// Reads IOKit and flattens it to the state shape. Pure enough to be worth separating.
@@ -159,25 +171,37 @@ public actor BatteryModule: Module {
     }
 }
 
-/// CoreAudio's default output device, with listeners on the device, its volume and its mute,
-/// re-registered whenever the default device itself changes.
+/// CoreAudio's default output device, with listeners on the device, its volume, its mute and
+/// its data source, re-registered whenever the default device itself changes.
+///
+/// The icon follows the device as well as the level: headphones show as headphones, and AirPods
+/// and Beats as themselves, so the bar says where the sound is going.
 public actor VolumeModule: Module {
     private let context: ModuleContext
     private let renderer: FormatRenderer
+    /// Bluetooth outputs that are speakers, by name: Bluetooth audio is headphones unless this
+    /// says otherwise.
+    private let speakers: [String]
     private var block: AudioObjectPropertyListenerBlock?
     private var registrations: [(AudioObjectID, AudioObjectPropertyAddress)] = []
 
     public init(context: ModuleContext) {
         self.context = context
-        self.renderer = FormatRenderer(format: context.format ?? "{icon}", fallback: "level")
+        self.renderer = FormatRenderer(context, format: "{icon}", fallback: "level")
+        switch context.option("speakers") {
+        case .string(let names)?: speakers = names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        case .array(let names)?: speakers = names.compactMap(\.stringValue)
+        default: speakers = []
+        }
     }
 
     public func start() async {
         let store = context.store
         let item = context.item
+        let speakers = speakers
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             Task {
-                await store.merge(VolumeModule.read(), at: item)
+                await store.merge(VolumeModule.read(speakers: speakers), at: item)
                 await self?.followDeviceChanges()
             }
         }
@@ -195,13 +219,15 @@ public actor VolumeModule: Module {
 
     public func poll() async -> PollResult {
         // A safety net rather than a heartbeat: the listeners do the work.
-        PollResult(patch: VolumeModule.read(), nextIn: nil)
+        PollResult(patch: VolumeModule.read(speakers: speakers), nextIn: nil)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {
         var classes: [String] = []
         if state.value("muted")?.boolValue == true { classes.append("muted") }
-        return RenderResult(content: renderer.render(state), classes: classes)
+        if state.value("headphones")?.boolValue == true { classes.append("headphones") }
+        return RenderResult(content: try renderer.render(state), classes: classes,
+                            tooltip: state.value("device")?.stringValue)
     }
 
     /// `on-scroll="adjust"` and `on-click="toggle-mute"` from DESIGN.md §8. Neither is a
@@ -226,7 +252,7 @@ public actor VolumeModule: Module {
         default:
             return nil
         }
-        return VolumeModule.read()
+        return VolumeModule.read(speakers: speakers)
     }
 
     static func setLevel(_ percent: Double) {
@@ -272,8 +298,10 @@ public actor VolumeModule: Module {
         registrations.removeAll { $0.0 != system }
 
         guard let device = VolumeModule.defaultOutputDevice() else { return }
+        // The data source too: on a Mac whose headphone jack is part of the built-in device,
+        // plugging in changes the source from speakers to headphones and not the device.
         for selector in [VolumeModule.virtualMainVolume, kAudioDevicePropertyVolumeScalar,
-                         kAudioDevicePropertyMute] {
+                         kAudioDevicePropertyMute, kAudioDevicePropertyDataSource] {
             listen(to: device, selector: selector, scope: kAudioDevicePropertyScopeOutput)
         }
     }
@@ -326,7 +354,64 @@ public actor VolumeModule: Module {
         return value
     }
 
-    static func read() -> JSONValue {
+    /// A property that is a four-character code, like a transport type or a data source.
+    static func code(_ device: AudioDeviceID, _ selector: AudioObjectPropertySelector,
+                     scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> UInt32? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectHasProperty(device, &address) else { return nil }
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
+    static func name(_ device: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var name: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &name) == noErr else { return nil }
+        return name?.takeRetainedValue() as String?
+    }
+
+    /// Where the sound goes, in the words a config would use.
+    public enum Transport: String, Sendable {
+        case builtIn = "built-in", bluetooth, usb, hdmi, displayport, airplay, thunderbolt, virtual,
+             aggregate, other
+
+        init(_ code: UInt32?) {
+            switch code {
+            case kAudioDeviceTransportTypeBuiltIn: self = .builtIn
+            case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: self = .bluetooth
+            case kAudioDeviceTransportTypeUSB: self = .usb
+            case kAudioDeviceTransportTypeHDMI: self = .hdmi
+            case kAudioDeviceTransportTypeDisplayPort: self = .displayport
+            case kAudioDeviceTransportTypeAirPlay: self = .airplay
+            case kAudioDeviceTransportTypeThunderbolt: self = .thunderbolt
+            case kAudioDeviceTransportTypeVirtual: self = .virtual
+            case kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAutoAggregate: self = .aggregate
+            default: self = .other
+            }
+        }
+    }
+
+    /// 'hdpn', the built-in device's headphone jack as a data source.
+    static let headphoneSource: UInt32 = 0x6864_706E
+
+    /// There is no property that says "headphones", so it is read from what there is: the
+    /// built-in jack's data source, Bluetooth (which is headphones far more often than not,
+    /// with `speakers` for the exceptions), or a name that says so.
+    static func isHeadphones(name: String, transport: Transport, dataSource: UInt32?,
+                             speakers: [String] = []) -> Bool {
+        if dataSource == headphoneSource { return true }
+        if speakers.contains(where: { name.localizedCaseInsensitiveContains($0) }) { return false }
+        if transport == .bluetooth { return true }
+        return ["headphone", "headset", "airpods", "buds"].contains { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    static func read(speakers: [String] = []) -> JSONValue {
         guard let device = defaultOutputDevice() else {
             return .object(["present": .bool(false), "icon": .string("speaker.slash")])
         }
@@ -345,12 +430,24 @@ public actor VolumeModule: Module {
         }
 
         let level = Double(volume) * 100
+        let name = self.name(device) ?? ""
+        let transport = Transport(code(device, kAudioDevicePropertyTransportType))
+        let headphones = isHeadphones(name: name, transport: transport,
+                                      dataSource: code(device, kAudioDevicePropertyDataSource,
+                                                       scope: kAudioDevicePropertyScopeOutput),
+                                      speakers: speakers)
+        let speakerIcon = Symbols.volume(level: level, muted: muted != 0)
         return .object([
             "present": .bool(true),
             "level": .number(level.rounded()),
             "fraction": .number((level / 100 * 1000).rounded() / 1000),
             "muted": .bool(muted != 0),
-            "icon": .string(Symbols.volume(level: level, muted: muted != 0)),
+            "device": .string(name),
+            "transport": .string(transport.rawValue),
+            "headphones": .bool(headphones),
+            "icon": .string(headphones ? Symbols.headphones(name: name, muted: muted != 0) : speakerIcon),
+            // The level as waves whatever the device, for a format that wants both.
+            "level-icon": .string(speakerIcon),
         ])
     }
 }

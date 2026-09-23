@@ -102,9 +102,12 @@ public struct ItemConfig: Sendable, Equatable {
     public var style: String?
     /// Stay out of the layout until a provider writes something under this item's key.
     public var hiddenUntilSet = false
-    /// A content tree written in the config, for `text` and `data` items: what a `text` item
-    /// shows, and what a `data` item shows until something is pushed to it.
+    /// A content tree written in the config: what an item shows in place of its format, and
+    /// what a `data` item shows until something is pushed to it.
     public var content: Node?
+    /// A content tree with slots in it, filled from the item's state on every render; what a
+    /// `content` block is when any string in it names a slot.
+    public var template: ContentTemplate?
     public var align: Align?
     /// The whole config node as JSON — what the module receives from `init(config)`.
     public var options: JSONValue = .object([:])

@@ -19,13 +19,32 @@ import Foundation
 /// `icon "wifi"`, `meter 0.7`), as several (a list, for `graph`), or as properties and child
 /// nodes, which become the payload's fields (`meter value=0.7 width=24`,
 /// `source surface="wave"`).
+///
+/// A tree with a slot in any of its strings (`graph values="{history}"`) is a template instead,
+/// filled from state on every render ([20-stats-widgets.md]). Its values are not known until
+/// then, so what is checked here is only what can be: the format strings themselves, and
+/// every subtree that has no slot in it.
 extension KDLNode {
     public func content() throws -> Node {
-        let json = try contentJSON()
+        let json = try template(of: contentJSON()).plain
         do {
             return try JSONDecoder().decode(Node.self, from: json.encoded())
         } catch let error as DecodingError {
             throw KDLError(error.contentMessage, at: position)
+        }
+    }
+
+    /// Plain content, decoded now, or a template when a string in it has a slot.
+    public func contentOrTemplate() throws -> (content: Node?, template: ContentTemplate?) {
+        let template = try template(of: contentJSON())
+        return template.hasSlots ? (nil, template) : (try content(), nil)
+    }
+
+    private func template(of json: JSONValue) throws -> ContentTemplate {
+        do {
+            return try ContentTemplate(json)
+        } catch {
+            throw KDLError("\(error)", at: position)
         }
     }
 
@@ -50,8 +69,9 @@ extension KDLNode {
             for property in fields { payload[property.name] = property.value.json }
             // Each child is checked on its own, so an error points at the child that has it.
             payload["children"] = .array(try children.map { child in
-                _ = try child.content()
-                return try child.contentJSON()
+                let json = try child.contentJSON()
+                if try !child.template(of: json).hasSlots { _ = try child.content() }
+                return json
             })
             object[name] = .object(payload)
         default:

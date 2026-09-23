@@ -17,6 +17,9 @@ public actor TextModule: Module {
         if let content = context.content {
             return RenderResult(content: content)
         }
+        if let template = context.template {
+            return RenderResult(content: try template.render(state))
+        }
         if let template {
             return RenderResult(content: template.render(state))
         }
@@ -58,6 +61,11 @@ public actor DataModule: Module {
         let isEmpty = own.objectValue?.isEmpty ?? true
         if isEmpty && hiddenUntilSet {
             return RenderResult(visible: false)
+        }
+        if let content = context.template {
+            return RenderResult(content: try content.render(state),
+                                classes: own["classes"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+                                tooltip: own["tooltip"]?.stringValue)
         }
         guard let template else {
             return RenderResult(content: isEmpty ? nil : .text(own.stringValue ?? ""))

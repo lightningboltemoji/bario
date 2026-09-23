@@ -20,7 +20,7 @@ this file; the plan lives in [00-roadmap.md](00-roadmap.md); the intent lives in
 | `Model/` | `JSONValue` (state), `Node`/`RenderResult` (content) |
 | `Config/` | a KDL 2.0 reader, and the typed `Config` it builds |
 | `Style/` | the CSS subset: parser, selectors, typed properties, cascade, the style stage (`Styler`), the default look |
-| `Runtime/` | the `StateStore` actor, the `Module` protocol, format strings, the `EventBus`, `ModuleHost` |
+| `Runtime/` | the `StateStore` actor, the `Module` protocol, format strings, content templates, the `EventBus`, `ModuleHost` |
 | `Modules/` | the built-in modules: `text` `clock` `data` `front-app` `battery` `wifi` `volume` `net` `cpu` `mem` `exec` (`wasm` lives in `Wasm/`) |
 | `Layout/` | `Metrics`, the flex solver, the `Scene`, the layout stage (`BarLayout`), and `SceneBuilder` (style + layout in one call) |
 | `Paint/` | colour resolution, rounded rects, the backdrop cache, display lists and the canvas painter, rasters, offscreen rendering on `CARenderer` |
@@ -95,6 +95,11 @@ does not react to the pointer at all ([15-interaction.md](15-interaction.md)).
 - Modules push where the system lets them (`front-app`, `battery`, `volume` are notification
   driven) and poll only where a value must be sampled (`net`, `cpu`, `mem`). Each writes an
   `icon` key so `format="{icon} {pct}%"` needs no symbol names in anyone's config.
+- Sampling is config, in durations: `interval` is the rate, and `windows` and `history` mean
+  the same seconds whatever it is. A window is exact, the newest raw snapshot against one
+  that many samples back ([20-stats-widgets.md](20-stats-widgets.md)).
+- A `content` block whose strings name slots is a template, filled from state on every
+  render and read-tracked like a format; every module that shows a format shows one.
 - `Sources/BarioKit` is the only place with logic; the executables are thin.
 
 ## Building and looking at it

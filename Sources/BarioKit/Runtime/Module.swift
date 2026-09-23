@@ -57,18 +57,21 @@ public struct ModuleContext: Sendable {
     public var format: String?
     /// A content tree written in the config (`ItemConfig.content`).
     public var content: Node?
+    /// A content block with slots in it, filled from this item's state on every render.
+    public var template: ContentTemplate?
     public var interval: Interval?
     public var store: StateStore
     /// Where this module's `emit` goes, and what its `subscribe` registers with.
     public var events: EventBus
 
     public init(item: String, config: JSONValue = .object([:]), format: String? = nil,
-                content: Node? = nil, interval: Interval? = nil, store: StateStore,
-                events: EventBus = EventBus()) {
+                content: Node? = nil, template: ContentTemplate? = nil, interval: Interval? = nil,
+                store: StateStore, events: EventBus = EventBus()) {
         self.item = item
         self.config = config
         self.format = format
         self.content = content
+        self.template = template
         self.interval = interval
         self.store = store
         self.events = events
@@ -134,9 +137,9 @@ public enum ModuleRegistry {
             "battery": { BatteryModule(context: $0) },
             "volume": { VolumeModule(context: $0) },
             "wifi": { WifiModule(context: $0) },
-            "net": { NetModule(context: $0) },
-            "cpu": { CPUModule(context: $0) },
-            "mem": { MemModule(context: $0) },
+            "net": { try NetModule(context: $0) },
+            "cpu": { try CPUModule(context: $0) },
+            "mem": { try MemModule(context: $0) },
             "exec": { try ExecModule(context: $0) },
             "wasm": { try WasmModule(context: $0) },
         ]

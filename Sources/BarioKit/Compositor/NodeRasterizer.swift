@@ -129,38 +129,82 @@ struct NodeRasterizer {
             }
             image = image.withSymbolConfiguration(configuration) ?? image
         }
-        var box = frame
+        let rect: CGRect
+        if case .symbol = icon {
+            rect = CoreTextMetrics.symbolRect(image, in: frame, style: style)
+        } else {
+            rect = frame
+        }
+        var box = rect
         guard let cgImage = image.cgImage(forProposedRect: &box, context: NSGraphicsContext.current,
                                           hints: nil) else { return }
         if style.iconRendering == .monochrome {
             // Tint by clipping to the symbol's own alpha: exact, and it works for file icons
             // that happen to be masks too.
             ctx.saveGState()
-            ctx.clip(to: frame, mask: cgImage)
+            ctx.clip(to: rect, mask: cgImage)
             ctx.setFillColor(tint.cgColor)
-            ctx.fill(frame)
+            ctx.fill(rect)
             ctx.restoreGState()
         } else {
-            ctx.draw(cgImage, in: frame)
+            ctx.draw(cgImage, in: rect)
         }
     }
 
+    /// Oldest value at the left, one step apart, scaled so the top of the frame is the graph's
+    /// ceiling. A gap (nil) breaks a line or an area and leaves a bar out. A smooth graph's step
+    /// leaves its newest value one step past the right edge of `frame`, where the compositor's
+    /// strip keeps it until the slide brings it in.
     func drawGraph(_ graph: Graph, in frame: CGRect, style: Style, colors: ColorResolver,
                    ctx: CGContext) {
         let values = graph.values
-        guard values.count > 1 else { return }
-        let ceiling = graph.max ?? values.max() ?? 1
-        guard ceiling > 0 else { return }
-        let step = frame.width / CGFloat(values.count - 1)
-        let path = CGMutablePath()
+        let ceiling = graph.ceiling
+        let step = NodeRasterizer.graphStep(graph, width: frame.width)
+        guard ceiling > 0, step > 0 else { return }
+        func height(_ value: Double) -> CGFloat { frame.height * CGFloat(min(max(value / ceiling, 0), 1)) }
+        let color = colors.resolve(style.fill).cgColor
+
+        if graph.kind == .bars {
+            // A hairline between bars once there is room for one.
+            let gap: CGFloat = step >= 3 ? 1 : 0
+            ctx.setFillColor(color)
+            for (index, value) in values.enumerated() {
+                guard let value, height(value) > 0 else { continue }
+                ctx.fill(CGRect(x: frame.minX + CGFloat(index) * step + gap / 2, y: frame.minY,
+                                width: step - gap, height: height(value)))
+            }
+            return
+        }
+
+        // Runs of consecutive values, each a line or an area of its own.
+        var runs: [[CGPoint]] = [[]]
         for (index, value) in values.enumerated() {
-            let fraction = min(max(value / ceiling, 0), 1)
-            let point = CGPoint(x: frame.minX + CGFloat(index) * step,
-                                y: frame.minY + frame.height * CGFloat(fraction))
-            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+            guard let value else {
+                if !runs[runs.count - 1].isEmpty { runs.append([]) }
+                continue
+            }
+            runs[runs.count - 1].append(CGPoint(x: frame.minX + CGFloat(index) * step,
+                                                y: frame.minY + height(value)))
+        }
+        let path = CGMutablePath()
+        for run in runs where run.count > 1 {
+            if graph.kind == .area {
+                // Not `addLines(between:)`, which would start a subpath of its own.
+                path.move(to: CGPoint(x: run[0].x, y: frame.minY))
+                for point in run { path.addLine(to: point) }
+                path.addLine(to: CGPoint(x: run[run.count - 1].x, y: frame.minY))
+                path.closeSubpath()
+            } else {
+                path.addLines(between: run)
+            }
         }
         ctx.addPath(path)
-        ctx.setStrokeColor(colors.resolve(style.fill).cgColor)
+        if graph.kind == .area {
+            ctx.setFillColor(color)
+            ctx.fillPath()
+            return
+        }
+        ctx.setStrokeColor(color)
         ctx.setLineWidth(style.strokeWidth)
         ctx.setLineJoin(.round)
         switch style.lineCap {
@@ -169,5 +213,14 @@ struct NodeRasterizer {
         case .square: ctx.setLineCap(.square)
         }
         ctx.strokePath()
+    }
+
+    /// The distance between two values. A line or an area puts its first and last value on the
+    /// edges; bars are a step wide each; and a smooth graph shows one fewer, since its newest
+    /// sits past the edge.
+    static func graphStep(_ graph: Graph, width: CGFloat) -> CGFloat {
+        var spans = graph.kind == .bars ? graph.values.count : graph.values.count - 1
+        if graph.scroll == .smooth { spans -= 1 }
+        return spans > 0 ? width / CGFloat(spans) : 0
     }
 }

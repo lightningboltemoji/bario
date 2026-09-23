@@ -145,15 +145,23 @@ public struct Styler: Sendable {
 
     // MARK: - Content
 
-    private func styleNode(_ node: Node, parentPath: [StyleNode], parentStyle: Style) -> SceneNode {
+    /// `structural` is where the node sits among its siblings, so `.stacked text:last-child`
+    /// reaches the second line of a column as `group item:last-child` reaches an item.
+    private func styleNode(_ node: Node, parentPath: [StyleNode], parentStyle: Style,
+                           structural: Set<StyleState> = []) -> SceneNode {
         let path = parentPath + [StyleNode(type: node.typeName, id: node.id,
-                                           classes: Set(node.classes), states: [])]
+                                           classes: Set(node.classes), states: structural)]
         let style = cascade.style(for: path, inheriting: parentStyle).style
         var styled = SceneNode(kind: node.kind, style: style, id: node.id, classes: node.classes)
         switch node.kind {
         case .row(let container), .column(let container):
-            styled.children = container.children.map {
-                styleNode($0, parentPath: path, parentStyle: style)
+            let count = container.children.count
+            styled.children = container.children.enumerated().map { index, child in
+                var structural: Set<StyleState> = []
+                if index == 0 { structural.insert(.firstChild) }
+                if index == count - 1 { structural.insert(.lastChild) }
+                if count == 1 { structural.insert(.onlyChild) }
+                return styleNode(child, parentPath: path, parentStyle: style, structural: structural)
             }
         default:
             break

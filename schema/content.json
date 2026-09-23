@@ -78,15 +78,22 @@
           ]
         },
         "graph": {
-          "description": "A sparkline. Values are scaled to `max`, or to the largest value present.",
+          "description": "A sparkline, oldest value first. Values are scaled to `max`, or to the largest value present but never less than `floor`. A null is a gap.",
           "oneOf": [
-            { "type": "array", "items": { "type": "number" } },
+            { "type": "array", "items": { "type": ["number", "null"] } },
             {
               "type": "object",
               "properties": {
-                "values": { "type": "array", "items": { "type": "number" } },
+                "values": { "type": "array", "items": { "type": ["number", "null"] } },
                 "width": { "type": "number", "exclusiveMinimum": 0 },
-                "max": { "type": "number" }
+                "max": { "type": "number" },
+                "floor": { "type": "number", "description": "The least an auto-scaled top stands for." },
+                "kind": { "enum": ["line", "area", "bars"], "default": "line" },
+                "scroll": {
+                  "enum": ["step", "smooth"],
+                  "default": "step",
+                  "description": "smooth slides each new value in from the right over the time the last one took."
+                }
               },
               "required": ["values"]
             }

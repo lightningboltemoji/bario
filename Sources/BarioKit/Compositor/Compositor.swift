@@ -362,6 +362,11 @@ public final class Compositor {
             guard case .meter(let meter) = node.kind else { return nil }
             return applyMeter(meter, in: node.frame, style: style, colors: colors, record: record)
 
+        case .scroller:
+            guard case .graph(let graph) = node.kind else { return nil }
+            return applyScroller(node, graph: graph, style: style, colors: colors, record: record,
+                                 walk: walk, report: &report)
+
         case .coverage:
             // The tint is a colour; the raster under it is only where the ink is.
             let tint = record.leaf ?? factory.make()
@@ -397,16 +402,18 @@ public final class Compositor {
 
     /// Draws a leaf into `layer` when its key changed, or when it came to rest off the pixel
     /// grid, and places the layer over the node.
+    /// `reach` is how far past the node's right edge the drawing goes, for a smooth graph.
     private func raster(_ node: SceneNode, style: Style, colors: ColorResolver, into layer: CALayer,
                         record: NodeRecord, walk: Walk, report: inout CommitReport,
-                        draw: (NodeRasterizer, CGContext) -> Void) {
+                        reach: CGFloat = 0, draw: (NodeRasterizer, CGContext) -> Void) {
         let inputs = walk.inputs
         let key = RasterKey(kind: node.kind, size: node.frame.size,
                             style: RasterStyle(node, style: style, colors: colors),
                             drawing: node.displayList?.source, scale: inputs.scale,
                             dark: inputs.resolver.dark)
         let overhang = NodeRasterizer.overhang(of: node)
-        let extent = node.frame.insetBy(dx: -overhang, dy: -overhang)
+        var extent = node.frame.insetBy(dx: -overhang, dy: -overhang)
+        extent.size.width += reach
         assign(layer, \.contentsScale, inputs.scale)
 
         // A raster is drawn with its pixels on the display's, as the painter drew, or glyphs
@@ -428,6 +435,50 @@ public final class Compositor {
         layer.place(CGRect(x: extent.minX - record.drawnPhase.width,
                            y: extent.minY - record.drawnPhase.height,
                            width: record.drawnSize.width, height: record.drawnSize.height))
+    }
+
+    /// A smooth graph ([20-stats-widgets.md]): a strip one step wider than the node, with the
+    /// newest value just past the right edge, inside a layer that clips to the node. When the
+    /// values change the strip is drawn again and slid one step left over as long as the last
+    /// change took, so the next sample lands exactly where the slide ends. The window server
+    /// runs the slide; bario draws once per sample, as it would for a graph that steps.
+    private func applyScroller(_ node: SceneNode, graph: Graph, style: Style, colors: ColorResolver,
+                               record: NodeRecord, walk: Walk, report: inout CommitReport) -> CALayer {
+        let clip = record.leaf ?? factory.make()
+        let strip = record.inner ?? factory.make()
+        record.leaf = clip
+        record.inner = strip
+        assign(clip, \.masksToBounds, true)
+        // Clipped at the sides only, so a stroke at the top or the bottom keeps its overhang.
+        let overhang = NodeRasterizer.overhang(of: node)
+        clip.place(node.frame.insetBy(dx: 0, dy: -overhang))
+
+        let step = NodeRasterizer.graphStep(graph, width: node.frame.width)
+        let drawnValues = record.key.flatMap { key -> [Double?]? in
+            if case .graph(let drawn) = key.kind { return drawn.values } else { return nil }
+        }
+        raster(node, style: style, colors: colors, into: strip, record: record, walk: walk,
+               report: &report, reach: step) { rasterizer, ctx in
+            rasterizer.drawLeaf(node, style: style, in: ctx)
+        }
+        if drawnValues != graph.values {
+            let now = walk.inputs.animationTime ?? CACurrentMediaTime()
+            if let last = record.slidAt, drawnValues != nil, step > 0 {
+                let slide = CABasicAnimation(keyPath: "transform.translation.x")
+                slide.fromValue = 0
+                slide.toValue = -step
+                // A sample that never came would hold the slide still for ever; a gap that long
+                // is a pause, and the next one starts over.
+                slide.duration = min(max(now - last, 0.05), 30)
+                if let time = walk.inputs.animationTime { slide.beginTime = time }
+                slide.fillMode = .forwards
+                slide.isRemovedOnCompletion = false
+                strip.add(slide, forKey: "bario.scroll")
+            }
+            record.slidAt = now
+        }
+        clip.updateSublayers([strip])
+        return clip
     }
 
     /// A rounded track with the fill inside it, as wide as the value, and never narrower than
@@ -489,7 +540,10 @@ extension NodeRasterizer {
     static func overhang(of node: SceneNode) -> CGFloat {
         switch node.kind {
         case .text: return max(2, (node.style.font.size / 4).rounded(.up))
-        case .icon: return 2
+        // A symbol draws at its own height, centred on a frame a line tall
+        // (`CoreTextMetrics.symbolRect`): the tallest reach about a third of their point size
+        // past it.
+        case .icon: return max(2, (node.style.effectiveIconSize * 0.35).rounded(.up))
         case .graph: return node.style.strokeWidth / 2 + 1
         default: return 0
         }

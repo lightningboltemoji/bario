@@ -119,10 +119,17 @@ public struct FormatString: Sendable, Hashable {
     }
 
     /// The spec's shape decides what it means: `%…` is a printf format, digits are a maximum
-    /// length, anything else is a `DateFormatter` pattern over an epoch or an ISO date.
+    /// length, `bytes` and `rate` scale a number of bytes to a unit, anything else is a
+    /// `DateFormatter` pattern over an epoch or an ISO date.
     public static func format(_ value: JSONValue?, spec: String?) -> String {
         guard let value, !value.isNull else { return "" }
         guard let spec, !spec.isEmpty else { return value.stringValue ?? "" }
+
+        switch spec {
+        case "bytes": return value.doubleValue.map { Humanise.bytes($0) } ?? ""
+        case "rate": return value.doubleValue.map { Humanise.rate($0) } ?? ""
+        default: break
+        }
 
         if spec.hasPrefix("%") {
             if let number = value.doubleValue, spec.last.map({ "fgeFGE".contains($0) }) == true {

@@ -47,6 +47,11 @@ group item:only-child { border-radius: 8pt; }
 meter { fill: currentColor; track: rgba(255, 255, 255, 0.25); }
 graph { fill: currentColor; stroke-width: 1.5pt; line-cap: round; }
 
+/* The stats presets: `stacked` is two lines in the height of one. */
+.stacked { font-size: 9pt; }
+.graph, .meter { gap: 4pt; }
+.graph graph { fill: accent; }
+
 #clock { font-weight: semibold; }
 #battery.low { background: rgba(255, 70, 70, 0.35); }
 #battery.charging .icon { color: system(systemGreenColor); }

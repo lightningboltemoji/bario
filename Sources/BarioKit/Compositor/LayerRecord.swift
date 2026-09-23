@@ -52,10 +52,13 @@ final class NodeRecord {
     let role: LeafRole
     let chrome = Chrome()
     let motion = Motion()
-    /// A raster, a tint, pixels, or a meter's track.
+    /// A raster, a tint, pixels, a meter's track, or a smooth graph's clip.
     var leaf: CALayer?
-    /// A tint's coverage, or a meter's fill.
+    /// A tint's coverage, a meter's fill, or a smooth graph's sliding strip.
     var inner: CALayer?
+    /// When a smooth graph's values last changed, in media time: the next slide lasts as long
+    /// as the gap between the two.
+    var slidAt: CFTimeInterval?
     var key: RasterKey?
     /// How far the raster sat past the pixel grid when it was drawn, and the size of the
     /// layer that shows it.

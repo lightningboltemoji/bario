@@ -8,10 +8,13 @@ because it replaces something the cover is hiding.
 | `front-app` | `NSWorkspace.frontmostApplication` + the activation notification | `name`, `bundle-id`, `icon` |
 | `battery` | IOKit `IOPSCopyPowerSourcesInfo`, with a change notification | `pct`, `charging`, `plugged`, `time-remaining`, `icon` |
 | `wifi` | CoreWLAN | `ssid`, `rssi`, `on`, `bars`, `icon` |
-| `volume` | CoreAudio's default output device, with a property listener | `level`, `muted`, `icon` |
+| `volume` | CoreAudio's default output device, with a property listener | `level`, `muted`, `device`, `transport`, `headphones`, `icon`, `level-icon` |
 | `net` | `getifaddrs` counters on an interval | `rx`, `tx`, `rx-total`, `tx-total`, and rolling history for `graph` |
-| `cpu` | `host_processor_info` deltas | `load`, `user`, `system`, history |
+| `cpu` | `host_statistics` tick deltas | `load`, `user`, `system`, history |
 | `mem` | `host_statistics64` | `used`, `total`, `pressure`, history |
+
+`net`, `cpu` and `mem` grew time windows, content templates and presets in
+[20-stats-widgets.md](20-stats-widgets.md), which also has their full list of keys.
 
 ## Push, not poll, wherever the system offers it
 
@@ -33,6 +36,14 @@ and `tx` are bytes per second with a `rx-human` companion (`1.2 MB/s`) because a
 string cannot do unit scaling. The raw values stay too, so a `meter` node can use `pct/100`.
 
 ## The awkward corners, handled where they are
+
+- **Headphones have no property of their own.** `volume` reads them from what there is: the
+  built-in device's `hdpn` data source (the jack; on Apple Silicon it is a device of its own,
+  on Intel a source on the built-in one, so the data source is listened to as well), Bluetooth,
+  which is headphones far more often than not (`speakers="Kitchen"` names the exceptions), or a
+  name with headphones, headset, AirPods or Buds in it. Then `icon` is the headphones' own
+  symbol (`airpods.max`, `airpods.pro`, `beats.headphones`, `headphones`) and the item wears
+  `.headphones`; `level-icon` keeps the speaker waves for a format that wants the level too.
 
 - **Wi-Fi SSID needs Location Services** on macOS 14+ (§13). The module works without it: it
   writes `rssi`, `on` and `bars` regardless, leaves `ssid` unset, and sets `ssid-denied` so a

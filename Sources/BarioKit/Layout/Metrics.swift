@@ -63,12 +63,18 @@ public final class CoreTextMetrics: Metrics, @unchecked Sendable {
         if let cached = iconCache[key] { lock.unlock(); return cached }
         lock.unlock()
 
+        // As tall as the point size. A symbol is as wide as it draws at that size, and any
+        // height past the frame overhangs (`symbolRect`): scaling every image to one height
+        // would undo the optical sizing that makes symbols look alike, shrinking tall ones and
+        // growing flat ones. A file has no point size to draw at, so it is scaled to fit.
         let point = style.effectiveIconSize
         var size = CGSize(width: point, height: point)
         if let image = CoreTextMetrics.image(for: icon, style: style) {
             let natural = image.size
-            if natural.height > 0 {
-                size = CGSize(width: ceil(natural.width * point / natural.height), height: point)
+            if !icon.isFile {
+                size.width = ceil(natural.width)
+            } else if natural.height > 0 {
+                size.width = ceil(natural.width * point / natural.height)
             }
         }
 
@@ -96,6 +102,18 @@ public final class CoreTextMetrics: Metrics, @unchecked Sendable {
         case .file(let path):
             return NSImage(contentsOfFile: (path as NSString).expandingTildeInPath)
         }
+    }
+
+    /// Where a symbol draws in a frame laid out for it: at its own size, on the baseline text
+    /// of its point size would have there (`drawText` centres the ascender/descender box), so
+    /// symbols sit level with each other and with text. The alignment rectangle starts at the
+    /// symbol's baseline. Taller symbols reach past the frame, up to about a third of the point
+    /// size each way (`NodeRasterizer.overhang`).
+    public static func symbolRect(_ image: NSImage, in frame: CGRect, style: Style) -> CGRect {
+        let font = NSFont.systemFont(ofSize: style.effectiveIconSize)
+        let baseline = frame.midY - (font.ascender + font.descender) / 2
+        return CGRect(x: frame.minX, y: baseline - image.alignmentRect.minY,
+                      width: image.size.width, height: image.size.height)
     }
 
     public static func font(for spec: FontSpec) -> NSFont {

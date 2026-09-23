@@ -200,7 +200,8 @@ public final class ModuleHost {
 
     private func make(_ item: ItemConfig, moduleName: String, fingerprint: JSONValue) -> Instance {
         let context = ModuleContext(item: item.name, config: item.options, format: item.format,
-                                    content: item.content, interval: item.interval, store: store,
+                                    content: item.content, template: item.template,
+                                    interval: item.interval, store: store,
                                     events: events)
         do {
             let module = try ModuleRegistry.make(moduleName, context: context)

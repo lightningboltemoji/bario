@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 import Testing
 @testable import BarioKit
@@ -57,6 +58,32 @@ struct ModuleSupportTests {
         #expect(Symbols.volume(level: 90, muted: false) == "speaker.wave.3.fill")
     }
 
+    @Test("headphones show as what they are")
+    func headphoneIcons() {
+        #expect(Symbols.headphones(name: "Tanner’s AirPods Max", muted: false) == "airpods.max")
+        #expect(Symbols.headphones(name: "AirPods Pro", muted: false) == "airpods.pro")
+        #expect(Symbols.headphones(name: "Someone's AirPods", muted: false) == "airpods")
+        #expect(Symbols.headphones(name: "Beats Studio Pro", muted: false) == "beats.headphones")
+        #expect(Symbols.headphones(name: "External Headphones", muted: false) == "headphones")
+        #expect(Symbols.headphones(name: "AirPods Max", muted: true) == "headphones.slash")
+    }
+
+    @Test("headphones are read from the jack, Bluetooth, or the name")
+    func headphoneDetection() {
+        let jack = VolumeModule.headphoneSource
+        let speakers: UInt32 = 0x6973_706B    // 'ispk'
+        #expect(VolumeModule.isHeadphones(name: "External Headphones", transport: .builtIn, dataSource: jack))
+        #expect(VolumeModule.isHeadphones(name: "Built-in Output", transport: .builtIn, dataSource: jack),
+                "an Intel Mac's jack is a data source on the built-in device")
+        #expect(!VolumeModule.isHeadphones(name: "MacBook Pro Speakers", transport: .builtIn, dataSource: speakers))
+        #expect(VolumeModule.isHeadphones(name: "WH-1000XM5", transport: .bluetooth, dataSource: nil))
+        #expect(!VolumeModule.isHeadphones(name: "Kitchen Speaker", transport: .bluetooth, dataSource: nil,
+                                           speakers: ["kitchen"]))
+        #expect(VolumeModule.isHeadphones(name: "USB Headset", transport: .usb, dataSource: nil))
+        #expect(!VolumeModule.isHeadphones(name: "LG UltraFine", transport: .displayport, dataSource: nil))
+        #expect(VolumeModule.Transport(kAudioDeviceTransportTypeBluetoothLE) == .bluetooth)
+    }
+
     @Test("CPU load is a difference between two samples")
     func cpuDelta() {
         let a = CPUModule.Ticks(user: 100, system: 50, idle: 850, nice: 0)
@@ -111,6 +138,18 @@ struct BuiltInModuleTests {
         if let remaining = state["time-remaining"]?.intValue { #expect(remaining >= 0) }
     }
 
+    @Test("volume names the output device and says whether it is headphones")
+    func volume() async throws {
+        let (result, state) = try await run("volume", format: "{icon}")
+        guard state["present"]?.boolValue == true else { return }   // no output device at all
+        #expect(state["device"]?.stringValue?.isEmpty == false)
+        #expect(state["transport"]?.stringValue != nil)
+        let headphones = state["headphones"]?.boolValue == true
+        #expect(result.classes.contains("headphones") == headphones)
+        #expect(state["level-icon"]?.stringValue?.hasPrefix("speaker") == true)
+        if !headphones { #expect(state["icon"] == state["level-icon"]) }
+    }
+
     @Test("front-app names the app in front, truncated if asked")
     func frontApp() async throws {
         let (_, state) = try await run("front-app", config: .object(["max-length": .number(4)]),
@@ -148,7 +187,7 @@ struct BuiltInModuleTests {
     @Test("cpu needs two samples before it means anything")
     func cpu() async throws {
         let store = StateStore()
-        let module = CPUModule(context: ModuleContext(item: "cpu", store: store))
+        let module = try CPUModule(context: ModuleContext(item: "cpu", store: store))
         #expect(await module.poll().patch?["load"]?.doubleValue == 0)
         let second = await module.poll()
         let load = second.patch?["load"]?.doubleValue ?? -1

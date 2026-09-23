@@ -79,15 +79,43 @@ public struct Meter: Sendable, Hashable {
 }
 
 public struct Graph: Sendable, Hashable {
-    public var values: [Double]
+    /// Oldest first. A nil is a gap: a history not yet full is padded with them in front, so
+    /// its step stays the same while it fills.
+    public var values: [Double?]
     public var width: Double?
+    /// The top, fixed. Without it the graph scales to its largest value.
     public var max: Double?
+    /// The least an auto-scaled top can stand for, so an idle graph is flat rather than noise
+    /// at full height.
+    public var floor: Double?
+    public var kind: GraphKind
+    public var scroll: GraphScroll
 
-    public init(values: [Double], width: Double? = nil, max: Double? = nil) {
+    public init(values: [Double?], width: Double? = nil, max: Double? = nil, floor: Double? = nil,
+                kind: GraphKind = .line, scroll: GraphScroll = .step) {
         self.values = values
         self.width = width
         self.max = max
+        self.floor = floor
+        self.kind = kind
+        self.scroll = scroll
     }
+
+    /// What the top of the graph stands for.
+    public var ceiling: Double {
+        if let max { return max }
+        return Swift.max(values.compactMap { $0 }.max() ?? 0, floor ?? 0)
+    }
+}
+
+public enum GraphKind: String, Sendable, Hashable, CaseIterable {
+    case line, area, bars
+}
+
+/// How a graph shows new values: redrawn in place, or slid in from the right over the time
+/// the last sample took.
+public enum GraphScroll: String, Sendable, Hashable, CaseIterable {
+    case step, smooth
 }
 
 public struct Container: Sendable, Hashable {

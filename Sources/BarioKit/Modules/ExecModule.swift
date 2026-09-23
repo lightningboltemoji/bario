@@ -39,7 +39,7 @@ public actor ExecModule: Module {
 
     public init(context: ModuleContext) throws {
         self.context = context
-        self.renderer = FormatRenderer(format: context.format ?? "{text}", fallback: "text")
+        self.renderer = FormatRenderer(context, format: "{text}", fallback: "text")
         self.interval = context.interval ?? .seconds(context.double("interval", default: 5) ?? 5)
         self.timeout = context.double("timeout", default: 10) ?? 10
 
@@ -91,7 +91,7 @@ public actor ExecModule: Module {
         if (state.value("exit-code")?.intValue ?? 0) != 0 { classes.append("error") }
         let tooltip = state.value("tooltip")?.stringValue
             ?? state.value("stderr")?.stringValue?.trimmed.nonEmpty
-        return RenderResult(content: renderer.render(state), classes: classes, tooltip: tooltip)
+        return RenderResult(content: try renderer.render(state), classes: classes, tooltip: tooltip)
     }
 
     // MARK: - Running
