@@ -33,11 +33,11 @@ public struct Styler: Sendable {
 
         // The notch marker is kept as a position among the items that are shown, so an
         // invisible item before it cannot move the split.
-        var marker: Int?
+        var marker: (index: Int, mode: NotchMarker)?
         var visible: [ItemConfig] = []
         for item in items {
-            if case .notch = item.kind {
-                marker = visible.count
+            if case .notch(let mode) = item.kind {
+                marker = (visible.count, mode)
             } else if shown(item) {
                 visible.append(item)
             }
@@ -191,8 +191,8 @@ public struct StyledBar: Sendable {
     public var style: Style
     /// In config order, without the notch marker.
     public var items: [StyledItem]
-    /// Where an explicit `notch` marker splits `items`.
-    public var notchMarker: Int?
+    /// Where an explicit `notch` marker splits `items`, and on which displays.
+    public var notchMarker: (index: Int, mode: NotchMarker)?
     /// The styler that produced this, for the one restyle layout needs.
     public var styler: Styler
 }

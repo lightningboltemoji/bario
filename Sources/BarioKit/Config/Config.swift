@@ -72,7 +72,17 @@ public enum HoleClick: String, Sendable, Equatable {
 
 public enum NotchPolicy: String, Sendable, Equatable, CaseIterable {
     case avoid
+    /// Treat the display as having no notch, so only an `always` marker splits the bar.
     case ignore
+}
+
+/// When a `notch` marker splits the bar. DESIGN.md §6.
+public enum NotchMarker: String, Sendable, Equatable {
+    /// At the notch on a notched display and at the screen's centre on any other, so one
+    /// config keeps its two halves apart on both.
+    case always
+    /// Only on a notched display; elsewhere the bar is one row, as if the marker were not there.
+    case ifPresent = "if-present"
 }
 
 /// A named condition over the state store and time. While it holds, the bar wears its name as
@@ -104,13 +114,13 @@ public struct RendererConfig: Sendable, Equatable {
 }
 
 /// One entry on a bar. A group is an item whose content is other items; a spacer is an empty
-/// item with `grow` 1; the notch marker is where the bar splits on a notched display.
+/// item with `grow` 1; the notch marker is where the bar splits in two.
 public struct ItemConfig: Sendable, Equatable {
     public enum Kind: Sendable, Equatable {
         case module(String)
         case group([ItemConfig])
         case spacer
-        case notch
+        case notch(NotchMarker)
     }
 
     public init(name: String, kind: Kind, position: KDLPosition = .start) {

@@ -178,7 +178,7 @@ public enum ConfigLoader {
                 bar.align = try enumeration(child, "align", Align.self)
             case "hole":
                 bar.hole = try hole(child)
-            case "notch" where child.arguments.first != nil:
+            case "notch" where child.argument(0)?.value.stringValue.flatMap(NotchPolicy.init) != nil:
                 bar.notch = try enumeration(child, "notch", NotchPolicy.self)
             case "item", "group", "spacer", "notch":
                 counter += 1
@@ -238,7 +238,15 @@ public enum ConfigLoader {
             item.kind = .spacer
             item.sizing.grow = 1
         case "notch":
-            item.kind = .notch
+            // The argument is the marker's mode, not its name.
+            item.name = "\(node.name)-\(ordinal)"
+            switch node.argument(0)?.value.stringValue {
+            case nil: item.kind = .notch(.always)
+            case NotchMarker.ifPresent.rawValue: item.kind = .notch(.ifPresent)
+            default:
+                throw KDLError("notch takes \"avoid\" or \"ignore\" as the bar's policy, or "
+                               + "\"if-present\" as a marker", at: node.position)
+            }
         case "group":
             var counter = 0
             var children: [ItemConfig] = []

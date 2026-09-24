@@ -73,14 +73,20 @@ treats it as an exclusion interval and runs the flex pass twice, once per sub-ro
 Which items go where:
 
 - an explicit `notch` marker splits there — the predictable option the docs recommend;
-- otherwise items fill from the left and the first item whose natural end would cross the
-  notch starts the right sub-row;
-- if that crossing item is a `spacer`, it becomes a spacer on *each* side, which is what
-  makes `[a spacer clock spacer b]` degrade to `clock` hugging the notch instead of
-  vanishing under it.
+- otherwise one flex pass is run over the whole width, and the first non-spacer that would
+  end past the notch's left edge starts the right sub-row;
+- if the spacer before it straddles the whole notch, it becomes a spacer on *each* side,
+  which is what makes `[a spacer clock spacer b]` degrade to `clock` hugging the notch
+  instead of vanishing under it.
 
-On a display without a notch the marker is ignored and there is one row, so one config serves
-the MacBook and the external monitor. `bar { notch "ignore" }` opts out entirely.
+The marker has two modes (`ItemConfig.Kind.notch(NotchMarker)`). A bare `notch` (`.always`)
+splits on a plain display too, at a gap-wide stand-in centred on the screen, so each half
+stays on its own side of the centre whatever its width. `notch "if-present"` splits only at a
+real notch and is dropped elsewhere, which is how to pick the notch's side for an item that is
+centred on a plain display. `bar { notch "ignore" }` treats the display as plain: `scene.notch`
+is nil, `.always` still splits at the centre, `.ifPresent` does nothing. The bar-level policy
+and the marker share a node name; the loader tells them apart by argument (`"avoid"` /
+`"ignore"` versus none or `"if-present"`).
 
 ## Vertical placement
 
@@ -92,5 +98,6 @@ placed inside the bar's padding box by `bar { align … }`: `center` (the defaul
 
 `Flex.solve` against hand-computed cases; natural sizes with `FixedMetrics`; a spacer pushes
 items apart; overflow drops the right items in the right order; the notch split in all three
-modes including the straddling spacer; one config laid out on a notched and a plain display;
+modes including the straddling spacer; both marker modes on a notched and a plain display,
+and under `notch "ignore"`;
 every frame lands inside the bar.

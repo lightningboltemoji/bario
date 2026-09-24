@@ -33,13 +33,20 @@ public struct BarLayout: Sendable {
         // Measure everything first: the split, the drops and the flex pass all need naturals.
         let measured = bar.items.map(measure)
 
+        // Without a notch, a marker that splits everywhere splits at the screen's centre, as
+        // wide as a gap so the two halves sit as far apart as any two items.
+        var obstacle = scene.notch.flatMap { $0.width > 1 ? $0 : nil }
+        if obstacle == nil, bar.notchMarker?.mode == .always {
+            obstacle = CGRect(x: bounds.midX - gap / 2, y: 0, width: gap, height: height)
+        }
+
         var rows: [(rect: CGRect, items: [Measured])] = []
-        if let notch = scene.notch, notch.width > 1 {
+        if let notch = obstacle {
             let left = CGRect(x: content.minX, y: content.minY,
                               width: max(0, notch.minX - content.minX), height: content.height)
             let right = CGRect(x: notch.maxX, y: content.minY,
                                width: max(0, content.maxX - notch.maxX), height: content.height)
-            let split = splitPoint(measured, markerAt: bar.notchMarker, notch: notch,
+            let split = splitPoint(measured, markerAt: bar.notchMarker?.index, notch: notch,
                                    in: content, gap: gap)
             var rightItems = Array(measured[split.index...])
             // A spacer that straddles the whole notch becomes a spacer on each side, which is

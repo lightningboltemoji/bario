@@ -23,7 +23,7 @@ struct ConfigTests {
         #expect(bar.items.map(\.name) == ["app", "spacer-2", "notch-3", "spacer-4", "clock", "status"])
         #expect(bar.items[0].priority == 10)
         #expect(bar.items[1].sizing.grow == 1)
-        #expect(bar.items[2].kind == .notch)
+        #expect(bar.items[2].kind == .notch(.always))
     }
 
     @Test("the design document's example config loads")
@@ -128,6 +128,17 @@ struct ConfigTests {
         """)
         #expect(config.bars[0].notch == .ignore)
         #expect(config.bars[0].items.map(\.kind) == [.module("clock")])
+    }
+
+    @Test("a notch marker takes \"if-present\" as its mode, not its name")
+    func notchMarkerModes() throws {
+        let config = try ConfigLoader.parse("""
+        bar { notch "ignore"; notch; notch "if-present" }
+        """)
+        #expect(config.bars[0].notch == .ignore)
+        #expect(config.bars[0].items.map(\.kind) == [.notch(.always), .notch(.ifPresent)])
+        #expect(config.bars[0].items.map(\.name) == ["notch-1", "notch-2"])
+        #expect(message(#"bar { notch "sometimes" }"#).contains("\"if-present\" as a marker"))
     }
 
     @Test("config errors say what and where")

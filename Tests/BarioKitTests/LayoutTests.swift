@@ -300,15 +300,58 @@ struct SceneLayoutTests {
         #expect(scene.rows[1].items.map(\.name) == ["c"])
     }
 
-    @Test("the same config on a plain display is one row")
-    func notchIgnoredWithoutOne() throws {
+    @Test("without a notch, a marker splits at the screen's centre")
+    func notchMarkerCentres() throws {
+        // 180pt: it fits in a half, but one flex pass over the whole bar would put it across
+        // the centre, at 52.5...232.5.
+        let wide = String(repeating: "a", count: 30)
+        let scene = try scene("""
+        bar { spacer; item "\(wide)" module="text"; spacer
+              notch
+              spacer; item "b" module="text"; spacer }
+        """, css: "bar { padding: 0; gap: 4pt } item { padding: 0 }")
+        #expect(scene.rows.count == 2)
+        #expect(scene.notch == nil)
+        #expect(scene.rows[0].frame.right == 198)
+        #expect(scene.rows[1].frame.x == 202)
+        let left = try #require(scene.allItems.first { $0.name == wide })
+        let right = try #require(scene.allItems.first { $0.name == "b" })
+        #expect(left.frame.right <= 198)
+        #expect(right.frame.x >= 202)
+        // Each is centred in its own half.
+        #expect(abs(left.frame.midX - 99) < 0.01)
+        #expect(abs(right.frame.midX - 301) < 0.01)
+    }
+
+    @Test("an if-present marker does nothing without a notch")
+    func notchIfPresentPlain() throws {
         let scene = try scene("""
         bar { item "a" module="text"
-              notch
-              item "c" module="text" }
+              spacer
+              item "clock" module="text"
+              notch "if-present"
+              spacer
+              item "b" module="text" }
         """, css: "bar { padding: 0; gap: 0 } item { padding: 0 }")
         #expect(scene.rows.count == 1)
-        #expect(scene.rows[0].items.map(\.name) == ["a", "c"])
+        let clock = try #require(scene.allItems.first { $0.name == "clock" })
+        #expect(abs(clock.frame.midX - 200) < 0.01)
+    }
+
+    @Test("an if-present marker picks the side of the notch")
+    func notchIfPresentNotched() throws {
+        let notched = display(width: 400, notch: CGRect(x: 170, y: 0, width: 60, height: 24))
+        let scene = try scene("""
+        bar { item "a" module="text"
+              spacer
+              item "clock" module="text"
+              notch "if-present"
+              spacer
+              item "b" module="text" }
+        """, css: "bar { padding: 0; gap: 0 } item { padding: 0 }", display: notched)
+        #expect(scene.rows[0].items.map(\.name) == ["a", "spacer-2", "clock"])
+        #expect(scene.rows[0].items[2].frame.right == 170)
+        #expect(scene.rows[1].items.map(\.name) == ["spacer-5", "b"])
     }
 
     @Test("notch \"ignore\" opts out of avoidance entirely")
@@ -322,6 +365,18 @@ struct SceneLayoutTests {
         """, css: "bar { padding: 0; gap: 0 }", display: notched)
         #expect(scene.rows.count == 1)
         #expect(scene.notch == nil)
+    }
+
+    @Test("notch \"ignore\" treats the display as plain, so a marker splits at the centre")
+    func notchIgnoreWithMarker() throws {
+        let notched = display(width: 400, notch: CGRect(x: 170, y: 0, width: 60, height: 24))
+        let scene = try scene("""
+        bar { notch "ignore"
+              item "a" module="text"; notch; item "b" module="text" }
+        """, css: "bar { padding: 0; gap: 0 } item { padding: 0 }", display: notched)
+        #expect(scene.notch == nil)
+        #expect(scene.rows.count == 2)
+        #expect(scene.rows[1].frame.x == 200)
     }
 
     // MARK: Content trees

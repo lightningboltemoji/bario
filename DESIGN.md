@@ -321,14 +321,31 @@ and right of the notch, and each is laid out as its own flex row. Which items go
 
 - If the config contains an explicit `notch` marker, the split is there. This is the
   predictable option and the docs recommend it.
-- Otherwise the split is automatic: items fill from the left; the first item whose natural
-  end would cross the notch starts the right sub-row. A `spacer` straddling the notch becomes
-  a spacer on each side, which is what makes `[a spacer clock spacer b]` degrade to `clock`
-  hugging the notch instead of vanishing under it.
+- Otherwise the split is automatic: the bar is laid out as one flex pass over the whole
+  width, and the first item that would end past the notch's left edge starts the right
+  sub-row. A `spacer` straddling the notch becomes a spacer on each side, which is what makes
+  `[a spacer clock spacer b]` degrade to `clock` hugging the notch instead of vanishing under
+  it. A centred item always crosses the notch's left edge, so it always goes right; a marker
+  is how to choose.
 
-Both sub-rows use the same styles, gap and padding. On a display without a notch the `notch`
-marker is ignored and the row is one flex pass, so one config serves the MacBook and the
-external monitor. `bar { notch "ignore" }` opts out of avoidance entirely.
+Both sub-rows use the same styles, gap and padding. The marker says where the bar splits, and
+also on which displays:
+
+| | notched display | plain display |
+|---|---|---|
+| `notch` | at the notch | at the screen's centre |
+| `notch "if-present"` | at the notch | nowhere: one row |
+| no marker | automatic, around the notch | nowhere: one row |
+
+On a plain display `notch` splits at a gap-wide stand-in for the notch at the screen's
+centre, so `[spacer a spacer notch spacer b spacer]` keeps `a` and `b` on their own sides of
+the centre however wide they grow, as it does on the MacBook; an item that does not fit its
+half overflows rather than crossing. `notch "if-present"` places things only around a real
+notch: `[a spacer clock notch "if-present" spacer b]` centres the clock on an external
+monitor and puts it left of the notch on the MacBook.
+
+`bar { notch "ignore" }` treats every display as plain, so nothing avoids the notch and only
+a bare `notch` marker splits the bar.
 
 ### Modes
 
