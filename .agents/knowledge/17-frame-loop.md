@@ -51,6 +51,13 @@ layer tree and never draws; `BarCover` is the window-backed `BarSurface`.
   off screen for its first frame. It is paused, not torn down, between animations.
 - The loop keeps at most one frame pending. While refreshes are coming, invalidations wait for
   the next one instead of adding a frame.
+- **A render's result is styled at the next refresh, not the end of its turn.** Renders finish
+  on their module's actor and come back in turns of their own: at end-of-turn pacing, clock,
+  cpu and net landing a few milliseconds apart made three style frames a second, each a whole
+  restyle. The display is the soonest a result can be seen anyway, and waiting for it gathers
+  everything on one `Tick` into one frame. Nothing waits for a render still running; a
+  straggler lands in a later frame. (`rendersWaiting` tells the test harness's `settle()` this
+  refresh from one a frame asked for itself.)
 
 ## Rules that are easy to break
 

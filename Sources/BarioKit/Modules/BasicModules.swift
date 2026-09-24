@@ -106,7 +106,7 @@ public actor ClockModule: Module {
     public func poll() async -> PollResult {
         let now = Date()
         return PollResult(patch: .object(["now": .number(now.timeIntervalSince1970)]),
-                          nextIn: ClockModule.secondsUntilNextTick(after: now, ticksEverySecond: ticksEverySecond))
+                          every: ticksEverySecond ? 1 : 60)
     }
 
     private var ticksEverySecond: Bool {
@@ -140,14 +140,5 @@ public actor ClockModule: Module {
             if c == "s" || c == "S" || c == "A" { return true }
         }
         return false
-    }
-
-    static func secondsUntilNextTick(after date: Date, ticksEverySecond: Bool) -> Double {
-        let period: Double = ticksEverySecond ? 1 : 60
-        let elapsed = date.timeIntervalSince1970
-        let remainder = elapsed.truncatingRemainder(dividingBy: period)
-        let wait = period - remainder
-        // Land a hair after the boundary rather than a hair before it.
-        return wait < 0.02 ? wait + period : wait + 0.005
     }
 }

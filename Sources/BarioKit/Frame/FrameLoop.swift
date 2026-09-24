@@ -134,7 +134,10 @@ public final class FrameLoop {
             self?.dirty.render = true
             self?.requestFrame()
         }
-        host.onRendered = { [weak self] item in self?.invalidate(.style, items: [item]) }
+        // At the next refresh rather than the end of this turn: renders that finish within a
+        // refresh of each other, as every item on the same `Tick` does, are styled in one
+        // frame and not one each. Nothing waits for a render that is still running.
+        host.onRendered = { [weak self] item in self?.rendered(item) }
         // A producer's `frame` changes a layer's contents and nothing else.
         surfaces.onChange = { [weak self] _ in self?.invalidate(.commit) }
     }
@@ -181,10 +184,22 @@ public final class FrameLoop {
     /// The first invalidation in a turn schedules a frame for the end of it; the rest find one
     /// already coming. During a frame nothing is scheduled: what a frame invalidates, it
     /// schedules at its end.
-    private func requestFrame() {
+    private func requestFrame(atRefresh: Bool = false) {
         guard !inFrame, !framePending else { return }
         framePending = true
-        scheduler.scheduleFrame()
+        if atRefresh { scheduler.scheduleRefresh() } else { scheduler.scheduleFrame() }
+    }
+
+    /// Whether renders have landed since the last frame, and wait for the next refresh to be
+    /// styled. For tests, which run that refresh with the clock standing still and leave the
+    /// refreshes a frame asks for itself to the clock.
+    private(set) var rendersWaiting = false
+
+    /// An item's render finished and it looks different.
+    private func rendered(_ item: String) {
+        for bar in bars where bar.contains(item) { dirty.style.insert(bar.id) }
+        rendersWaiting = true
+        requestFrame(atRefresh: true)
     }
 
     // MARK: - Bars
@@ -310,6 +325,7 @@ public final class FrameLoop {
         let now = clock()
         let started = trace == nil ? 0 : CACurrentMediaTime()
         framePending = false
+        rendersWaiting = false
         inFrame = true
         frameCount += 1
         let dirty = self.dirty

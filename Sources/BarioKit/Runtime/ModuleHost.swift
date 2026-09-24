@@ -268,15 +268,18 @@ public final class ModuleHost {
                     await self?.store.merge(patch, at: instance.name)
                 }
                 self?.release(instance)
-                if let next = result.nextIn {
-                    delay = next
-                } else if case .seconds(let seconds)? = instance.interval {
-                    delay = seconds
-                } else {
-                    delay = nil                     // event-driven from here on
-                }
+                delay = ModuleHost.delay(after: result, interval: instance.interval, at: Date())
             }
         }
+    }
+
+    /// When a poll loop polls again: exactly when the module said, else on the next tick of
+    /// its period or of the configured interval, else never, as an event-driven module.
+    nonisolated static func delay(after result: PollResult, interval: Interval?, at now: Date) -> Double? {
+        if let next = result.nextIn { return next }
+        if let every = result.every { return Tick.wait(every: every, after: now) }
+        if case .seconds(let seconds)? = interval { return Tick.wait(every: seconds, after: now) }
+        return nil
     }
 
     private func release(_ instance: Instance) {

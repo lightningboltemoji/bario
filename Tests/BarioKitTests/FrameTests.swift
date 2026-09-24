@@ -120,6 +120,43 @@ struct FrameLoopTests {
         #expect(await module.renders == 3, "and no more than that")
     }
 
+    @Test("renders that land a turn apart are styled in one frame, at the next refresh")
+    func renderedTogether() async throws {
+        let (a, b) = (GatedEchoModule(), GatedEchoModule())
+        let id = UUID().uuidString
+        ModuleRegistry.register("gated-a-\(id)") { _ in a }
+        ModuleRegistry.register("gated-b-\(id)") { _ in b }
+        let h = try Harness(#"item "a" module="gated-a-\#(id)"; item "b" module="gated-b-\#(id)""#)
+        await h.start()
+        h.loop.setBackdrop(FrameLoopTests.checker, for: 1)
+        await h.settle()
+        #expect(h.surface.visible)
+
+        // One tick: both items change and both renders start in one frame.
+        await h.host.store.merge(.object(["text": "one"]), at: "a")
+        await h.host.store.merge(.object(["text": "two"]), at: "b")
+        h.scheduler.run()
+        let frames = h.loop.frameCount
+
+        // They come back apart, in turns of their own. The first waits for the display
+        // rather than taking a frame at the end of its turn, and the second finds it waiting.
+        await a.release()
+        #expect(await eventually { h.host.state(for: "a")?.result.content == .text("one") })
+        #expect(h.scheduler.pending == .refresh, "a render's result waits for the display")
+        await b.release()
+        await h.host.finishRenders()
+        #expect(h.scheduler.pending == .refresh)
+
+        h.scheduler.run()
+        #expect(h.loop.frameCount == frames + 1)
+        let names = h.surface.presentations.last?.scene.allItems.compactMap { item -> String? in
+            if case .text(let text)? = item.content?.kind { return text }
+            return nil
+        }
+        #expect(names == ["one", "two"], "one frame styled both")
+        #expect(h.scheduler.pending == nil)
+    }
+
     @Test("a bar is ordered in only after a frame in which every item has rendered, on a backdrop")
     func firstFrame() async throws {
         let h = try Harness(#"item "a" module="echo-test"; item "b" module="echo-test""#)
@@ -597,6 +634,27 @@ actor GatedCountingModule: Module {
     }
 }
 
+/// Shows its `text`, like `EchoModule`, but every render after the first runs until the test
+/// releases it, so the test decides when each result lands.
+actor GatedEchoModule: Module {
+    private var renders = 0
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var released = 0
+
+    func render(_ state: StateReader) async throws -> RenderResult {
+        renders += 1
+        let text = state.value("text")?.stringValue ?? "echo"
+        if renders > 1 {
+            if released > 0 { released -= 1 } else { await withCheckedContinuation { held.append($0) } }
+        }
+        return RenderResult(content: .text(text))
+    }
+
+    func release() {
+        if held.isEmpty { released += 1 } else { held.removeFirst().resume() }
+    }
+}
+
 /// Content for a custom node type.
 actor BlinkModule: Module {
     func render(_ state: StateReader) async throws -> RenderResult {
@@ -665,14 +723,19 @@ final class Harness {
     }
 
     /// What the run loop does while the clock stands still: run the frames asked for at the
-    /// end of a turn, and let the renders they start come back. A frame asking for a refresh
-    /// is left waiting for the test to move the clock.
+    /// end of a turn and the refresh that styles what renders brought back, and let the
+    /// renders they start come back. A refresh for something moving is left waiting for the
+    /// test to move the clock.
     func settle() async {
         for _ in 0..<20 {
-            if scheduler.pending == .turn { scheduler.run() }
+            if settling { scheduler.run() }
             await host.finishRenders()
             await Task.yield()
-            guard scheduler.pending == .turn else { return }
+            guard settling else { return }
         }
+    }
+
+    private var settling: Bool {
+        scheduler.pending == .turn || (scheduler.pending == .refresh && loop.rendersWaiting)
     }
 }

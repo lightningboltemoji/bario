@@ -87,7 +87,7 @@ public actor ExecModule: Module {
     public func poll() async -> PollResult {
         guard case .seconds(let seconds) = interval else { return PollResult() }
         let patch = await runOnce()
-        return PollResult(patch: patch, nextIn: seconds)
+        return PollResult(patch: patch, every: seconds)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {

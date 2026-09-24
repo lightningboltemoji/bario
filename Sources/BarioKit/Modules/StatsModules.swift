@@ -103,7 +103,7 @@ public actor NetModule: Module {
             patch["rx-\(window.name)"] = .number(over.rx.rounded())
             patch["tx-\(window.name)"] = .number(over.tx.rounded())
         }
-        return PollResult(patch: .object(patch), nextIn: sampling.interval)
+        return PollResult(patch: .object(patch), every: sampling.interval)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {
@@ -260,7 +260,7 @@ public actor CPUModule: Module {
             let over = ticks.back(window.samples).map { CPUModule.delta($0, now).load } ?? 0
             patch["load-\(window.name)"] = .number((over * 100).rounded())
         }
-        return PollResult(patch: .object(patch), nextIn: sampling.interval)
+        return PollResult(patch: .object(patch), every: sampling.interval)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {
@@ -355,7 +355,7 @@ public actor MemModule: Module {
         for window in sampling.windows {
             patch["pct-\(window.name)"] = .number((MemModule.mean(samples.suffix(window.samples)) * 100).rounded())
         }
-        return PollResult(patch: .object(patch), nextIn: sampling.interval)
+        return PollResult(patch: .object(patch), every: sampling.interval)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {

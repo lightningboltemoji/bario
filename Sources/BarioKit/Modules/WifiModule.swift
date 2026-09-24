@@ -27,7 +27,7 @@ public actor WifiModule: Module {
     }
 
     public func poll() async -> PollResult {
-        PollResult(patch: WifiModule.read(wantsSSID: wantsSSID), nextIn: interval)
+        PollResult(patch: WifiModule.read(wantsSSID: wantsSSID), every: interval)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {

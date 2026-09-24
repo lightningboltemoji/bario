@@ -29,12 +29,32 @@ extension Module {
 public struct PollResult: Sendable {
     /// Merged into the store under this item's key.
     public var patch: JSONValue?
-    /// Seconds until the next poll, overriding the configured interval.
+    /// Seconds until the next poll, exactly, overriding `every` and the configured interval.
     public var nextIn: Double?
+    /// Poll again on the next tick of this period, overriding the configured interval: see
+    /// `Tick`.
+    public var every: Double?
 
-    public init(patch: JSONValue? = nil, nextIn: Double? = nil) {
+    public init(patch: JSONValue? = nil, nextIn: Double? = nil, every: Double? = nil) {
         self.patch = patch
         self.nextIn = nextIn
+        self.every = every
+    }
+}
+
+/// The clock every periodic poll keeps: whole multiples of its period on the wall clock, the
+/// same for every item. Items that sample at one rate sample at the same moment, so what they
+/// change reaches the screen in one frame rather than one each (the frame loop styles renders
+/// that finish within a refresh of each other together). No item waits for another; a slow
+/// one lands in a later frame. A clock showing seconds is one more item on the 1s tick.
+public enum Tick {
+    /// Seconds from `date` to the next tick of `period`, landing a hair after it rather than
+    /// a hair before, so a clock polled on it reads the new second.
+    public static func wait(every period: Double, after date: Date) -> Double {
+        guard period > 0 else { return 0 }
+        let remainder = date.timeIntervalSince1970.truncatingRemainder(dividingBy: period)
+        let wait = period - remainder
+        return wait < 0.02 ? wait + period : wait + 0.005
     }
 }
 

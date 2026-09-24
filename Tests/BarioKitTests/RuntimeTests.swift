@@ -173,13 +173,35 @@ struct FormatStringTests {
 
 @Suite("Modules")
 struct ModuleTests {
-    @Test("the clock aligns to the next boundary")
-    func clockAlignment() {
+    @Test("a tick lands a hair after the next boundary of its period")
+    func ticks() {
         let at = Date(timeIntervalSince1970: 1_700_000_012.4)
-        let nextSecond = ClockModule.secondsUntilNextTick(after: at, ticksEverySecond: true)
-        #expect(abs(nextSecond - 0.605) < 0.01)
-        let nextMinute = ClockModule.secondsUntilNextTick(after: at, ticksEverySecond: false)
-        #expect(abs(nextMinute - 27.605) < 0.01)
+        #expect(abs(Tick.wait(every: 1, after: at) - 0.605) < 0.001)
+        #expect(abs(Tick.wait(every: 2, after: at) - 1.605) < 0.001)
+        #expect(abs(Tick.wait(every: 60, after: at) - 27.605) < 0.001)
+        // Just short of a boundary is too close to make: the one after it.
+        let late = Date(timeIntervalSince1970: 1_700_000_012.99)
+        #expect(abs(Tick.wait(every: 1, after: late) - 1.01) < 0.001)
+    }
+
+    @Test("a poll comes back exactly when asked, else on the tick of its period or interval")
+    func pollDelays() {
+        let at = Date(timeIntervalSince1970: 1_700_000_012.4)
+        #expect(ModuleHost.delay(after: PollResult(nextIn: 2.5, every: 1), interval: .seconds(5), at: at) == 2.5)
+        #expect(abs(ModuleHost.delay(after: PollResult(every: 1), interval: .seconds(5), at: at)! - 0.605) < 0.001)
+        #expect(abs(ModuleHost.delay(after: PollResult(), interval: .seconds(5), at: at)! - 2.605) < 0.001)
+        #expect(ModuleHost.delay(after: PollResult(), interval: nil, at: at) == nil)
+    }
+
+    @Test("the clock ticks every second only if it shows seconds")
+    func clockTicks() async {
+        let store = StateStore()
+        let seconds = ClockModule(context: ModuleContext(item: "clock", config: .object([:]),
+                                                             format: "HH:mm:ss", store: store))
+        #expect(await seconds.poll().every == 1)
+        let minutes = ClockModule(context: ModuleContext(item: "clock", config: .object([:]),
+                                                             format: "HH:mm", store: store))
+        #expect(await minutes.poll().every == 60)
         #expect(ClockModule.patternHasSeconds("HH:mm:ss"))
         #expect(!ClockModule.patternHasSeconds("EEE d MMM  HH:mm"))
         #expect(!ClockModule.patternHasSeconds("'seconds' HH:mm"))

@@ -58,6 +58,13 @@ as `JSONValue` — the same bytes a WASM module gets from `init(ptr, len)`.
 throws or overruns keeps its last content and gains the `.stale` class; it never takes the
 bar down.
 
+Periodic polls keep one clock, `Tick`: an item polled every N seconds polls at the next
+multiple of N on the wall clock, 5ms past it, so every item on one period polls at the same
+moment and its changes reach the screen in one frame (see the refresh rule in
+[17-frame-loop.md](17-frame-loop.md)). The clock item is one more item on the 1s tick, or the
+60s one without seconds. `PollResult.every` asks for a tick; `nextIn` is an exact delay, for
+backoff and anything else that is not a period; the configured interval is ticked too.
+
 ## Format strings
 
 The waybar affordance, and the 80% case (§2). `format = "{icon} {pct}%"` compiles once into
