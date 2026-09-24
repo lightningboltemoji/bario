@@ -3,6 +3,8 @@ import Foundation
 /// A pseudo-class, i.e. a state the scene tree can be in.
 public enum StyleState: String, Sendable, Hashable, CaseIterable {
     case hover, active, overflow, stale, error
+    /// An item on its way out: the style it transitions to after it leaves the layout.
+    case leaving
     case firstChild = "first-child"
     case lastChild = "last-child"
     case onlyChild = "only-child"

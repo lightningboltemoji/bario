@@ -21,26 +21,30 @@ public struct Styler: Sendable {
         }
     }
 
+    /// `modes` are the modes that are on: classes on the bar, and what `when` and `unless`
+    /// show items by.
     public func style(bar: BarConfig, items: [ItemConfig],
                       states: [String: ModuleHost.ItemState],
-                      interaction: Interaction = Interaction()) -> StyledBar {
-        let barNode = StyleNode(type: "bar", id: nil, classes: [], states: [])
+                      interaction: Interaction = Interaction(),
+                      modes: Set<String> = []) -> StyledBar {
+        let barNode = StyleNode(type: "bar", id: nil, classes: modes, states: [])
         let barStyle = cascade.style(for: [barNode]).style
+        let shown = Shown(states: states, modes: modes)
 
         // The notch marker is kept as a position among the items that are shown, so an
         // invisible item before it cannot move the split.
         var marker: Int?
-        var shown: [ItemConfig] = []
+        var visible: [ItemConfig] = []
         for item in items {
             if case .notch = item.kind {
-                marker = shown.count
-            } else if isShown(item, states: states) {
-                shown.append(item)
+                marker = visible.count
+            } else if shown(item) {
+                visible.append(item)
             }
         }
         return StyledBar(config: bar, style: barStyle,
-                         items: siblings(shown, parentPath: [barNode], parentStyle: barStyle,
-                                         states: states, interaction: interaction),
+                         items: siblings(visible, parentPath: [barNode], parentStyle: barStyle,
+                                         shown: shown, interaction: interaction),
                          notchMarker: marker, styler: self)
     }
 
@@ -58,21 +62,28 @@ public struct Styler: Sendable {
 
     // MARK: - Items
 
-    /// Whether an item takes part in the bar at all. An item that has never rendered has
-    /// nothing to show yet, and a placeholder is exactly what the first frame waits to avoid;
-    /// an item whose module says invisible is not there either, and neither is a group with
-    /// nothing in it.
-    private func isShown(_ config: ItemConfig, states: [String: ModuleHost.ItemState]) -> Bool {
-        switch config.kind {
-        case .module:
-            guard let state = states[config.name], state.rendered else { return false }
-            return state.result.visible
-        case .group(let children):
-            return children.contains { isShown($0, states: states) }
-        case .spacer:
-            return true
-        case .notch:
-            return false
+    /// Whether an item takes part in the bar at all. One a mode leaves out is not there; an
+    /// item that has never rendered has nothing to show yet, and a placeholder is exactly what
+    /// the first frame waits to avoid; an item whose module says invisible is not there
+    /// either, and neither is a group with nothing in it.
+    struct Shown {
+        var states: [String: ModuleHost.ItemState]
+        var modes: Set<String>
+
+        func callAsFunction(_ config: ItemConfig) -> Bool {
+            if let mode = config.when, !modes.contains(mode) { return false }
+            if let mode = config.unless, modes.contains(mode) { return false }
+            switch config.kind {
+            case .module:
+                guard let state = states[config.name], state.rendered else { return false }
+                return state.result.visible
+            case .group(let children):
+                return children.contains { self($0) }
+            case .spacer:
+                return true
+            case .notch:
+                return false
+            }
         }
     }
 
@@ -80,8 +91,7 @@ public struct Styler: Sendable {
     /// these, so a hidden item does not leave a hole in a group's corner radii. Spacers are the
     /// space between things, not things, so they do not count either.
     private func siblings(_ configs: [ItemConfig], parentPath: [StyleNode], parentStyle: Style,
-                          states: [String: ModuleHost.ItemState],
-                          interaction: Interaction) -> [StyledItem] {
+                          shown: Shown, interaction: Interaction) -> [StyledItem] {
         let ranked = configs.indices.filter { configs[$0].kind != .spacer }
         return configs.indices.map { index in
             var structural: Set<StyleState> = []
@@ -89,14 +99,14 @@ public struct Styler: Sendable {
             if index == ranked.last { structural.insert(.lastChild) }
             if ranked.count == 1, index == ranked.first { structural.insert(.onlyChild) }
             return style(configs[index], parentPath: parentPath, parentStyle: parentStyle,
-                         states: states, interaction: interaction, structural: structural)
+                         shown: shown, interaction: interaction, structural: structural)
         }
     }
 
     private func style(_ config: ItemConfig, parentPath: [StyleNode], parentStyle: Style,
-                       states: [String: ModuleHost.ItemState], interaction: Interaction,
+                       shown: Shown, interaction: Interaction,
                        structural: Set<StyleState>) -> StyledItem {
-        let state = states[config.name]
+        let state = shown.states[config.name]
         var itemStates = structural
         if interaction.hovered == config.name { itemStates.insert(.hover) }
         if interaction.active == config.name { itemStates.insert(.active) }
@@ -118,12 +128,17 @@ public struct Styler: Sendable {
         let style = itemStyle(config, path: path, parentStyle: parentStyle)
         var item = StyledItem(config: config, style: style, states: itemStates, classes: classes,
                               tooltip: state?.result.tooltip, path: path, parentStyle: parentStyle)
+        // A spacer is the space between things, and has no way in or out to show.
+        if !item.isSpacer {
+            item.starting = cascade.startingStyle(for: path, inheriting: parentStyle, inline: inlineRules(config))
+            item.leaving = cascade.leavingStyle(for: path, inheriting: parentStyle, inline: inlineRules(config))
+        }
 
         switch config.kind {
         case .group(let children):
-            item.children = siblings(children.filter { isShown($0, states: states) },
+            item.children = siblings(children.filter { shown($0) },
                                      parentPath: path, parentStyle: style,
-                                     states: states, interaction: interaction)
+                                     shown: shown, interaction: interaction)
         case .module:
             item.content = state?.result.content.map {
                 styleNode($0, parentPath: path, parentStyle: style)
@@ -191,6 +206,9 @@ public struct StyledItem: Sendable {
     public var tooltip: String?
     public var content: SceneNode?
     public var children: [StyledItem] = []
+    /// What it transitions from when it appears, and to when it leaves, if the stylesheet says.
+    public var starting: Style?
+    public var leaving: Style?
     /// What the item was cascaded from, so it can be restyled with one more state.
     var path: [StyleNode]
     var parentStyle: Style

@@ -31,9 +31,14 @@ public final class FrameLoop {
         didSet {
             guard config != oldValue else { return }
             for bar in bars { bar.config = config.bar(for: bar.display) }
+            modeTracker.configure(config.modes, store: host.store)
             invalidate(.style)
         }
     }
+
+    /// The modes that are on. One turning on or off restyles every bar.
+    public var modes: Set<String> { modeTracker.active }
+    let modeTracker: ModeTracker
 
     public var stylesheet = Stylesheet() {
         didSet { invalidate(.style) }
@@ -85,6 +90,12 @@ public final class FrameLoop {
         didSet { if revealed != oldValue { invalidate(.present) } }
     }
 
+    /// Every bar put away from the menu bar item, leaving the real menu bar alone. The bars keep
+    /// their scenes, so showing them again is one present and no layout.
+    public var hidden = false {
+        didSet { if hidden != oldValue { invalidate(.present) } }
+    }
+
     // MARK: - State
 
     public private(set) var bars: [Bar] = []
@@ -115,6 +126,8 @@ public final class FrameLoop {
         self.scheduler = scheduler
         self.clock = clock
         resolver = ColorResolver.system(dark: false)
+        modeTracker = ModeTracker(after: { [scheduler] in scheduler.after($0, $1) }, now: clock)
+        modeTracker.onChange = { [weak self] in self?.invalidate(.style) }
 
         scheduler.onFrame = { [weak self] in self?.frame() }
         host.onNeedsRender = { [weak self] in
@@ -369,7 +382,7 @@ public final class FrameLoop {
                     hovered: hovered?.bar == bar.id ? hovered?.item : nil,
                     active: pressed?.bar == bar.id ? pressed?.item : nil)
                 bar.styled = styler.style(bar: config, items: (banner.map { [$0.config] } ?? []) + config.items,
-                                          states: states, interaction: interaction)
+                                          states: states, interaction: interaction, modes: modes)
             }
             guard let styled = bar.styled else { continue }
 
@@ -421,7 +434,7 @@ public final class FrameLoop {
         if !bar.isReady, bar.deadlinePassed || (bar.backdrop.image != nil && hasRendered(bar)) {
             bar.isReady = true
         }
-        setVisible(bar, bar.isReady && bar.menuBarShown)
+        setVisible(bar, bar.isReady && bar.menuBarShown && !hidden)
         return report
     }
 

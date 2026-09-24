@@ -81,24 +81,29 @@ public final class ModuleHost {
         let fingerprint: JSONValue
         /// Set when the item could not be built at all; survives every render.
         let permanentError: String?
+        /// A source writes state and is never shown, so it never renders.
+        let isSource: Bool
         var state = ItemState()
-        var needsRender = true
+        var needsRender: Bool
         /// A new module's first render waits until it has state to show: its first poll has
         /// landed, something wrote under its key, or the host stopped waiting.
-        var held = true
+        var held: Bool
         var renderTask: Task<Void, Never>?
         var pollTask: Task<Void, Never>?
         var startTask: Task<Void, Never>?
 
         init(name: String, moduleName: String, module: any Module, interval: Interval?,
-             fingerprint: JSONValue, permanentError: String? = nil) {
+             fingerprint: JSONValue, permanentError: String? = nil, isSource: Bool = false) {
             self.name = name
             self.moduleName = moduleName
             self.module = module
             self.interval = interval
             self.fingerprint = fingerprint
             self.permanentError = permanentError
+            self.isSource = isSource
             self.state.error = permanentError
+            needsRender = !isSource
+            held = !isSource
         }
 
         var canRender: Bool { needsRender && !held && renderTask == nil }
@@ -136,33 +141,37 @@ public final class ModuleHost {
     /// Build instances to match the config, reusing any whose module and options are
     /// unchanged so a stylesheet-only reload never restarts a module. Items are unique by name
     /// across bars: the first definition of a name is the one that runs.
-    public func load(_ items: [ItemConfig]) async {
+    ///
+    /// Sources run like any module and never render: they only write state.
+    public func load(_ items: [ItemConfig], sources: [ItemConfig] = []) async {
         // One load at a time, or two quick reloads would interleave their retirements.
         let previous = loading
         let task = Task { @MainActor in
             await previous?.value
-            await self.apply(items)
+            await self.apply(items, sources: sources)
         }
         loading = task
         await task.value
     }
 
-    private func apply(_ items: [ItemConfig]) async {
+    private func apply(_ items: [ItemConfig], sources: [ItemConfig]) async {
         var next: [String: Instance] = [:]
         var nextOrder: [String] = []
         var fresh: [Instance] = []
 
-        for item in items.flatMap(\.flattened) {
+        let entries = items.flatMap(\.flattened).map { ($0, false) } + sources.map { ($0, true) }
+        for (item, isSource) in entries {
             guard let moduleName = item.moduleName, next[item.name] == nil else { continue }
             nextOrder.append(item.name)
             if let existing = instances[item.name],
                existing.moduleName == moduleName,
-               existing.fingerprint == item.options {
+               existing.fingerprint == item.options,
+               existing.isSource == isSource {
                 next[item.name] = existing
                 instances.removeValue(forKey: item.name)
                 continue
             }
-            let instance = make(item, moduleName: moduleName, fingerprint: item.options)
+            let instance = make(item, moduleName: moduleName, fingerprint: item.options, isSource: isSource)
             // A restarted item keeps showing what it showed until its new module renders,
             // rather than vanishing and coming back.
             if let replaced = instances[item.name] {
@@ -198,7 +207,8 @@ public final class ModuleHost {
         }
     }
 
-    private func make(_ item: ItemConfig, moduleName: String, fingerprint: JSONValue) -> Instance {
+    private func make(_ item: ItemConfig, moduleName: String, fingerprint: JSONValue,
+                      isSource: Bool) -> Instance {
         let context = ModuleContext(item: item.name, config: item.options, format: item.format,
                                     content: item.content, template: item.template,
                                     interval: item.interval, store: store,
@@ -206,13 +216,16 @@ public final class ModuleHost {
         do {
             let module = try ModuleRegistry.make(moduleName, context: context)
             return Instance(name: item.name, moduleName: moduleName, module: module,
-                            interval: item.interval, fingerprint: fingerprint)
+                            interval: item.interval, fingerprint: fingerprint, isSource: isSource)
         } catch {
-            // A bad module name is a bubble with the message in it, not a dead bar.
+            // A bad module name is a bubble with the message in it, not a dead bar. A source
+            // has no bubble, so its message goes to the log.
             let message = "\(error)"
+            if isSource { warn("source \(item.name): \(message)") }
             return Instance(name: item.name, moduleName: moduleName,
                             module: ErrorModule(message: message),
-                            interval: nil, fingerprint: fingerprint, permanentError: message)
+                            interval: nil, fingerprint: fingerprint, permanentError: message,
+                            isSource: isSource)
         }
     }
 
@@ -304,7 +317,7 @@ public final class ModuleHost {
         var due = false
         var released = false
         for name in names {
-            guard let instance = instances[name] else { continue }
+            guard let instance = instances[name], !instance.isSource else { continue }
             instance.needsRender = true
             // A write under the item's key is state to show.
             if instance.held {

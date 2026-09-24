@@ -83,9 +83,19 @@ longer for `poll`. Over budget, the call is abandoned, the item keeps its last c
 
 The honest part (DESIGN.md §13 anticipates it): WasmKit has no way to interrupt a running
 call, so "abandoned" means the host stops waiting, not that the guest stops running. A module
-in a genuinely infinite loop leaks one thread until bario exits. It cannot corrupt anything —
-no shared state, its own actor, its own memory — but it is a leak, and it is the reason the
-engine is behind a protocol. Memory is capped at 16MB per instance through WasmKit's resource
+in a genuinely infinite loop leaks one thread until bario exits. That is a leak, and it is the
+reason the engine is behind a protocol; it must not also be a corruption, so an abandoned call
+keeps its instance to itself. The instance is discarded before the next call starts, and the
+bytes `get` stashes for `read` and the requests a guest makes (timer, frame, subscriptions)
+belong to the instance, not the item, so a replacement shares nothing with the call it replaced.
+
+Calls into one instance run one at a time, queued on the module. An instance is one thread's
+worth of stack and heap, and the actor alone does not ensure that: it is re-entrant across
+the `await` on a call's budget, so without the queue an event arriving mid-render ran in the
+same instance at once. That showed up as a guest `out of bounds memory access` inside its own
+allocator — two calls' `get`/`read` pairs crossed, and one wrote a longer answer into the
+other's buffer — and as a segfault in WasmKit itself. A queued call's budget starts when it
+does, not when it was asked for. Memory is capped at 16MB per instance through WasmKit's resource
 limiter.
 
 ## Where the tiers meet

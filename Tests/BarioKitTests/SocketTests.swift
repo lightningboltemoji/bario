@@ -126,6 +126,8 @@ struct SocketTopicTests {
     }
 }
 
+/// Real time: a real socket, answered from the main actor, so these are in the Makefile's
+/// `REAL_TIME` and run in the serial pass.
 @Suite("Socket server")
 struct SocketServerTests {
     /// A minimal client: connect, write lines, read lines.
@@ -161,7 +163,7 @@ struct SocketServerTests {
         /// Blocking.swift. `BarioService` is the main actor's, so that reply also waits behind
         /// every `@MainActor` test in the run: the timeout is for a busy machine, not for a
         /// round trip, which takes a millisecond.
-        func line(timeout: Double = 15) async -> JSONValue? {
+        func line(timeout: Double = 30) async -> JSONValue? {
             await offPool { self.blockingLine(timeout: timeout) }
         }
 
@@ -226,8 +228,10 @@ struct SocketServerTests {
         try await withServer { server, _ in
             guard let watcher = Client(path: server.path),
                   let writer = Client(path: server.path) else { Issue.record("no connection"); return }
-            watcher.send(#"{"op": "subscribe", "topics": ["event:*"]}"#)
-            try await Task.sleep(nanoseconds: 150_000_000)
+            // With an id, so there is an answer to wait for: the connection records its topics
+            // before it answers, so once the answer is back the emit below cannot beat it.
+            watcher.send(#"{"id": 0, "op": "subscribe", "topics": ["event:*"]}"#)
+            #expect(await watcher.line()?["id"]?.intValue == 0)
 
             writer.send(#"{"op": "emit", "name": "refresh"}"#)
             let event = await watcher.line()

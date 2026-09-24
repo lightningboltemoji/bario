@@ -40,19 +40,49 @@ public final class SurfaceListener: @unchecked Sendable {
         init(_ value: SharedSurfaces) { self.value = value }
     }
 
-    /// Runs on the listener's own queue: messages are taken off the port and their surfaces
-    /// looked up there, and the registry, which is the main actor's, is told on it.
+    /// Runs on the listener's own queue, and a producer is answered there: who holds which name
+    /// is decided from `owners`, which lives on this queue, and never waits for the main thread.
+    /// Were the answer the main actor's to give, a producer starting up would stall behind
+    /// whatever the main thread was busy with — past its timeout, on a busy enough machine. The
+    /// registry, which is the main actor's, is told afterwards, in the order things happened.
     private nonisolated static func receive(on port: mach_port_t,
                                             into surfaces: WeakSurfaces) -> @Sendable () -> Void {
+        let owners = Owners()
         return {
             var event = bario_surfaces_event()
             while bario_surfaces_receive(port, &event) == 1 {
                 let received = Received(event)
-                DispatchQueue.main.async {
-                    MainActor.assumeIsolated {
-                        guard let registry = surfaces.value else { return received.discard() }
-                        received.apply(to: registry, listener: port)
+                switch received.kind {
+                case BARIO_SURFACES_HANDOFF:
+                    let outcome = owners.claim(received.name, surfaces: received.surfaces,
+                                               owner: received.owner, listener: port)
+                    if outcome == .accepted {
+                        // Queued before the answer goes: by the time the producer hears it, the
+                        // main thread has the surfaces coming.
+                        DispatchQueue.main.async {
+                            MainActor.assumeIsolated {
+                                _ = surfaces.value?.register(received.name, surfaces: received.surfaces,
+                                                             owner: received.owner)
+                            }
+                        }
                     }
+                    let status: Int32
+                    switch outcome {
+                    case .accepted: status = BARIO_SURFACES_ACCEPTED
+                    case .taken: status = BARIO_SURFACES_TAKEN
+                    case .invalid: status = BARIO_SURFACES_INVALID
+                    }
+                    bario_surfaces_answer(received.reply, status)
+                case BARIO_SURFACES_OWNER_GONE:
+                    owners.drop(received.owner)
+                    // The name may be reused from here on; `drop` below is queued ahead of any
+                    // hand-off that could reuse it.
+                    mach_port_deallocate(mach_task_self_, received.owner)
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated { surfaces.value?.drop(owner: received.owner) }
+                    }
+                default:
+                    break
                 }
             }
         }
@@ -61,6 +91,40 @@ public final class SurfaceListener: @unchecked Sendable {
     public func stop() {
         source.cancel()
         bario_surfaces_close(port)
+    }
+
+    /// Which producer holds which name, as far as hand-offs go. Only ever touched on the
+    /// listener's queue. It applies the rule `SharedSurfaces.register` does — a name is one
+    /// producer's for as long as it runs — and is kept in step with the registry, which only
+    /// ever learns of a producer from here.
+    private final class Owners: @unchecked Sendable {
+        private var byName: [String: mach_port_t] = [:]
+
+        func claim(_ name: String, surfaces: [IOSurface], owner: mach_port_t,
+                   listener: mach_port_t) -> SharedSurfaces.Outcome {
+            guard surfaces.count == 2, !name.isEmpty else {
+                mach_port_deallocate(mach_task_self_, owner)
+                return .invalid
+            }
+            if let held = byName[name], held != owner {
+                mach_port_deallocate(mach_task_self_, owner)
+                return .taken
+            }
+            // One reference to each producer's port is kept, with a notification for when it
+            // dies; a second hand-off from a producer already known gives its reference back.
+            let known = byName.values.contains(owner)
+            byName[name] = owner
+            if known {
+                mach_port_deallocate(mach_task_self_, owner)
+            } else {
+                bario_surfaces_watch(listener, owner)
+            }
+            return .accepted
+        }
+
+        func drop(_ owner: mach_port_t) {
+            byName = byName.filter { $0.value != owner }
+        }
     }
 
     /// One message off the port, with its surfaces looked up.
@@ -85,39 +149,6 @@ public final class SurfaceListener: @unchecked Sendable {
                 if let surface = IOSurfaceLookupFromMachPort(port) { surfaces.append(surface) }
                 mach_port_deallocate(mach_task_self_, port)
             }
-        }
-
-        @MainActor
-        func apply(to registry: SharedSurfaces, listener: mach_port_t) {
-            switch kind {
-            case BARIO_SURFACES_HANDOFF:
-                // One reference to each producer's port is kept, with a notification for when it
-                // dies; a second hand-off from a producer already known gives its reference back.
-                let known = registry.holds(owner: owner)
-                let outcome = registry.register(name, surfaces: surfaces, owner: owner)
-                if outcome == .accepted, !known {
-                    bario_surfaces_watch(listener, owner)
-                } else {
-                    mach_port_deallocate(mach_task_self_, owner)
-                }
-                let status: Int32
-                switch outcome {
-                case .accepted: status = BARIO_SURFACES_ACCEPTED
-                case .taken: status = BARIO_SURFACES_TAKEN
-                case .invalid: status = BARIO_SURFACES_INVALID
-                }
-                bario_surfaces_answer(reply, status)
-            case BARIO_SURFACES_OWNER_GONE:
-                registry.drop(owner: owner)
-                mach_port_deallocate(mach_task_self_, owner)
-            default:
-                break
-            }
-        }
-
-        func discard() {
-            if owner != mach_port_t(MACH_PORT_NULL) { mach_port_deallocate(mach_task_self_, owner) }
-            if reply != mach_port_t(MACH_PORT_NULL) { mach_port_deallocate(mach_task_self_, reply) }
         }
     }
 }

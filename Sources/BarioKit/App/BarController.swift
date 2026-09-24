@@ -33,6 +33,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var surfaceListener: SurfaceListener?
     private var stateFeed: Task<Void, Never>?
     private var hupSource: DispatchSourceSignal?
+    private var menuBarItem: MenuBarItem?
 
     public init(options: RunOptions, theme: Theme, startupError: String? = nil) {
         self.options = options
@@ -64,7 +65,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
         }
         loop.renderers.load(theme.config.renderers, store: host.store, events: host.events)
         let items = theme.config.bars.flatMap(\.items)
-        Task { await host.load(items) }
+        let sources = theme.config.sources
+        Task { await host.load(items, sources: sources) }
 
         syncDisplays()
         startTimers()
@@ -72,6 +74,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         observeSystem()
         startWatching()
         startSocket()
+        startMenuBarItem()
         printBanner()
 
         // `killall -HUP bario` re-reads the config and re-photographs the desktop.
@@ -466,6 +469,21 @@ public final class BarController: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - The menu bar item
+
+    private func startMenuBarItem() {
+        let item = MenuBarItem()
+        item.isHidden = { [weak self] in self?.loop.hidden ?? false }
+        item.error = { [weak self] in self?.loop.banner }
+        item.configDirectory = { [weak self] in
+            self?.theme.configURL?.deletingLastPathComponent() ?? ConfigLoader.searchDirectories[0]
+        }
+        item.onSetHidden = { [weak self] hidden in self?.loop.hidden = hidden }
+        item.onReload = { [weak self] in self?.reload() }
+        item.refresh()
+        menuBarItem = item
+    }
+
     // MARK: - Live reload
 
     /// Watch both files, and both directories, so creating one for the first time works too.
@@ -488,6 +506,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// theme and says so on the bar. Everything it changes is an input: the stylesheet and
     /// config invalidate style everywhere, and only modules whose options changed restart.
     public func reload() {
+        defer { menuBarItem?.refresh() }
         let next: Theme
         do {
             next = try Theme.load(configPath: options.configPath, stylePath: options.stylePath)
@@ -510,7 +529,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
         loop.invalidate(.layout)
 
         let items = next.config.bars.flatMap(\.items)
-        Task { await host.load(items) }
+        let sources = next.config.sources
+        Task { await host.load(items, sources: sources) }
     }
 
     // MARK: - Chatter
@@ -526,6 +546,6 @@ public final class BarController: NSObject, NSApplicationDelegate {
                         cover.name, f.width, f.height, f.minX, f.minY, notched ? " · notched" : ""))
         }
         if covers.isEmpty { warn("no screens found") }
-        note("  Ctrl-C to quit.")
+        note("  Ctrl-C, or Quit in bario's menu bar item, to quit.")
     }
 }

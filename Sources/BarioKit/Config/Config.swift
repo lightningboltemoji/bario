@@ -5,10 +5,17 @@ import Foundation
 public struct Config: Sendable, Equatable {
     public var bars: [BarConfig]
     public var renderers: [RendererConfig]
+    /// Providers with no bubble: modules that write state for other items to read, and are
+    /// never laid out. DESIGN.md §3.
+    public var sources: [ItemConfig]
+    public var modes: [ModeConfig]
 
-    public init(bars: [BarConfig] = [], renderers: [RendererConfig] = []) {
+    public init(bars: [BarConfig] = [], renderers: [RendererConfig] = [],
+                sources: [ItemConfig] = [], modes: [ModeConfig] = []) {
         self.bars = bars
         self.renderers = renderers
+        self.sources = sources
+        self.modes = modes
     }
 
     /// The bar a display should show: the most specific `bar` node that matches it.
@@ -68,6 +75,27 @@ public enum NotchPolicy: String, Sendable, Equatable, CaseIterable {
     case ignore
 }
 
+/// A named condition over the state store and time. While it holds, the bar wears its name as
+/// a class and items shown `when` it appear; DESIGN.md §6.
+public struct ModeConfig: Sendable, Equatable {
+    public var name: String
+    /// On while any of these paths holds a truthy value.
+    public var whilePaths: [String] = []
+    /// On when any of these paths changes value; a path's first value is not a change.
+    public var changed: [String] = []
+    /// How long it stays on after the last thing that turned it on, in seconds.
+    public var hold: Double = 0
+    public var position: KDLPosition = .start
+
+    public init(name: String, position: KDLPosition = .start) {
+        self.name = name
+        self.position = position
+    }
+
+    /// Every path the mode is decided from.
+    public var paths: [String] { whilePaths + changed }
+}
+
 public struct RendererConfig: Sendable, Equatable {
     public var nodeType: String
     public var path: String
@@ -102,6 +130,10 @@ public struct ItemConfig: Sendable, Equatable {
     public var style: String?
     /// Stay out of the layout until a provider writes something under this item's key.
     public var hiddenUntilSet = false
+    /// Laid out only while this mode is on, or only while it is off. The module runs either
+    /// way, so an item a mode brings in has its content ready.
+    public var when: String?
+    public var unless: String?
     /// A content tree written in the config: what an item shows in place of its format, and
     /// what a `data` item shows until something is pushed to it.
     public var content: Node?

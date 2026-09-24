@@ -26,7 +26,7 @@ public enum Shot {
         }
 
         let scene = try await scene(bar: bar, display: display, theme: theme,
-                                    dark: options.dark ?? false)
+                                    dark: options.dark ?? false, modes: options.modes)
 
         let backdrop = BackdropImage()
         if let path = options.shotBackdrop {
@@ -59,17 +59,18 @@ public enum Shot {
     /// first frame of a running bar would.
     @MainActor
     public static func scene(bar: BarConfig, display: DisplayInfo, theme: Theme,
-                             dark: Bool, metrics: any Metrics = CoreTextMetrics()) async throws -> Scene {
+                             dark: Bool, metrics: any Metrics = CoreTextMetrics(),
+                             modes: Set<String> = []) async throws -> Scene {
         ModuleRegistry.registerBuiltIns()
         let host = ModuleHost()
-        await host.load(bar.items)
+        await host.load(bar.items, sources: theme.config.sources)
         await host.renderPending()
         let states = host.states
         await host.shutdown()
 
         let cascade = Cascade(stylesheet: theme.stylesheet, dark: dark)
         let builder = SceneBuilder(cascade: cascade, metrics: metrics)
-        return builder.build(bar: bar, display: display, items: bar.items, states: states)
+        return builder.build(bar: bar, display: display, items: bar.items, states: states, modes: modes)
     }
 
     /// A backdrop stand-in that makes transparency obvious in a screenshot.

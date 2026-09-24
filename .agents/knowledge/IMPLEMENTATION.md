@@ -25,7 +25,7 @@ this file; the plan lives in [00-roadmap.md](00-roadmap.md); the intent lives in
 | `Layout/` | `Metrics`, the flex solver, the `Scene`, the layout stage (`BarLayout`), and `SceneBuilder` (style + layout in one call) |
 | `Paint/` | colour resolution, rounded rects, the backdrop cache, display lists and the canvas painter, rasters, offscreen rendering on `CARenderer` |
 | `Compositor/` | each bar's layer tree and the commit stage: chrome as layers, raster keys, the node rasterizer, the hole as a mask, the window-shadow plane — see [18-compositor.md](18-compositor.md) |
-| `Frame/` | the rendering pipeline of §10: `FrameLoop` (invalidation and the frame), `Bar`, the scheduler, the `Animator`, the `Lens`, `Presentation` — see [17-frame-loop.md](17-frame-loop.md) |
+| `Frame/` | the rendering pipeline of §10: `FrameLoop` (invalidation and the frame), `Bar`, the scheduler, the `Animator` (with the ghosts of items on their way out), the `Lens`, the `ModeTracker`, `Presentation` — see [17-frame-loop.md](17-frame-loop.md) and [21-sources-modes-arrivals.md](21-sources-modes-arrivals.md) |
 | `App/` | options and theme loading, the cover window, the view, the controller (glue from AppKit to frame-loop inputs), events, `--shot` |
 | `IPC/` | the socket protocol and its verbs (`BarioService`), the server, and the client the CLI uses |
 | `Wasm/` | the `WasmEngine` seam, the WasmKit engine, host imports, permissions, the `wasm` module, the renderer registry |
@@ -89,6 +89,13 @@ does not react to the pointer at all ([15-interaction.md](15-interaction.md)).
 - An option bario does not recognise on an item is not an error — it belongs to the module.
 - `emit` and `subscribe` are one path whether they come from a socket client or a WASM
   module: both go through `EventBus`, and both reach the socket and the subscribed modules.
+- A write is what it changed: one that changes no value invalidates and notifies nothing, and
+  one that does dirties the readers of what changed, not of everything it wrote. Under an
+  item's key, `content` is a tree and is replaced whole.
+- A `source` is a module with no bubble, and a `mode` is a condition over the store and time
+  that restyles every bar when it flips and decides what `when`/`unless` items are laid out.
+  Items that come and go transition from `@starting-style` and to `:leaving`
+  ([21-sources-modes-arrivals.md](21-sources-modes-arrivals.md)).
 - Renders are cached against the state paths they read, so hover, animation and the hole
   never call a module. An item that has never rendered is not laid out. A module that throws or overruns keeps its last content and wears
   `.stale`.
@@ -115,6 +122,7 @@ Makefile handles both; see its comments.
   is how rendering is verified without looking at a screen, and the pixel tests assert pixels
   from it.
 - `bario --diagnose` prints the resolved scene as text: items, frames, classes, hole modes.
+- `--mode <name>`, with `--shot` or `--diagnose`, holds a mode on, to see what it arranges.
 - `bario --run --trace-frames` prints what every frame did; an idle bar prints nothing.
 - `make app` builds `bario.app`, which is what Screen Recording and Location permissions
   attach to; `make install` puts it in `/Applications`, `make uninstall` removes it.
@@ -136,6 +144,7 @@ theme and shows the message as a red bubble on the bar. `killall -HUP bario` doe
 | `examples/counter.wat` | the same lifecycle with no toolchain — bario assembles `.wat` at load |
 | `examples/ring.wat` | the design's worked renderer, registering and drawing a `ring` node |
 | `examples/surface` | a native producer drawing into shared IOSurfaces with Metal (`swift run surface-example`) |
+| `examples/emira` | emira's names guide rolled in over the app name: a source, a mode, a stylesheet, and a Rust module (or a jq filter) rendering the row |
 | `schema/content.json` | the published content-tree contract |
 | `Resources/Info.plist` | the app bundle's plist; `make app` stamps the version into its copy |
 

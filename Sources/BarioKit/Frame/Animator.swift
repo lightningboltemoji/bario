@@ -11,6 +11,8 @@ public struct Animator {
     private var motions: [String: Motion] = [:]
     /// The bar's own style, which transitions like an item's.
     private var bar = StyleMotion()
+    /// Per item name, items that have left the scene and are easing to their `:leaving` style.
+    private var ghosts: [String: Ghost] = [:]
 
     public init() {}
 
@@ -73,8 +75,21 @@ public struct Animator {
         }
     }
 
+    /// An item that has left: where it was on screen when it went, with its `:leaving` style as
+    /// its target, and where it sat, so it is presented among the items it left. It takes no
+    /// part in layout and none in hit testing, and it is gone once its transitions end.
+    struct Ghost {
+        var item: SceneItem
+        var style: StyleMotion
+        var row: Int
+        var index: Int
+        /// The group it was in, when that group is still there.
+        var parent: String?
+    }
+
     public func isMoving(at now: CFTimeInterval) -> Bool {
         bar.isMoving(at: now) || motions.values.contains { $0.isMoving(at: now) }
+            || ghosts.values.contains { $0.style.isMoving(at: now) }
     }
 
     /// Point the animation at a new scene. With `animated` false, or with nothing on screen
@@ -84,18 +99,26 @@ public struct Animator {
         guard animated, let old = target else {
             motions = [:]
             bar = StyleMotion()
+            ghosts = [:]
             return
         }
 
         bar.retarget(from: old.style, to: scene.style, at: now)
         let layout = scene.style.transitions.last { $0.property == "layout" }
         let before = Dictionary(old.allItems.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        let after = Set(scene.allItems.map(\.name))
+        ghosts = ghosts.filter { $0.value.style.isMoving(at: now) }
+        leave(old, keeping: after, at: now)
 
         var next: [String: Motion] = [:]
         for item in scene.allItems {
             // An item that was not there before is placed where it belongs rather than grown
-            // out of nothing; its neighbours still slide to make room.
-            guard let previous = before[item.name] else { continue }
+            // out of nothing; its neighbours still slide to make room. It transitions from its
+            // `@starting-style`, or from where it was on its way out.
+            guard let previous = before[item.name] else {
+                if let motion = arrive(item, layout: layout, at: now) { next[item.name] = motion }
+                continue
+            }
             var motion = motions[item.name] ?? Motion()
             motion.style.retarget(from: previous.style, to: item.style, at: now)
 
@@ -117,17 +140,82 @@ public struct Animator {
         motions = next
     }
 
+    /// Ghosts for the items of `old` that are not in the next scene and have somewhere to go:
+    /// a `:leaving` style with a transition to it. A group goes as one, its items with it.
+    private mutating func leave(_ old: Scene, keeping after: Set<String>, at now: CFTimeInterval) {
+        func visit(_ items: [SceneItem], row: Int, parent: String?) {
+            for (index, item) in items.enumerated() {
+                guard !after.contains(item.name) else {
+                    visit(item.children, row: row, parent: item.name)
+                    continue
+                }
+                guard item.kind != .spacer, let leaving = item.leaving else { continue }
+                // It goes from where it is on screen, mid-transition or not.
+                let shown = present(item, at: now)
+                var style = motions[item.name]?.style ?? StyleMotion()
+                style.retarget(from: item.style, to: leaving, at: now)
+                guard style.isMoving(at: now) else { continue }
+                var ghost = shown
+                ghost.style = leaving
+                ghost.states.insert(.leaving)
+                ghosts[item.name] = Ghost(item: ghost, style: style, row: row, index: index, parent: parent)
+            }
+        }
+        for (row, items) in old.rows.map(\.items).enumerated() { visit(items, row: row, parent: nil) }
+    }
+
+    /// The motion an item that was not in the last scene starts with, if any.
+    private mutating func arrive(_ item: SceneItem, layout: Transition?, at now: CFTimeInterval) -> Motion? {
+        var motion = Motion()
+        if let ghost = ghosts.removeValue(forKey: item.name) {
+            // Back before it had gone: it turns round from wherever it has got to.
+            motion.style = ghost.style
+            motion.style.retarget(from: ghost.item.style, to: item.style, at: now)
+            if let layout, layout.duration + layout.delay > 0, ghost.item.frame != item.frame {
+                motion.frame = Tween(from: ghost.item.frame, start: now, transition: layout)
+            }
+        } else if let starting = item.starting {
+            motion.style.retarget(from: starting, to: item.style, at: now)
+        }
+        return motion.isMoving(at: now) ? motion : nil
+    }
+
     /// The scene as it should be on screen at `now`.
     public func presented(at now: CFTimeInterval) -> Scene? {
         guard var scene = target else { return nil }
-        guard !motions.isEmpty || !bar.tweens.isEmpty else { return scene }
+        guard !motions.isEmpty || !bar.tweens.isEmpty || !ghosts.isEmpty else { return scene }
         scene.style = bar.sample(scene.style, at: now)
         scene.rows = scene.rows.map { row in
             var row = row
             row.items = row.items.map { present($0, at: now) }
             return row
         }
+        for ghost in ghosts.values.sorted(by: { $0.item.name < $1.item.name })
+        where ghost.style.isMoving(at: now) && !scene.rows.isEmpty {
+            var item = ghost.item
+            item.style = ghost.style.sample(ghost.item.style, at: now)
+            item.content = item.content.map { Animator.inherit($0, from: ghost.item.style, as: item.style) }
+            let row = min(ghost.row, scene.rows.count - 1)
+            if let parent = ghost.parent,
+               Animator.insert(item, at: ghost.index, into: parent, in: &scene.rows[row].items) {
+                continue
+            }
+            scene.rows[row].items.insert(item, at: min(ghost.index, scene.rows[row].items.count))
+        }
         return scene
+    }
+
+    /// Put `item` among the children of the group called `parent`, wherever that group is.
+    private static func insert(_ item: SceneItem, at index: Int, into parent: String,
+                               in items: inout [SceneItem]) -> Bool {
+        for position in items.indices {
+            if items[position].name == parent {
+                items[position].children.insert(item, at: min(index, items[position].children.count))
+                return true
+            }
+            if insert(item, at: index, into: parent, in: &items[position].children) { return true }
+        }
+        return false
     }
 
     private func present(_ item: SceneItem, at now: CFTimeInterval) -> SceneItem {

@@ -71,10 +71,6 @@ public final class SharedSurfaces {
         return entry.surfaces[entry.current]
     }
 
-    public func holds(owner: UInt32) -> Bool {
-        entries.values.contains { $0.owner == owner }
-    }
-
     /// A producer has gone, and every surface it handed over goes with it.
     public func drop(owner: UInt32) {
         let names = entries.filter { $0.value.owner == owner }.map(\.key)

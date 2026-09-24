@@ -30,9 +30,11 @@ public struct Scene: Sendable {
     /// Depth-first over every item and every item inside a group.
     public var allItems: [SceneItem] { items.flatMap(\.selfAndDescendants) }
 
-    /// The item under a point, innermost first. A spacer is the space between items, not one.
+    /// The item under a point, innermost first. A spacer is the space between items, not one,
+    /// and an item on its way out is not there to be pointed at.
     public func item(at point: CGPoint) -> SceneItem? {
-        for item in allItems.reversed() where item.kind != .spacer && item.frame.contains(point) {
+        for item in allItems.reversed()
+        where item.kind != .spacer && !item.states.contains(.leaving) && item.frame.contains(point) {
             return item
         }
         return nil
@@ -69,6 +71,10 @@ public struct SceneItem: Sendable {
     public var priority: Int
     /// The item's config, so interaction can find `on-click` without another lookup.
     public var actions: Actions
+    /// What it transitions from when it appears (`@starting-style`), and to when it leaves
+    /// (`:leaving`); nil when the stylesheet says nothing, and it snaps.
+    public var starting: Style?
+    public var leaving: Style?
 
     public init(name: String, kind: Kind, style: Style, frame: CGRect = .zero,
                 content: SceneNode? = nil, children: [SceneItem] = [],

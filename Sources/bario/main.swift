@@ -9,7 +9,12 @@ if arguments.first == "--version" {
     note(barioVersion)
     exit(0)
 }
-if arguments.isEmpty || arguments.first == "-h" || arguments.first == "--help" {
+// Opened from Finder, with `open`, or as a login item, the executable gets no arguments and
+// launchd for a parent: that is a request to run the bar. The same empty command line typed in a
+// terminal is a request for help.
+let launchedAsApp = arguments.isEmpty && getppid() == 1
+
+if !launchedAsApp && (arguments.isEmpty || arguments.first == "-h" || arguments.first == "--help") {
     note(RunOptions.usage)
     note("")
     note(CLI.usage)
@@ -83,7 +88,7 @@ if options.diagnose {
                 continue
             }
             if let scene = try? await Shot.scene(bar: bar, display: display, theme: theme,
-                                                 dark: options.dark ?? false) {
+                                                 dark: options.dark ?? false, modes: options.modes) {
                 note(Shot.describe(scene))
             }
         }
@@ -96,7 +101,7 @@ if options.diagnose {
 }
 
 if let other = SingleInstance.claim(name: "bario") {
-    warn("already running\(other > 0 ? " as pid \(other)" : ""). Quit that one first, or `killall bario`.")
+    warn("already running\(other > 0 ? " as pid \(other)" : ""). Quit that one first, from its menu bar item.")
     exit(1)
 }
 

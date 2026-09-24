@@ -10,6 +10,7 @@ actually write; these are the same contracts with the sugar taken off.
 | `ring.wat` | a renderer module that registers a node type, measures it, and draws it |
 | `weather/` | the design's worked example, in Rust: `http`, permissions, state, render |
 | `surface/` | a native process drawing into shared IOSurfaces with Metal, shown with no copy |
+| `emira/` | another program's stream as a source, a mode that takes part of the bar over, a roll, and a Rust module rendering from the source |
 
 ## counter.wat
 
@@ -94,3 +95,82 @@ exits, its surfaces go with it.
 `SurfaceProducer` in BarioKit is the whole producing side: `next` is the surface to draw into,
 `present()` says it is drawn. A producer in another language sends the same Mach message
 (`bario_surfaces_hand_off` in `Sources/CBarioShim` is the reference) and the same `frame` line.
+
+## emira
+
+[emira](https://github.com/lightningboltemoji/emira)'s names guide in the bar: while the desktop
+changes, the app name rolls away and a row of the focused strip's columns rolls in, centred
+between the Apple logo and the notch, and it all rolls back 700ms after things settle. Nothing in
+bario knows about emira; this is config, a stylesheet, and `names/`, a module that reads what the
+source wrote. It needs an emira with `emira watch`.
+
+```sh
+rustup target add wasm32-unknown-unknown
+names/build.sh          # installs ~/.config/bario/modules/emira-names.wasm
+```
+
+Then in `config.kdl`:
+
+```kdl
+// emira's desktop, a snapshot per change, under `emira` in the store. No bubble.
+source "emira" module="exec" interval="watch" {
+  command "emira" "watch"
+}
+
+// On while the desktop moves, and for 700ms after the last change or movement.
+mode "guide" {
+  while "emira.moving"
+  changed "emira.focus" "emira.displays"
+  hold "700ms"
+}
+
+bar {
+  item "apple" module="text" { content { icon "apple.logo" } }
+  item "app" module="front-app" format="{name}" unless="guide"
+  spacer when="guide"
+  // Reads `emira`, asks for no permissions; `max` keeps the 7 columns nearest focus.
+  item "names" module="wasm" path="~/.config/bario/modules/emira-names.wasm" when="guide" {
+    config source="emira" max=7
+  }
+  spacer
+  notch
+  // …
+}
+```
+
+and in `style.css`:
+
+```css
+#app, #names {
+  transition: transform 280ms ease-in-out, opacity 220ms ease-in;
+}
+@starting-style {
+  #app, #names { transform: perspective(40pt) translateY(20pt) rotateX(-90deg); opacity: 0; }
+}
+#app:leaving, #names:leaving {
+  transform: perspective(40pt) translateY(-20pt) rotateX(90deg); opacity: 0;
+}
+#names         { padding: 3pt 5pt; }
+#names .column { padding: 0pt 7pt; border-radius: 12pt; }
+#names .focused { background: rgba(255, 255, 255, 0.16); }
+#names .app    { text-transform: lowercase; }
+#names .more   { opacity: 0.5; padding: 0pt 4pt; }
+```
+
+`bario --diagnose --mode guide` prints the arrangement without emira moving anything, and
+`--shot` draws it.
+
+With no Rust toolchain, `names.jq` makes the same row from a second `emira watch`, through the
+`jq` that ships with macOS; copy it to `~/.config/bario/emira/` and make the item
+
+```kdl
+  item "names" module="exec" interval="watch" when="guide" {
+    command "emira watch | jq -c --unbuffered --argjson max 7 -f ~/.config/bario/emira/names.jq"
+  }
+```
+
+The stylesheet is the same for both, since both draw the same tree.
+
+The pieces are general. `source` puts any program's stream in the store, `mode` turns a
+condition into an arrangement, and `@starting-style` and `:leaving` animate whatever comes and
+goes. The module and the filter are the only parts that know emira's schema.

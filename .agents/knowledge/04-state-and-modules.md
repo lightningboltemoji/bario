@@ -18,7 +18,11 @@ An actor holding one `JSONValue` object: item name → that item's subtree, exac
 the socket's `set`/`get` verbs address (`"battery"`, `"battery.pct"`).
 
 - `merge(_ patch:at:)` — deep merge, `null` deletes; the one semantics from increment 01.
+  Under an item's key, a `content` tree is replaced whole rather than merged.
 - `replace(_ value:at:)` — what `content` and a module's own render output use.
+- A write that changes no value is no write: no version, no notification, nothing dirty. One
+  that changes something dirties the readers of the paths that changed
+  ([21-sources-modes-arrivals.md](21-sources-modes-arrivals.md)).
 - `value(at:)`, `snapshot()`.
 - **Read tracking.** `render(state:)` is given a `StateReader` that records every path it
   touches. The store keeps those paths per item, so a write invalidates exactly the items
@@ -26,6 +30,8 @@ the socket's `set`/`get` verbs address (`"battery"`, `"battery.pct"`).
   hovering pointer or an animation from ever calling a module.
 - **Subscriptions.** `changes(matching:)` yields paths as they change, with `*` globbing, so
   the socket's `subscribe state:battery.*` and a module's own `subscribe` are one mechanism.
+  `values(of:)` yields the values at some paths, now and after every write that changes one,
+  in order; modes are decided from it.
 
 A write returns the set of item names whose cached render is now stale; the host re-renders
 exactly those.

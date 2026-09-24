@@ -12,15 +12,15 @@ public actor WasmModule: Module {
     private let pollBudget: Double
     private let interval: Double?
 
-    private var instance: (any WasmInstance)?
+    private var guest: Guest?
     private var wasm: [UInt8]?
     private var failure: String?
     private var backoff: Double = 1
     private var nextTimer: Double?
     private var subscriptions: [String] = []
     private var wantsFrame = false
-    /// Bytes a host import produced, waiting for the guest to `read` them.
-    private let pending = PendingBytes()
+    /// The guest call in flight, which the next one waits behind. See `run`.
+    private var queue: Task<Void, Never>?
 
     public init(context: ModuleContext, engine: (any WasmEngine)? = nil) throws {
         self.context = context
@@ -43,12 +43,12 @@ public actor WasmModule: Module {
     }
 
     public func stop() async {
-        instance = nil
+        guest = nil
     }
 
     @discardableResult
-    private func load() throws -> any WasmInstance {
-        if let instance { return instance }
+    private func load() throws -> Guest {
+        if let guest { return guest }
         let bytes: [UInt8]
         if let wasm {
             bytes = wasm
@@ -59,9 +59,15 @@ public actor WasmModule: Module {
             bytes = [UInt8](data)
             wasm = bytes
         }
-        let fresh = try engine.instantiate(wasm: bytes, imports: hostFunctions(),
-                                           memoryLimitBytes: memoryLimit)
-        instance = fresh
+        let pending = PendingBytes()
+        let control = Control()
+        let imports = WasmHost.imports(store: context.store, item: context.item,
+                                       permissions: permissions, pending: pending, control: control,
+                                       events: context.events)
+        let fresh = Guest(instance: try engine.instantiate(wasm: bytes, imports: imports,
+                                                           memoryLimitBytes: memoryLimit),
+                          control: control)
+        guest = fresh
         if fresh.hasExport("init") {
             _ = try fresh.callJSON("init", context.config["config"] ?? context.config)
         }
@@ -70,9 +76,11 @@ public actor WasmModule: Module {
     }
 
     /// A call that overran or trapped costs the instance: it is dropped and rebuilt, with
-    /// backoff, rather than left in whatever state it stopped in.
-    private func discard(_ reason: String) {
-        instance = nil
+    /// backoff, rather than left in whatever state it stopped in. A guest that was already
+    /// replaced has nothing left to cost.
+    private func discard(_ reason: String, _ failed: Guest? = nil) {
+        if let failed, failed !== guest { return }
+        guest = nil
         failure = reason
         backoff = min(30, backoff * 2)
     }
@@ -80,24 +88,23 @@ public actor WasmModule: Module {
     // MARK: - Module
 
     public func poll() async -> PollResult {
-        guard let instance = try? load(), instance.hasExport("poll") else {
+        guard let guest = try? load(), guest.hasExport("poll") else {
             return PollResult(nextIn: interval)
         }
         let state = await context.store.value(at: context.item) ?? .object([:])
         do {
-            let patch = try await run(instance, "poll", state, budget: pollBudget)
+            let patch = try await run("poll", state, budget: pollBudget)
             let next = nextTimer ?? interval
             nextTimer = nil
             return PollResult(patch: patch, nextIn: next)
         } catch {
             warn("\(context.item): \(error)")
-            discard("\(error)")
             return PollResult(nextIn: max(interval ?? 0, backoff))
         }
     }
 
     public func onEvent(_ event: ModuleEvent) async -> JSONValue? {
-        guard let instance = try? load(), instance.hasExport("on_event") else { return nil }
+        guard let guest = try? load(), guest.hasExport("on_event") else { return nil }
         // A module only hears what it subscribed to, plus its own clicks.
         let interested = subscriptions.isEmpty
             || subscriptions.contains { SocketTopic($0).matches("\(event.name):\(context.item)") }
@@ -106,23 +113,22 @@ public actor WasmModule: Module {
 
         let payload = JSONValue.object(["name": .string(event.name), "payload": event.payload])
         do {
-            return try await run(instance, "on_event", payload, budget: renderBudget)
+            return try await run("on_event", payload, budget: renderBudget)
         } catch {
             warn("\(context.item): \(error)")
-            discard("\(error)")
             return nil
         }
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {
-        if let failure, instance == nil, wasm == nil {
+        if let failure, guest == nil, wasm == nil {
             throw ModuleError(failure)
         }
-        let instance = try load()
-        let own = state.own
+        try load()
+        guard let value = try await run("render", state.own, budget: renderBudget) else {
+            return RenderResult()
+        }
         do {
-            let value = try await run(instance, "render", own, budget: renderBudget)
-            guard let value else { return RenderResult() }
             return try JSONDecoder().decode(RenderResult.self, from: value.encoded())
         } catch {
             discard("\(error)")
@@ -130,22 +136,39 @@ public actor WasmModule: Module {
         }
     }
 
-    /// Runs one guest call under a budget. The budget is enforced by abandoning the wait, not
-    /// by interrupting the guest — see .agents/knowledge/13-wasm.md for why that is honest
-    /// rather than ideal.
-    private func run(_ instance: any WasmInstance, _ name: String, _ payload: JSONValue,
-                     budget: Double) async throws -> JSONValue? {
-        let box = UncheckedBox(instance)
-        defer { drainControl() }
-        return try await withBudget(budget) {
-            try box.value.callJSON(name, payload)
+    /// Runs one guest call under a budget, after every call before it. An instance is one
+    /// thread's worth of stack and heap, and awaiting the budget lets the actor take the next
+    /// call — an event, a render — before this one is done; without the queue the two run in
+    /// the same instance at once, and the guest's allocator corrupts itself.
+    ///
+    /// The budget is enforced by abandoning the wait, not by interrupting the guest — see
+    /// .agents/knowledge/13-wasm.md for why that is honest rather than ideal. So a call that
+    /// overran discards its instance before the queue moves on: the guest still running in it
+    /// is left alone, and the next call gets a fresh one.
+    private func run(_ name: String, _ payload: JSONValue, budget: Double) async throws -> JSONValue? {
+        let previous = queue
+        let call = Task { () async throws -> JSONValue? in
+            await previous?.value
+            return try await self.call(name, payload, budget: budget)
+        }
+        queue = Task { _ = try? await call.value }
+        return try await call.value
+    }
+
+    private func call(_ name: String, _ payload: JSONValue, budget: Double) async throws -> JSONValue? {
+        let guest = try load()
+        defer { drainControl(guest.control) }
+        do {
+            return try await withBudget(budget) { try guest.callJSON(name, payload) }
+        } catch {
+            discard("\(error)", guest)
+            throw error
         }
     }
 
     /// Everything the guest asked for while it was running: a new poll interval, topics it
     /// wants to hear about, events it emitted, a frame it wants drawn.
-    private func drainControl() {
-        guard let control else { return }
+    private func drainControl(_ control: Control) {
         if let timer = control.timer {
             nextTimer = timer
             control.timer = nil
@@ -167,15 +190,27 @@ public actor WasmModule: Module {
 
     // MARK: - Host imports
 
-    private func hostFunctions() -> [WasmHostFunction] {
-        let control = Control()
-        self.control = control
-        return WasmHost.imports(store: context.store, item: context.item,
-                                permissions: permissions, pending: pending, control: control,
-                                events: context.events)
-    }
+    /// One instance, and the host-side state only it may touch: bytes an import stashed for
+    /// it to `read`, and what it asked for. Nothing is shared with the instance that replaces
+    /// it, so a call abandoned over budget, still running, cannot answer the next one's `get`.
+    final class Guest: @unchecked Sendable {
+        private let instance: any WasmInstance
+        let control: Control
+        /// A second guard on what `run`'s queue already ensures.
+        private let lock = NSLock()
 
-    private var control: Control?
+        init(instance: any WasmInstance, control: Control) {
+            self.instance = instance
+            self.control = control
+        }
+
+        func hasExport(_ name: String) -> Bool { instance.hasExport(name) }
+
+        func callJSON(_ name: String, _ payload: JSONValue) throws -> JSONValue? {
+            lock.lock(); defer { lock.unlock() }
+            return try instance.callJSON(name, payload)
+        }
+    }
 
     /// What the guest asked for during a call, collected out of the host functions.
     public final class Control: @unchecked Sendable {
@@ -292,11 +327,4 @@ final class PendingBytes: @unchecked Sendable {
         _ = semaphore.wait(timeout: .now() + 1)
         return answer
     }
-}
-
-/// Carries a non-Sendable instance into a detached budgeted call. Safe because the module
-/// actor is the only thing that ever touches it, one call at a time.
-struct UncheckedBox<T>: @unchecked Sendable {
-    let value: T
-    init(_ value: T) { self.value = value }
 }

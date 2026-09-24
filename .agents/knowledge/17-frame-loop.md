@@ -79,6 +79,11 @@ layer tree and never draws; `BarCover` is the window-backed `BarSurface`.
   (PLAN.md D3), and a hole alone sets the mask. Pointer moves far from every bar do not even
   schedule a frame. *(This rule was "repaint only what changed" while the painter drew the bar
   whole; see [18-compositor.md](18-compositor.md).)*
+- **An item on its way out is presented, never laid out and never hit.** Ghosts live in the
+  animator, not in the target scene, so layout and `before` never see them; `Scene.item(at:)`
+  skips `.leaving`. A ghost keeps its name, so it keeps its layers ([21-sources-modes-arrivals.md]).
+- **A mode is an input like `dark`.** `ModeTracker` flips `FrameLoop.modes` and invalidates style
+  everywhere; its holds run on the scheduler's `after`, so tests drive them with the clock.
 - **Hover is per bar** (`ItemRef`), and so is the click reveal (`revealed`). Two displays both
   showing `clock` must not hover together, and sliding onto the next display is not a click.
 - **Taking the pointer is a frame output.** A bar is interactive while Option is held with the

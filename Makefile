@@ -35,15 +35,25 @@ SHELL   := /bin/bash
 LD_NOISE = ld: warning: search path '$(DEVDIR)/Developer/.*' not found
 QUIET    = 2> >(grep -vE "$(LD_NOISE)" >&2)
 
-.PHONY: build release test clean app zip dist install uninstall print-version
+.PHONY: build release test clean app icon zip dist install uninstall print-version
 build:
 	swift build $(QUIET)
 
 release:
 	swift build -c release $(QUIET)
 
+# Two passes. Most of the suite is pure — layout, style, pixels, a frame loop on a clock the test
+# moves — and runs in parallel. The suites in REAL_TIME wait on something real instead: the kernel's
+# file events, processes, sockets, a Mach port, module tasks on real budgets. In parallel with the
+# rest, they share the machine and its one main thread with every other test in the run, and on a
+# hosted runner, several times slower than a laptop, a wait that takes a millisecond here can take
+# seconds. So they run afterwards, one at a time. A test that waits on the real world belongs in a
+# suite listed here, and waits the way Tests/BarioKitTests/Waiting.swift says.
+REAL_TIME := \.(FileWatcherTests|ExecTests|SocketServerTests|SocketClientTests|SurfaceHandOffTests|ModuleHostTests|WasmModuleTests)/
+
 test:
-	swift test $(TEST_FLAGS) $(QUIET)
+	swift test $(TEST_FLAGS) --skip '$(REAL_TIME)' $(QUIET)
+	swift test $(TEST_FLAGS) --skip-build --no-parallel --filter '$(REAL_TIME)' $(QUIET)
 
 clean:
 	swift package clean
@@ -98,10 +108,45 @@ else
   SIGN_FALLBACK :=
 endif
 
+# --- The app icon --------------------------------------------------------------------------------
+# `Resources/bario.icon` is the source: the glasses from `bario.svg` as two layer SVGs — the frame,
+# thickened by a stroke so Liquid Glass has an edge to catch, and the lenses filled half-white — and
+# the `icon.json` that composes them over the background. Each is its own group with translucency on,
+# so the frame frosts and the plate shows through the lenses as tinted glass. It is an Icon Composer
+# document, so it can be opened and adjusted there directly.
+#
+# macOS does not read that format itself: `actool` compiles it into an `Assets.car`, which macOS 26
+# reads through `CFBundleIconName`, and a legacy `bario.icns`, which is what macOS 14 and 15 read
+# through `CFBundleIconFile`. `LSMinimumSystemVersion` is 14.0, so both are kept.
+#
+# **`actool` lives in Xcode, not the Command Line Tools**, so a CLT-only machine cannot compile the
+# icon at all. That is not worth failing a build over — a bundle without an icon runs exactly as well,
+# and the release runners have Xcode — so this compiles the icon when it can and says so when it
+# cannot. `xcrun --find` is the probe: `/usr/bin/actool` exists either way and only errors when asked
+# to do something.
+#
+# The partial plist actool insists on writing names the icon, which `Resources/Info.plist` already
+# does. It goes to $(DIST) and is not copied.
+ICON   := Resources/$(APP_NAME).icon
+ACTOOL := $(shell xcrun --find actool 2>/dev/null)
+
+icon:
+ifeq ($(ACTOOL),)
+	@echo "warning: no actool — needs Xcode, not Command Line Tools. Bundle gets no icon."
+else
+	@$(ACTOOL) $(ICON) --compile $(CONTENTS)/Resources \
+		--app-icon $(APP_NAME) --include-all-app-icons \
+		--platform macosx --target-device mac \
+		--minimum-deployment-target 14.0 --development-region en \
+		--output-partial-info-plist $(DIST)/icon-partial.plist \
+		--output-format human-readable-text --notices --warnings --errors
+endif
+
 app: release
 	rm -rf $(BUNDLE)
 	mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
 	cp Resources/Info.plist $(CONTENTS)/Info.plist
+	@$(MAKE) --no-print-directory icon
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" \
 	                        -c "Set :CFBundleVersion $(BUILD)" $(CONTENTS)/Info.plist
 	cp $(RELEASE)/$(APP_NAME) $(CONTENTS)/MacOS/$(APP_NAME)
@@ -129,7 +174,7 @@ install: app
 	rm -rf /Applications/Bario.app
 	cp -R $(BUNDLE) /Applications/
 	@echo "installed /Applications/Bario.app"
-	@echo "run it with: open -a Bario  (or /Applications/Bario.app/Contents/MacOS/$(APP_NAME) --run)"
+	@echo "run it with: open -a Bario  — quit it from its menu bar item"
 
 uninstall:
 	rm -rf /Applications/Bario.app

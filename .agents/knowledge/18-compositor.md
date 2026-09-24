@@ -124,6 +124,11 @@ turn. Keys are `bario.<name>.<path>`.
 - **No frames.** An animation never makes a bar `moving`. A layer too faint to see is hidden,
   except when it animates, since the animation may be what shows it.
 
+A layer whose style turns in depth (`rotateX`, `rotateY`, now or in a keyframe) is given
+`zPosition` `Motion.lift`. Measured: siblings share one 3D space, and a box tipped out of the
+bar's plane is otherwise cut where it passes behind the backdrop layer at z = 0
+([21-sources-modes-arrivals.md](21-sources-modes-arrivals.md)).
+
 ## Shared surfaces (step 3c)
 
 A native process draws with Metal into a pair of IOSurfaces and bario shows the one it drew

@@ -78,7 +78,10 @@ Subtleties that matter:
   that inherited it, not text that set its own.
 
 An item that has just appeared, or receives its first content, is placed at its target; its
-neighbours slide. A bar that is not on screen takes every scene without easing.
+neighbours slide. It can still transition in, from its `@starting-style`, and an item that has
+left can transition out, to its `:leaving` style, as a ghost the animator presents where it was
+([21-sources-modes-arrivals.md](21-sources-modes-arrivals.md)). A bar that is not on screen takes
+every scene without easing.
 
 ## Tests
 

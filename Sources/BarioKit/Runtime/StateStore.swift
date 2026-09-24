@@ -13,15 +13,23 @@ public actor StateStore {
     private var pending: Set<String> = []
     /// Bumped by every write, so a render can tell whether what it read changed while it ran.
     private var version = 0
-    /// The most recent writes, oldest first, for exactly that question.
-    private var recentWrites: [(version: Int, path: String)] = []
+    /// The most recent writes, oldest first, each with the paths it changed, for exactly that
+    /// question.
+    private var recentWrites: [(version: Int, paths: [String])] = []
     private static let writeHistory = 256
     private var dirtyHandler: (@Sendable (Set<String>) -> Void)?
     private var watchers: [UUID: Watcher] = [:]
+    private var valueWatchers: [UUID: ValueWatcher] = [:]
 
     private struct Watcher {
         var pattern: TopicPattern
         var continuation: AsyncStream<StateChange>.Continuation
+    }
+
+    private struct ValueWatcher {
+        var paths: [String]
+        var last: [JSONValue?]
+        var continuation: AsyncStream<[JSONValue?]>.Continuation
     }
 
     public init() {}
@@ -42,34 +50,53 @@ public actor StateStore {
     // MARK: - Writing
 
     /// Deep merge, the socket's `set` semantics. Returns the items whose render is now stale.
+    ///
+    /// Under an item's key, `content` is a content tree, and is replaced whole: two trees merged
+    /// key by key are neither, and a row followed by a text would hold two kinds.
     @discardableResult
     public func merge(_ patch: JSONValue, at path: String = "") -> Set<String> {
-        root = path.isEmpty ? root.merging(patch) : root.merging(patch, at: path)
-        return changed(at: path, value: patch)
+        var next = path.isEmpty ? root.merging(patch) : root.merging(patch, at: path)
+        if JSONValue.split(path).count == 1, let tree = patch["content"], !tree.isNull {
+            next = next.setting("\(path).content", to: tree)
+        }
+        return write(next, at: path, value: patch)
     }
 
     /// Replace a subtree wholesale, the socket's `content` semantics.
     @discardableResult
     public func replace(_ value: JSONValue, at path: String) -> Set<String> {
-        root = root.setting(path, to: value)
-        return changed(at: path, value: value)
+        write(root.setting(path, to: value), at: path, value: value)
     }
 
-    private func changed(at path: String, value: JSONValue) -> Set<String> {
+    /// A write is what it changed: one that leaves every value as it was invalidates nothing,
+    /// notifies nobody and is not remembered, so a script printing the same line every second
+    /// costs no render.
+    private func write(_ next: JSONValue, at path: String, value: JSONValue) -> Set<String> {
+        let paths = JSONValue.differences(from: root.value(at: path), to: next.value(at: path), at: path)
+        guard !paths.isEmpty else { return [] }
+        root = next
+        return changed(paths, written: path, value: value)
+    }
+
+    private func changed(_ paths: [String], written path: String, value: JSONValue) -> Set<String> {
         version += 1
-        recentWrites.append((version, path))
+        recentWrites.append((version, paths))
         if recentWrites.count > StateStore.writeHistory {
             recentWrites.removeFirst(recentWrites.count - StateStore.writeHistory)
         }
 
         var dirty: Set<String> = []
-        for (item, paths) in dependencies where paths.contains(where: { overlaps($0, path) }) {
+        for (item, reads) in dependencies
+        where reads.contains(where: { read in paths.contains { overlaps(read, $0) } }) {
             dirty.insert(item)
         }
         // An item always depends on its own subtree, even before its first render.
-        if let owner = path.split(separator: ".").first.map(String.init) { dirty.insert(owner) }
+        for changed in paths {
+            if let owner = changed.split(separator: ".").first.map(String.init) { dirty.insert(owner) }
+        }
 
         notify(path: path, value: value)
+        notifyValues()
         if !dirty.isEmpty {
             pending.formUnion(dirty)
             if let handler = dirtyHandler {
@@ -107,7 +134,7 @@ public actor StateStore {
         // Writes older than the history kept cannot be checked, so assume the worst.
         guard let oldest = recentWrites.first, oldest.version <= snapshot + 1 else { return true }
         return recentWrites.contains { write in
-            write.version > snapshot && paths.contains { overlaps($0, write.path) }
+            write.version > snapshot && paths.contains { read in write.paths.contains { overlaps(read, $0) } }
         }
     }
 
@@ -153,6 +180,35 @@ public actor StateStore {
 
     private func removeWatcher(_ id: UUID) {
         watchers.removeValue(forKey: id)
+    }
+
+    /// The values at `paths` now, and again after every write that changes any of them. Every
+    /// value they pass through is yielded in order, so a change and its undoing are two
+    /// changes rather than none; what modes are decided from.
+    public func values(of paths: [String]) -> AsyncStream<[JSONValue?]> {
+        let id = UUID()
+        let now = paths.map { root.value(at: $0) }
+        return AsyncStream { continuation in
+            continuation.yield(now)
+            valueWatchers[id] = ValueWatcher(paths: paths, last: now, continuation: continuation)
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeValueWatcher(id) }
+            }
+        }
+    }
+
+    private func removeValueWatcher(_ id: UUID) {
+        valueWatchers.removeValue(forKey: id)
+    }
+
+    private func notifyValues() {
+        for (id, var watcher) in valueWatchers {
+            let now = watcher.paths.map { root.value(at: $0) }
+            guard now != watcher.last else { continue }
+            watcher.last = now
+            valueWatchers[id] = watcher
+            watcher.continuation.yield(now)
+        }
     }
 
     private func notify(path: String, value: JSONValue) {

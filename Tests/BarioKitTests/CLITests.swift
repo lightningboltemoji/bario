@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import BarioKit
 
+/// Real time: a real socket and a real server, so these are in the Makefile's `REAL_TIME` and run
+/// in the serial pass.
 @Suite("Socket client")
 struct SocketClientTests {
     func withServer(_ body: @escaping @Sendable (String, StateStore) async throws -> Void) async throws {
@@ -82,22 +84,27 @@ struct SocketClientTests {
             let watcher = TestClient(path: path)
             try await watcher.connect()
             let task = Task {
-                try? await watcher.watch(["state:ci.*"], timeout: 5) { event in
+                try? await watcher.watch(["state:ci.*"], timeout: 30) { event in
                     received.set(event)
                     return false
                 }
             }
-            try await Task.sleep(nanoseconds: 250_000_000)
 
             let writer = TestClient(path: path)
             try await writer.connect()
             defer { writer.close() }
-            try await writer.send("set", ["target": .string("ci"), "data": .object(["status": .string("green")])])
-
-            // The store publishes, the server routes, the watcher prints.
-            for _ in 0..<40 where received.value == nil {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
+            // The watch subscribes from inside a blocking call, so there is no telling from here
+            // when it has: write until it hears one. Each write is a new value — one that changes
+            // nothing is not published at all. The store publishes, the server routes, the
+            // watcher prints.
+            var attempt = 0
+            #expect(try await eventually {
+                attempt += 1
+                try await writer.send("set", ["target": .string("ci"),
+                                              "data": .object(["status": .string("green"),
+                                                               "attempt": .number(Double(attempt))])])
+                return received.value != nil
+            })
             await task.value
             watcher.close()
             #expect(received.value?["event"]?.stringValue == "state")

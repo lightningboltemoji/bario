@@ -192,24 +192,35 @@ public enum Easing: Sendable, Hashable {
 
 /// `transform: translate(4pt, -2pt) rotate(45deg) scale(1.2)`. Kept as its parts rather than a
 /// matrix, because the parts are what eases: a matrix halfway through a full turn is no turn at
-/// all. The parts apply in one order whatever order they are written in: scale, then rotate,
-/// then translate, all about the centre of the box. DESIGN.md §7, §9.
+/// all. The parts apply in one order whatever order they are written in: scale, then rotateY,
+/// rotateX and rotate, then perspective, then translate, all about the centre of the box.
+/// DESIGN.md §7, §9.
 public struct Transform: Sendable, Hashable {
     /// Points; y runs down, as in CSS.
     public var translateX: Double = 0
     public var translateY: Double = 0
     /// Degrees, clockwise, as in CSS.
     public var rotate: Double = 0
+    /// Degrees about the horizontal and vertical axes: positive tips the top, or the right,
+    /// away from the viewer, as in CSS. Flat without `perspective`.
+    public var rotateX: Double = 0
+    public var rotateY: Double = 0
     public var scaleX: Double = 1
     public var scaleY: Double = 1
+    /// How far the viewer is from the box, in points; 0 is `none`.
+    public var perspective: Double = 0
 
     public init(translateX: Double = 0, translateY: Double = 0, rotate: Double = 0,
-                scaleX: Double = 1, scaleY: Double = 1) {
+                rotateX: Double = 0, rotateY: Double = 0,
+                scaleX: Double = 1, scaleY: Double = 1, perspective: Double = 0) {
         self.translateX = translateX
         self.translateY = translateY
         self.rotate = rotate
+        self.rotateX = rotateX
+        self.rotateY = rotateY
         self.scaleX = scaleX
         self.scaleY = scaleY
+        self.perspective = perspective
     }
 
     public static let identity = Transform()
@@ -709,13 +720,18 @@ enum CSSValue {
         var transform = Transform()
         var seen: Set<String> = []
         for component in components {
-            guard case .function(let name, let args) = component else {
+            guard case .function(let written, let args) = component else {
                 throw CSSError("'\(component.text)' is not a transform; use translate(), rotate() or scale()",
                                at: position)
             }
+            let name = written == "rotateZ" ? "rotate" : written
+            if name.hasPrefix("translate"), seen.contains(where: { $0.hasPrefix("translate") }),
+               name == "translate" || seen.contains("translate") {
+                throw CSSError("write translate(x, y) or translateX() and translateY(), not both", at: position)
+            }
             guard seen.insert(name).inserted else {
-                throw CSSError("transform takes \(name)() once; the parts apply as scale, rotate, "
-                               + "then translate, whatever order they are written in", at: position)
+                throw CSSError("transform takes \(written)() once; the parts apply as scale, rotation, "
+                               + "perspective, then translate, whatever order they are written in", at: position)
             }
             switch name {
             case "translate":
@@ -724,9 +740,24 @@ enum CSSValue {
                 }
                 transform.translateX = try length(args[0], at: position)
                 if args.count > 1 { transform.translateY = try length(args[1], at: position) }
+            case "translateX", "translateY":
+                guard args.count == 1 else { throw CSSError("\(name)() takes one length", at: position) }
+                let distance = try length(args[0], at: position)
+                if name == "translateX" { transform.translateX = distance } else { transform.translateY = distance }
             case "rotate":
-                guard args.count == 1 else { throw CSSError("rotate() takes one angle", at: position) }
+                guard args.count == 1 else { throw CSSError("\(written)() takes one angle", at: position) }
                 transform.rotate = try angle(args[0], at: position)
+            case "rotateX", "rotateY":
+                guard args.count == 1 else { throw CSSError("\(name)() takes one angle", at: position) }
+                let degrees = try angle(args[0], at: position)
+                if name == "rotateX" { transform.rotateX = degrees } else { transform.rotateY = degrees }
+            case "perspective":
+                guard args.count == 1 else { throw CSSError("perspective() takes one length", at: position) }
+                let distance = try length(args[0], at: position)
+                guard distance > 0 else {
+                    throw CSSError("perspective() is the distance to the viewer, so more than 0", at: position)
+                }
+                transform.perspective = distance
             case "scale":
                 guard (1...2).contains(args.count) else {
                     throw CSSError("scale() takes one factor, or an x and a y", at: position)
@@ -734,8 +765,8 @@ enum CSSValue {
                 transform.scaleX = try number(args[0], at: position)
                 transform.scaleY = args.count > 1 ? try number(args[1], at: position) : transform.scaleX
             default:
-                throw CSSError("'\(name)()' is not a transform; the ones that exist are translate(), "
-                               + "rotate() and scale()", at: position)
+                throw CSSError("'\(written)()' is not a transform; the ones that exist are translate(), translateX(), "
+                               + "translateY(), rotate(), rotateX(), rotateY(), scale() and perspective()", at: position)
             }
         }
         return transform

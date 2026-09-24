@@ -47,7 +47,11 @@ re-cascade ([17-frame-loop.md](17-frame-loop.md)).
 - `CFBundleIdentifier` `zip.tanner.bario` — the stable identity Screen Recording permission
   attaches to (§13). The probe's terminal-attached permission is a dev convenience only;
   granted to a terminal, it is granted to everything that terminal ever launches.
-- `LSUIElement` true, so there is no Dock icon and no menu of our own.
+- `LSUIElement` true, so there is no Dock icon and no app menu. The menu bar item
+  (`MenuBarItem`) is the whole GUI: hide/show the bars (the frame loop's `hidden` input), reload,
+  open the config folder, open at login (`SMAppService.mainApp`), quit.
+- `CFBundleIconName` / `CFBundleIconFile`, naming the icon `make icon` compiles from
+  `Resources/bario.icon` with `actool` — which needs Xcode, so a CLT-only build has no icon.
 - `NSLocationWhenInUseUsageDescription`, without which macOS never shows the prompt the
   `wifi` module needs for an SSID, and the module quietly stays SSID-less forever.
 - `CFBundleShortVersionString` and `CFBundleVersion`, stamped by `make app` from `git describe`
@@ -55,7 +59,9 @@ re-cascade ([17-frame-loop.md](17-frame-loop.md)).
   back through `Bundle.main`, which is why the version is the git tag and no Swift file holds a
   number — and why a binary run out of `.build`, with no bundle around it, reports `dev`.
 
-`make install` copies it to `/Applications`. The bundle runs `bario --run`; every other verb
+`make install` copies it to `/Applications`. Opened from Finder, `open` or at login, the
+executable gets no arguments and launchd (pid 1) as its parent, and `main.swift` takes that as
+`--run`; an empty command line from a shell still prints help. The bundle runs the bar; every other verb
 still works from the binary inside it, which is what makes `bario set …` from a shell script
 talk to the same process.
 

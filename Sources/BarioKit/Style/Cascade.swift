@@ -19,16 +19,19 @@ public struct Cascade: Sendable {
     }
 
     /// `path` runs root-first and ends at the node being styled. `parent` is that path's
-    /// second-to-last resolved style, or nil at the root.
+    /// second-to-last resolved style, or nil at the root. `starting` adds the rules written in
+    /// `@starting-style`, which take part in no other cascade.
     public func style(for path: [StyleNode],
                       inheriting parent: Style? = nil,
-                      inline: [Declaration] = []) -> Result {
+                      inline: [Declaration] = [],
+                      starting: Bool = false) -> Result {
         var style = parent?.inherited() ?? Style.initial
         var diagnostics: [CSSError] = []
 
         var matched: [(declaration: Declaration, key: SortKey)] = []
         for rule in stylesheet.rules {
             if let media = rule.media, !media.matches(dark: dark) { continue }
+            if rule.starting && !starting { continue }
             guard let specificity = rule.selectors
                 .filter({ $0.matches(path) })
                 .map(\.specificity)
@@ -91,6 +94,29 @@ public struct Cascade: Sendable {
         }
 
         return Result(style: style, diagnostics: diagnostics)
+    }
+
+    /// What a node that has just appeared transitions from, or nil when no `@starting-style`
+    /// rule matches it.
+    public func startingStyle(for path: [StyleNode], inheriting parent: Style? = nil,
+                              inline: [Declaration] = []) -> Style? {
+        guard stylesheet.rules.contains(where: { rule in
+            rule.starting && rule.selectors.contains { $0.matches(path) }
+        }) else { return nil }
+        return style(for: path, inheriting: parent, inline: inline, starting: true).style
+    }
+
+    /// What a node transitions to once it has left, or nil when no rule names it `:leaving`.
+    public func leavingStyle(for path: [StyleNode], inheriting parent: Style? = nil,
+                             inline: [Declaration] = []) -> Style? {
+        guard var node = path.last else { return nil }
+        node.states.insert(.leaving)
+        let leaving = Array(path.dropLast()) + [node]
+        guard stylesheet.rules.contains(where: { rule in
+            !rule.starting && rule.media.map { $0.matches(dark: dark) } != false
+                && rule.selectors.contains { $0.parts.last?.states.contains(.leaving) == true && $0.matches(leaving) }
+        }) else { return nil }
+        return style(for: leaving, inheriting: parent, inline: inline).style
     }
 
     /// A keyframes rule's stops for one node, sorted, with `var()` resolved against it.

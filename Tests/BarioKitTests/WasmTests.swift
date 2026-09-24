@@ -200,6 +200,8 @@ struct WasmEngineTests {
     }
 }
 
+/// Real time: guests write to the store from their own tasks and run against render budgets, so
+/// these are in the Makefile's `REAL_TIME` and run in the serial pass.
 @Suite("WASM modules")
 struct WasmModuleTests {
     func module(_ wasm: [UInt8], config: JSONValue = .object([:]), store: StateStore = StateStore())
@@ -259,10 +261,7 @@ struct WasmModuleTests {
         defer { try? FileManager.default.removeItem(at: url) }
         await module.start()
         _ = try await module.render(await store.reader(for: "weather"))
-        for _ in 0..<20 where await store.value(at: "weather.pushed") == nil {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
-        #expect(await store.value(at: "weather.pushed")?.boolValue == true)
+        #expect(await eventually { await store.value(at: "weather.pushed")?.boolValue == true })
     }
 
     @Test("the get import reads state back, relative to the item")
@@ -312,6 +311,47 @@ struct WasmModuleTests {
         #expect(message.contains("budget"))
     }
 
+    @Test("calls into one instance never overlap, however many arrive at once")
+    func oneCallAtATime() async throws {
+        let patch = #"{"ok":true}"#
+        let content = #"{"content":{"text":"x"}}"#
+        // Every export traps if another is already inside the instance, then spins long enough
+        // for one to try. A guest's allocator and stack are no more re-entrant than this.
+        let wasm = try Guest.build("""
+          (data (i32.const 0) "\(Guest.escape(patch))")
+          (data (i32.const 64) "\(Guest.escape(content))")
+          (global $busy (mut i32) (i32.const 0))
+          (func $inside
+            (local $i i32)
+            (if (global.get $busy) (then unreachable))
+            (global.set $busy (i32.const 1))
+            (loop $spin
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br_if $spin (i32.lt_u (local.get $i) (i32.const 20000))))
+            (global.set $busy (i32.const 0)))
+          (func (export "on_event") (param i32 i32) (result i64)
+            (call $inside)
+            (call $pack (i32.const 0) (i32.const \(patch.utf8.count))))
+          (func (export "render") (param i32 i32) (result i64)
+            (call $inside)
+            (call $pack (i32.const 64) (i32.const \(content.utf8.count))))
+        """)
+        // Generous budgets: what is under test is overlap, not speed.
+        let (module, store, url) = try module(wasm, config: .object(["render-budget": .number(10)]))
+        defer { try? FileManager.default.removeItem(at: url) }
+        await module.start()
+        let reader = await store.reader(for: "weather")
+
+        let failures = await withTaskGroup(of: Bool.self) { group in
+            for _ in 0..<8 {
+                group.addTask { await module.onEvent(ModuleEvent(name: "state", payload: .null)) == nil }
+                group.addTask { (try? await module.render(reader)) == nil }
+            }
+            return await group.reduce(0) { $0 + ($1 ? 1 : 0) }
+        }
+        #expect(failures == 0)
+    }
+
     @Test("a gated import that was not granted says which permission is missing")
     func permissionsDenied() async throws {
         let request = #"{"url":"https://example.com"}"#
@@ -336,9 +376,7 @@ struct WasmModuleTests {
         defer { try? FileManager.default.removeItem(at: url) }
         await module.start()
         _ = try await module.render(await store.reader(for: "weather"))
-        for _ in 0..<25 where await store.value(at: "weather.error") == nil {
-            try? await Task.sleep(nanoseconds: 20_000_000)
-        }
+        _ = await eventually { await store.value(at: "weather.error") != nil }
         let error = await store.value(at: "weather.error")?.stringValue ?? ""
         #expect(error.contains("'net' permission"))
         #expect(error.contains("permissions \"net\""))

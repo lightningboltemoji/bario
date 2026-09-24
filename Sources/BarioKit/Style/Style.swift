@@ -180,11 +180,17 @@ extension Style {
                                 color: Color.blend(from.color, to.color, t))
             }
         case .transform:
+            // `none` is no distance to ease from, so a perspective on one side holds for the
+            // whole way; with no rotation left at the end, it shows nothing.
+            let (from, to) = (a.transform.perspective, transform.perspective)
             transform = Transform(translateX: lerp(a.transform.translateX, transform.translateX, t),
                                   translateY: lerp(a.transform.translateY, transform.translateY, t),
                                   rotate: lerp(a.transform.rotate, transform.rotate, t),
+                                  rotateX: lerp(a.transform.rotateX, transform.rotateX, t),
+                                  rotateY: lerp(a.transform.rotateY, transform.rotateY, t),
                                   scaleX: lerp(a.transform.scaleX, transform.scaleX, t),
-                                  scaleY: lerp(a.transform.scaleY, transform.scaleY, t))
+                                  scaleY: lerp(a.transform.scaleY, transform.scaleY, t),
+                                  perspective: from > 0 && to > 0 ? lerp(from, to, t) : max(from, to))
         default:
             break
         }

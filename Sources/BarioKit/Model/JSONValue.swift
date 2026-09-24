@@ -76,6 +76,30 @@ extension JSONValue {
     static func split(_ path: String) -> [String] {
         path.split(separator: ".", omittingEmptySubsequences: true).map(String.init)
     }
+
+    /// Whether a condition over this value holds: `false`, `null`, zero and anything empty do
+    /// not, and everything else does.
+    public var isTruthy: Bool {
+        switch self {
+        case .null: return false
+        case .bool(let b): return b
+        case .number(let n): return n != 0
+        case .string(let s): return !s.isEmpty
+        case .array(let a): return !a.isEmpty
+        case .object(let o): return !o.isEmpty
+        }
+    }
+
+    /// The paths at or under `path` whose values differ between two versions of it, named as
+    /// shallowly as they can be: a key added, removed or changed inside an object, and the
+    /// whole value when either side is anything else.
+    static func differences(from old: JSONValue?, to new: JSONValue?, at path: String) -> [String] {
+        guard old != new else { return [] }
+        guard case .object(let a)? = old, case .object(let b)? = new else { return [path] }
+        return Set(a.keys).union(b.keys).sorted().flatMap { key in
+            differences(from: a[key], to: b[key], at: path.isEmpty ? key : "\(path).\(key)")
+        }
+    }
 }
 
 // MARK: - Writing

@@ -33,6 +33,9 @@ Stdout is either plain text or, if it parses, JSON, which is written into the st
   `percentage`, and `class` (a string or a list) becomes the item's state classes. Adopting
   that vocabulary means existing waybar scripts work unchanged.
 
+A `content` key is a whole content tree, and the item shows it, as a `data` item shows one
+pushed over the socket. The store replaces it whole on every line.
+
 Every run also writes `exit-code`, and `stderr` when there was any. A non-zero exit adds the
 `.error` class and puts stderr in the tooltip rather than replacing the last good content —
 the same rule modules follow everywhere else.

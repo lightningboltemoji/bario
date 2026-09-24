@@ -20,8 +20,10 @@ public struct SceneBuilder: Sendable {
                       display: DisplayInfo,
                       items: [ItemConfig],
                       states: [String: ModuleHost.ItemState],
-                      interaction: Interaction = Interaction()) -> Scene {
-        layout.layout(styler.style(bar: bar, items: items, states: states, interaction: interaction),
+                      interaction: Interaction = Interaction(),
+                      modes: Set<String> = []) -> Scene {
+        layout.layout(styler.style(bar: bar, items: items, states: states, interaction: interaction,
+                                   modes: modes),
                       on: display)
     }
 }

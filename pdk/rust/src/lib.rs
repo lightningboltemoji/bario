@@ -126,6 +126,9 @@ fn send(value: &Value) -> (i32, i32) {
         return (0, 0);
     }
     let ptr = alloc(bytes.len() as i32);
+    if ptr == 0 {
+        return (0, 0);
+    }
     unsafe {
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, bytes.len());
     }
@@ -139,6 +142,10 @@ fn receive(len: i32) -> Value {
         return json!(null);
     }
     let buf = alloc(len);
+    if buf == 0 {
+        // Out of memory: the host's copy is dropped with the next stash.
+        return json!(null);
+    }
     unsafe {
         read(buf);
         let bytes = std::slice::from_raw_parts(buf as *const u8, len as usize);

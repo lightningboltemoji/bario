@@ -18,6 +18,11 @@ final class Motion {
     func apply(_ style: Style, to layer: CALayer, animationTime: CFTimeInterval?) {
         let matrix = style.transform.matrix
         if !CATransform3DEqualToTransform(layer.transform, matrix) { layer.transform = matrix }
+        // Siblings share a 3D space, so a box tipped out of the bar's plane is cut where it
+        // passes behind the backdrop. Lifted far in front, it is ordered over its neighbours
+        // instead; a lift changes no projection.
+        let lift: CGFloat = style.turnsInDepth ? Motion.lift : 0
+        if layer.zPosition != lift { layer.zPosition = lift }
 
         guard !style.animations.isEmpty || !added.isEmpty else { return }
         let now = animationTime ?? layer.convertTime(CACurrentMediaTime(), from: nil)
@@ -46,11 +51,32 @@ final class Motion {
     }
 }
 
+extension Motion {
+    static let lift: CGFloat = 10_000
+}
+
+extension Style {
+    /// Whether this box turns out of the bar's plane, now or in an animation.
+    var turnsInDepth: Bool {
+        transform.turnsInDepth || animations.contains { $0.keyframes.contains { $0.transform?.turnsInDepth == true } }
+    }
+}
+
 extension Transform {
-    /// Scale, then rotate, then translate, with y up and clockwise meaning what it does in CSS.
+    var turnsInDepth: Bool { rotateX != 0 || rotateY != 0 }
+
+    /// Scale, then rotateY, rotateX and rotate, then perspective, then translate, with y up and
+    /// every angle turning the way it does in CSS.
     var matrix: CATransform3D {
         var matrix = CATransform3DMakeTranslation(translateX, -translateY, 0)
+        if perspective > 0 {
+            var eye = CATransform3DIdentity
+            eye.m34 = -1 / perspective
+            matrix = CATransform3DConcat(eye, matrix)
+        }
         matrix = CATransform3DRotate(matrix, -rotate * .pi / 180, 0, 0, 1)
+        if rotateX != 0 { matrix = CATransform3DRotate(matrix, -rotateX * .pi / 180, 1, 0, 0) }
+        if rotateY != 0 { matrix = CATransform3DRotate(matrix, rotateY * .pi / 180, 0, 1, 0) }
         return CATransform3DScale(matrix, scaleX, scaleY, 1)
     }
 }
@@ -90,6 +116,8 @@ extension Animation {
             ("transform.translation.x", { $0.translateX }),
             ("transform.translation.y", { -$0.translateY }),
             ("transform.rotation.z", { -$0.rotate * .pi / 180 }),
+            ("transform.rotation.x", { -$0.rotateX * .pi / 180 }),
+            ("transform.rotation.y", { $0.rotateY * .pi / 180 }),
             ("transform.scale.x", { $0.scaleX }),
             ("transform.scale.y", { $0.scaleY }),
         ]

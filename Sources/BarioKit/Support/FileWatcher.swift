@@ -6,6 +6,7 @@ public final class FileWatcher: @unchecked Sendable {
     private let url: URL
     private let debounce: Double
     private let onChange: @Sendable () -> Void
+    private let delay: Delay?
     private let queue = DispatchQueue(label: "zip.tanner.bario.filewatcher")
     private let lock = NSLock()
     private var fileSource: DispatchSourceFileSystemObject?
@@ -14,9 +15,17 @@ public final class FileWatcher: @unchecked Sendable {
     private var lastStamp: (Date, UInt64)?
     private var stopped = false
 
-    public init(url: URL, debounce: Double = 0.12, onChange: @escaping @Sendable () -> Void) {
+    /// Runs a reload check `seconds` from now. Tests pass one they fire by hand.
+    typealias Delay = @Sendable (_ seconds: Double, _ work: DispatchWorkItem) -> Void
+
+    public convenience init(url: URL, debounce: Double = 0.12, onChange: @escaping @Sendable () -> Void) {
+        self.init(url: url, debounce: debounce, delay: nil, onChange: onChange)
+    }
+
+    init(url: URL, debounce: Double, delay: Delay?, onChange: @escaping @Sendable () -> Void) {
         self.url = url
         self.debounce = debounce
+        self.delay = delay
         self.onChange = onChange
         lastStamp = FileWatcher.stamp(of: url)
         arm()
@@ -128,8 +137,8 @@ public final class FileWatcher: @unchecked Sendable {
     }
 
     /// Debounce, and then only report a change if the file really changed: a directory write
-    /// fires for every sibling too.
-    private func schedule() {
+    /// fires for every sibling too. What every event does.
+    func schedule() {
         lock.lock(); defer { lock.unlock() }
         pending?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -142,7 +151,7 @@ public final class FileWatcher: @unchecked Sendable {
             if changed { self.onChange() }
         }
         pending = work
-        queue.asyncAfter(deadline: .now() + debounce, execute: work)
+        if let delay { delay(debounce, work) } else { queue.asyncAfter(deadline: .now() + debounce, execute: work) }
     }
 
     private static func stamp(of url: URL) -> (Date, UInt64)? {

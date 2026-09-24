@@ -23,7 +23,7 @@ as much machinery as this needs, and it keeps the framing honest.
 | op | fields | effect |
 |---|---|---|
 | `set` | `target`, `data` | deep-merge `data` into the store under `target` |
-| `content` | `target`, `content`, `classes?`, `tooltip?` | replace a `data` item's content tree |
+| `content` | `target`, `content`, `classes?`, `tooltip?` | replace a `data` item's content tree, whole |
 | `emit` | `name`, `payload?` | broadcast an event to subscribed modules and connections |
 | `get` | `target?` | reply with the subtree, or the whole store |
 | `subscribe` | `topics` | stream matching events back on this connection |

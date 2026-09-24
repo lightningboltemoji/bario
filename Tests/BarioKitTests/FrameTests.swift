@@ -93,7 +93,7 @@ struct FrameLoopTests {
 
     @Test("a render invalidated while it is running runs again afterwards")
     func inFlight() async throws {
-        let module = SlowCountingModule()
+        let module = GatedCountingModule()
         let name = "slow-count-\(UUID().uuidString)"
         ModuleRegistry.register(name) { _ in module }
         let h = try Harness(#"item "slow" module="\#(name)""#)
@@ -103,16 +103,19 @@ struct FrameLoopTests {
         await h.settle()
         #expect(await module.renders == 1)
 
-        // A write starts a second render, and another write lands while it runs. The second
-        // render's result is no different, so nothing but the lost write can ask for a third.
+        // A write starts a second render, and another write lands while it runs — held, so it is
+        // still running however long the lines between take. The second render's result is no
+        // different, so nothing but the lost write can ask for a third.
         await h.host.store.merge(.object(["tick": 1]), at: "slow")
         h.scheduler.run()
         await h.host.store.merge(.object(["tick": 2]), at: "slow")
         #expect(h.scheduler.pending == nil, "nothing can start while the render is still running")
 
+        await module.release()
         await h.host.finishRenders()
         #expect(await module.renders == 2)
         #expect(h.scheduler.pending == .turn, "the finished render asks for the frame that starts the next")
+        await module.release()
         await h.settle()
         #expect(await module.renders == 3, "and no more than that")
     }
@@ -157,6 +160,26 @@ struct FrameLoopTests {
         #expect(h.surface.visible)
         #expect(stoodIn == 1)
         #expect(h.surface.orderedInWith.first??.scene.allItems.map(\.name) == ["a"])
+    }
+
+    @Test("hiding takes every bar off screen without a layout, and showing puts it back")
+    func hiding() async throws {
+        let h = try Harness(#"item "a" module="echo-test""#)
+        await h.start()
+        h.loop.setBackdrop(FrameLoopTests.checker, for: 1)
+        await h.settle()
+        #expect(h.surface.visible)
+        let presented = h.surface.presentations.count
+
+        h.loop.hidden = true
+        h.scheduler.run()
+        #expect(!h.surface.visible)
+        #expect(!h.loop.bars[0].isVisible, "a hidden bar takes no pointer")
+
+        h.loop.hidden = false
+        h.scheduler.run()
+        #expect(h.surface.visible)
+        #expect(h.surface.presentations.count == presented, "nothing changed, so nothing was committed")
     }
 
     @Test("a pointer nowhere near a bar costs nothing; near one, only that bar repaints")
@@ -551,14 +574,26 @@ actor EchoModule: Module {
     }
 }
 
-/// Counts its renders, takes a moment over each, and always shows the same thing.
-actor SlowCountingModule: Module {
+/// Counts its renders, and always shows the same thing. Every render after the first runs until
+/// the test releases it: "still running" for exactly as long as the test needs, rather than for
+/// a few milliseconds a busy machine can spend before the test gets to look.
+actor GatedCountingModule: Module {
     private(set) var renders = 0
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var released = 0
+
     func render(_ state: StateReader) async throws -> RenderResult {
         renders += 1
         _ = state.own
-        try await Task.sleep(nanoseconds: 20_000_000)
+        if renders > 1 {
+            if released > 0 { released -= 1 } else { await withCheckedContinuation { held.append($0) } }
+        }
         return RenderResult(content: .text("slow"))
+    }
+
+    /// Lets one render finish: the one held now, or else the next to start.
+    func release() {
+        if held.isEmpty { released += 1 } else { held.removeFirst().resume() }
     }
 }
 
@@ -581,15 +616,16 @@ final class Harness {
     private(set) var surfaces: [RecordingSurface] = []
     var surface: RecordingSurface { surfaces[0] }
 
+    /// `top` is config that goes beside the bar rather than in it: modes, sources.
     init(_ items: String, css: String = "", bars: Int = 1,
-         renderers: RendererHost = RendererHost()) throws {
+         renderers: RendererHost = RendererHost(), top: String = "") throws {
         ModuleRegistry.register("echo-test") { _ in EchoModule() }
         ModuleRegistry.register("blink-test") { _ in BlinkModule() }
 
         scheduler = ManualScheduler(clock: clock)
         loop = FrameLoop(host: host, renderers: renderers, metrics: FixedMetrics(),
                          scheduler: scheduler, clock: { [clock] in clock.now })
-        loop.config = try ConfigLoader.parse("bar { \(items) }")
+        loop.config = try ConfigLoader.parse("\(top)\nbar { \(items) }")
         style(css)
         for index in 0..<bars {
             let x = Double(index) * 400

@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import BarioKit
 
+/// Real time: these wait on the kernel's file events, so they are in the Makefile's `REAL_TIME`
+/// and run in the serial pass.
 @Suite("File watching")
 struct FileWatcherTests {
     func temporaryDirectory() throws -> URL {
@@ -17,13 +19,28 @@ struct FileWatcherTests {
         private var value = 0
         func bump() { lock.lock(); value += 1; lock.unlock() }
         var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+    }
 
-        func waitFor(_ target: Int, timeout: Double = 2) async -> Int {
-            let deadline = Date().addingTimeInterval(timeout)
-            while count < target, Date() < deadline {
-                try? await Task.sleep(nanoseconds: 20_000_000)
-            }
-            return count
+    /// Debounce timers the test fires by hand. Two writes "in quick succession" in real time are
+    /// only as quick as a busy machine lets the test make them; with these, nothing reloads
+    /// until the test says the quiet period is over.
+    final class ManualDelays: @unchecked Sendable {
+        private let lock = NSLock()
+        private var scheduled: [(seconds: Double, work: DispatchWorkItem)] = []
+
+        func delay(_ seconds: Double, _ work: DispatchWorkItem) {
+            lock.lock(); scheduled.append((seconds, work)); lock.unlock()
+        }
+
+        var seconds: [Double] { lock.lock(); defer { lock.unlock() }; return scheduled.map(\.seconds) }
+        var live: Int { lock.lock(); defer { lock.unlock() }; return scheduled.filter { !$0.work.isCancelled }.count }
+
+        /// The quiet period ends for every reload check still coming.
+        func fire() {
+            lock.lock()
+            let due = scheduled.map(\.work).filter { !$0.isCancelled }
+            lock.unlock()
+            due.forEach { $0.perform() }
         }
     }
 
@@ -39,7 +56,7 @@ struct FileWatcherTests {
 
         try? await Task.sleep(nanoseconds: 100_000_000)
         try "a 2".write(to: file, atomically: false, encoding: .utf8)
-        #expect(await counter.waitFor(1) >= 1)
+        #expect(await eventually { counter.count >= 1 })
     }
 
     @Test("an atomic replace fires, which is how every real editor saves")
@@ -54,7 +71,7 @@ struct FileWatcherTests {
 
         try? await Task.sleep(nanoseconds: 100_000_000)
         try "item { color: blue }".write(to: file, atomically: true, encoding: .utf8)
-        #expect(await counter.waitFor(1) >= 1)
+        #expect(await eventually { counter.count >= 1 })
     }
 
     @Test("a file that does not exist yet is still watched")
@@ -68,7 +85,7 @@ struct FileWatcherTests {
 
         try? await Task.sleep(nanoseconds: 100_000_000)
         try "bar { }".write(to: file, atomically: true, encoding: .utf8)
-        #expect(await counter.waitFor(1) >= 1)
+        #expect(await eventually { counter.count >= 1 })
     }
 
     @Test("a file in a directory that does not exist yet is still watched")
@@ -85,12 +102,12 @@ struct FileWatcherTests {
         // What someone setting bario up for the first time does.
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try "bar { }".write(to: file, atomically: true, encoding: .utf8)
-        #expect(await counter.waitFor(1) >= 1)
+        #expect(await eventually { counter.count >= 1 })
 
         // And once it exists, it is watched like any other file.
         try? await Task.sleep(nanoseconds: 300_000_000)
         try "bar { height 30 }".write(to: file, atomically: true, encoding: .utf8)
-        #expect(await counter.waitFor(2) >= 2)
+        #expect(await eventually { counter.count >= 2 })
     }
 
     @Test("two writes in quick succession are one reload")
@@ -100,15 +117,26 @@ struct FileWatcherTests {
         try "a 1".write(to: file, atomically: false, encoding: .utf8)
 
         let counter = Counter()
-        let watcher = FileWatcher(url: file, debounce: 0.3) { counter.bump() }
+        let delays = ManualDelays()
+        let watcher = FileWatcher(url: file, debounce: 0.3, delay: delays.delay) { counter.bump() }
         defer { watcher.stop() }
 
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        // Each change puts the reload off again: of the checks asked for — arming's own, and one
+        // per change — only the last is still coming.
+        watcher.schedule()
+        watcher.schedule()
+        #expect(delays.seconds == [0.3, 0.3, 0.3])
+        #expect(delays.live == 1)
+
+        // Two real writes. However the kernel reports them, nothing reloads until the quiet
+        // period ends, and then once: both writes are in the file by the time anything looks.
         try "a 2".write(to: file, atomically: false, encoding: .utf8)
-        try? await Task.sleep(nanoseconds: 30_000_000)
         try "a 3".write(to: file, atomically: false, encoding: .utf8)
-        _ = await counter.waitFor(1, timeout: 2)
-        try? await Task.sleep(nanoseconds: 400_000_000)
+        #expect(await eventually { delays.seconds.count > 3 }, "the watcher heard the writes")
+        #expect(counter.count == 0)
+        #expect(await eventually { delays.fire(); return counter.count > 0 })
+        // A check that runs later, for an event that was still on its way, finds nothing new.
+        delays.fire()
         #expect(counter.count == 1, "expected one reload, got \(counter.count)")
     }
 }

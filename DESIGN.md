@@ -20,6 +20,8 @@ Vocabulary, used consistently from here on:
 | **module** | the code that turns state into an item's content; built in, `exec`, or WASM |
 | **state store** | a key/value tree that modules and external processes write into |
 | **provider** | anything that writes state: a built-in poller, a shell command, a socket client, a WASM module |
+| **source** | a provider in the config with no bubble: a module whose state other items read (section 3) |
+| **mode** | a named condition over the state store and time, which the bar is in or not (section 6) |
 | **scene** | one bar laid out: every item and node with its resolved style and its rectangle |
 | **frame** | one pass of the rendering pipeline, run because something was invalidated (section 10) |
 
@@ -132,9 +134,21 @@ The initial set, chosen because each one replaces something the cover is hiding:
 
 - `exec`: run a command on an interval, or keep it running and read lines (`interval = "watch"`,
   like waybar's `exec` with continuous output). Stdout is either plain text or, if it parses,
-  JSON, which is written into the store as-is. Format strings apply as usual.
+  JSON, which is written into the store as-is. Format strings apply as usual, and a line with
+  a `content` key shows that content tree, so a script can draw anything a module can.
 - The socket (section 4): any process writes state under any item's key, or pushes a whole
   content tree to a `data` item. The `bario` CLI wraps this for shell use.
+- `source`: a module that only writes state. It is configured like an item, runs like one, and
+  is never laid out, so another program's stream of facts lands in the store for any item to
+  read and any mode to watch, with no bubble on the bar:
+
+  ```kdl
+  source "emira" module="exec" interval="watch" { command "emira" "watch" }
+  ```
+
+A write that changes no value changes nothing: it invalidates no render and notifies no
+subscriber, so a stream that repeats itself costs nothing. Under an item's key, `content` is a
+content tree and a write replaces it whole; two trees merged key by key are neither.
 
 **Tier 3, WASM modules** (section 5): user code, sandboxed, in any language with a wasm32
 target. For when a script is too slow, too chatty, or needs to react to events and clicks.
@@ -316,6 +330,37 @@ Both sub-rows use the same styles, gap and padding. On a display without a notch
 marker is ignored and the row is one flex pass, so one config serves the MacBook and the
 external monitor. `bar { notch "ignore" }` opts out of avoidance entirely.
 
+### Modes
+
+A bar can change its arrangement, not just its looks. A **mode** is a named condition over the
+state store and time, declared once:
+
+```kdl
+mode "guide" {
+  while "emira.moving"                    // on while this path is truthy
+  changed "emira.focus" "emira.displays"  // on when either changes value
+  hold "700ms"                            // and for this long after the last reason
+}
+```
+
+While it is on, the bar wears it as a class (`bar.guide #clock { … }`), and items, groups and
+spacers can be shown `when="guide"` or `unless="guide"`. So a mode can take a stretch of the
+bar over, Dynamic Island fashion: the app name gives way to a row of window names, centred by
+a spacer that exists only in that mode, while everything else stays where it was.
+
+```kdl
+item "app" module="front-app" format="{name}" unless="guide"
+spacer when="guide"
+item "names" module="exec" interval="watch" when="guide" { command "…" }
+spacer
+notch
+```
+
+`when` decides only whether an item is laid out. Its module runs either way, so an item a mode
+brings in has its content the moment it appears. A path's first value is not a change, so
+starting up turns nothing on. Items that stay in both arrangements slide to their new places;
+the ones that come and go transition in and out (section 7). Modes are the same on every bar.
+
 ### Multiple displays
 
 One config, one bar per display. `bar` can be filtered: `bar display="built-in" { … }`,
@@ -366,8 +411,8 @@ their friends.
 
 Selectors: type (`bar`, `item`, `group`, `text`, `icon`, `meter`, `graph`, `canvas`, and any
 registered custom node type), `#id`, `.class`, state pseudo-classes (`:hover`, `:active`,
-`:overflow`, `:stale`; the first two only while Option is held, section 8), descendant
-combinator (`#battery .pct`), and lists. Specificity follows CSS. Cascade order is the stylesheet, then
+`:overflow`, `:stale`, `:leaving`; the first two only while Option is held, section 8), the
+modes that are on as classes on `bar`, descendant combinator (`#battery .pct`), and lists. Specificity follows CSS. Cascade order is the stylesheet, then
 per-item `style="…"` in config for one-offs.
 
 Properties:
@@ -379,7 +424,7 @@ Properties:
 | text | `font` (family, size, weight, e.g. `12pt "SF Pro Text" medium`, `system-ui`, `monospace`), `color`, `font-weight`, `letter-spacing`, `text-transform` |
 | icon | `icon-size`, `icon-color`, `icon-weight` (SF Symbol weight), `icon-rendering` (`monochrome`, `hierarchical`, `palette`, `multicolor`) |
 | meter/graph | `fill`, `track`, `stroke-width`, `line-cap` |
-| effects | `shadow` (offset, blur, colour), `transform` (translate, rotate, scale), `transition` (property, duration, easing), `animation` (`@keyframes` over `transform` and `opacity`) |
+| effects | `shadow` (offset, blur, colour), `transform` (translate, rotate, scale, turns in depth, perspective), `transition` (property, duration, easing), `animation` (`@keyframes` over `transform` and `opacity`) |
 
 Values: `pt` lengths; colours as hex, `rgba()`, `hsl()`, `system(labelColor)` for any
 `NSColor` system colour, `accent` for the user's accent colour; variables via `--name` on
@@ -403,18 +448,44 @@ text does) animate too, with a bar-level `bar { transition: layout 160ms ease-ou
 
 `animation` takes a name, a duration, then in any order an easing, a delay, an iteration count
 or `infinite`, and `alternate`, and a list of them separated by commas. `transform` takes
-`translate(x[, y])`, `rotate(angle)` in `deg` or `turn`, and `scale(s)` or `scale(x, y)`, each at
-most once; whatever order they are written in, they apply as scale, then rotate, then
-translate, about the centre of the box, which is also how they ease. A keyframe that leaves a
+`translate(x[, y])` or `translateX()` and `translateY()`, `rotate(angle)` in `deg` or `turn`,
+`rotateX()` and `rotateY()`, which tip the top or the right away from the viewer,
+`perspective(distance)`, and `scale(s)` or `scale(x, y)`, each at most once; whatever order they
+are written in, they apply as scale, then the rotations, then perspective, then translate,
+about the centre of the box, which is also how they ease. A box turned out of the bar's plane
+is drawn in front of its neighbours rather than cut by them. A keyframe that leaves a
 property out takes the element's own value there. `backdrop blur()` and `saturate()` snap
 rather than ease: every distinct value is a filter pass and a cached image.
 
 Layout transitions follow three rules. An item that appears, including one receiving its
 first content, is placed where it belongs rather than grown out of nothing; its neighbours
-still slide to make room. The items in a group follow their own rectangles, which already
+still slide to make room, and it can transition in (below). The items in a group follow their own rectangles, which already
 include the group's movement. And while a bubble resizes, its content keeps the size it was
 measured at, stays centred in the bubble, and is clipped to it, so a bubble that is growing
 never paints its new content across the neighbours it has not reached yet.
+
+### Arriving and leaving
+
+An item comes and goes whenever a mode, its module or `hidden-until-set` says so, and the
+stylesheet says how, in CSS's own terms. `@starting-style` is what an item that has just
+appeared transitions from. `:leaving` is what an item that has just left transitions to: it
+stays on screen where it was, in the layer it had, taking no space and no clicks, until that
+transition ends, and one that comes back before then turns round from where it has got to. An
+item with neither snaps, as before. A group goes as one. A roll, as on a drum:
+
+```css
+#app, #names { transition: transform 280ms ease-in-out, opacity 220ms ease-in; }
+@starting-style {
+  #app, #names { transform: perspective(40pt) translateY(20pt) rotateX(-90deg); opacity: 0; }
+}
+#app:leaving, #names:leaving {
+  transform: perspective(40pt) translateY(-20pt) rotateX(90deg); opacity: 0;
+}
+```
+
+Both are transitions, run by the frame loop like any other, so they retarget from what is on
+screen; a Core Animation `animation` could not turn round mid-way. Neither draws anything:
+the layers keep their pixels and move.
 
 An example that reads as a finished bar:
 
@@ -809,11 +880,12 @@ is dirty, and for which bar if it concerns only one, and asks for a frame.
 
 | input | invalidates |
 |---|---|
-| a store write to a path some render read | render, for the items that read it |
+| a store write that changes a value some render read | render, for the items that read it |
 | a render returning different content, classes, visibility or staleness | style, for that item |
 | the pointer entering or leaving an item, a press, both only while Option is held | style, for that bar |
 | Option pressed or let go | style, for the bar under the pointer; present, if a hole is showing |
 | a stylesheet reload, a socket `style` delta, an appearance or accent colour change | style, everywhere |
+| a mode turning on or off | style, everywhere |
 | a config reload | render, for items whose module or options changed; style, everywhere |
 | a display added, removed or resized; the menu bar hiding or showing | layout, for that bar |
 | the pointer moving near a bar, a click that latches the reveal | present |
@@ -875,7 +947,8 @@ cuts; how far the click reveal has got, and how far the hole has closed for Opti
 at the frame's timestamp. A hole too far from the pointer to show does not ease at all, so
 Option pressed anywhere else starts no frames.
 
-Hit testing reads the presented scene, because that is what the pointer is over. Which bar
+Hit testing reads the presented scene, because that is what the pointer is over, less the
+items on their way out. Which bar
 Option has made interactive, and which of its items is hovered, are decided when the pointer
 moves or Option changes, and again after each frame, since a sliding item can arrive under a
 pointer that is standing still, or leave it.
@@ -1075,6 +1148,10 @@ Each phase ends with something you can run and look at.
     registry, `frame`, and the source know nothing of it. If the call is ever removed, a
     helper LaunchAgent that brokers the same message takes its place and producers do not
     change.
+- **Content is per item, not per bar.** A module runs once for an item name, and every bar
+  showing that item shows the same content. A window manager's stream is per display, so an
+  item showing one picks a display (the focused one) and every bar shows it. Per-bar content
+  needs a module context that knows its bar, and a module instance per bar where it matters.
 - **Shaders.** Nodes are layers, so a node could be a `CAMetalLayer` running pipelines the host
   owns. Shaders supplied by plugins would need translating, and GPU budgets the sandbox cannot
   enforce yet. Not planned, not ruled out.

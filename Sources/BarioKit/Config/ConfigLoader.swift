@@ -55,8 +55,12 @@ public enum ConfigLoader {
                 config.bars.append(try bar(node))
             case "renderer":
                 config.renderers.append(try renderer(node))
+            case "source":
+                config.sources.append(try source(node))
+            case "mode":
+                config.modes.append(try mode(node))
             default:
-                throw KDLError("'\(node.name)' is not a top-level node; expected bar or renderer",
+                throw KDLError("'\(node.name)' is not a top-level node; expected bar, renderer, source or mode",
                                at: node.position)
             }
         }
@@ -64,7 +68,84 @@ public enum ConfigLoader {
             throw KDLError("the config has no bar node, so there is nothing to show",
                            at: nodes.first?.position ?? .start)
         }
+        try check(config)
         return config
+    }
+
+    /// What can only be checked once everything is read: modes named before they are
+    /// declared, and sources sharing a key in the store with something else.
+    private static func check(_ config: Config) throws {
+        var modes: Set<String> = []
+        for mode in config.modes where !modes.insert(mode.name).inserted {
+            throw KDLError("there are two modes called \"\(mode.name)\"", at: mode.position)
+        }
+        let items = config.bars.flatMap(\.items).flatMap(\.flattened)
+        for item in items {
+            for name in [item.when, item.unless].compactMap({ $0 }) where !modes.contains(name) {
+                let known = modes.isEmpty ? "there are none" : "the ones that exist are "
+                    + modes.sorted().map { "\"\($0)\"" }.joined(separator: ", ")
+                throw KDLError("\(item.name) names a mode \"\(name)\" that no mode node declares; \(known)",
+                               at: item.position)
+            }
+        }
+        var keys = Set(items.map(\.name))
+        for source in config.sources where !keys.insert(source.name).inserted {
+            throw KDLError("source \"\(source.name)\" writes under a key an item or another source already has",
+                           at: source.position)
+        }
+    }
+
+    // MARK: - source and mode
+
+    /// `source "emira" module="exec" interval="watch" { command "emira" "watch" }`: a module with
+    /// no bubble, which only writes state.
+    private static func source(_ node: KDLNode) throws -> ItemConfig {
+        guard node.argument(0)?.value.stringValue != nil else {
+            throw KDLError("source needs the name its state is written under, e.g. source \"emira\" module=\"exec\"",
+                           at: node.position)
+        }
+        let source = try parseItem(node, ordinal: 0)
+        let shown = source.format != nil || source.content != nil || source.template != nil
+            || source.when != nil || source.unless != nil || source.actions != Actions()
+        if shown {
+            throw KDLError("source \"\(source.name)\" is never shown, so it takes no format, content, "
+                           + "when, unless or on-click; show its state from an item", at: node.position)
+        }
+        return source
+    }
+
+    /// `mode "guide" { while "emira.moving"; changed "emira.focus"; hold "700ms" }`
+    private static func mode(_ node: KDLNode) throws -> ModeConfig {
+        guard let name = node.argument(0)?.value.stringValue, !name.isEmpty else {
+            throw KDLError("mode needs a name, e.g. mode \"guide\" { changed \"emira.focus\" }", at: node.position)
+        }
+        var mode = ModeConfig(name: name, position: node.position)
+        for child in node.children {
+            switch child.name {
+            case "while", "changed":
+                let paths = child.arguments.compactMap(\.value.stringValue)
+                guard !paths.isEmpty, paths.count == child.arguments.count else {
+                    throw KDLError("\(child.name) takes the paths it watches, e.g. \(child.name) \"emira.focus\"",
+                                   at: child.position)
+                }
+                if child.name == "while" { mode.whilePaths += paths } else { mode.changed += paths }
+            case "hold":
+                guard let value = child.argument(0)?.value,
+                      let seconds = value.doubleValue ?? value.stringValue.flatMap(parseDuration),
+                      seconds >= 0 else {
+                    throw KDLError("hold takes a duration like \"700ms\"", at: child.position)
+                }
+                mode.hold = seconds
+            default:
+                throw KDLError("'\(child.name)' is not part of a mode; expected while, changed or hold",
+                               at: child.position)
+            }
+        }
+        guard !mode.paths.isEmpty else {
+            throw KDLError("mode \"\(name)\" has nothing to turn it on; give it while or changed",
+                           at: node.position)
+        }
+        return mode
     }
 
     private static func renderer(_ node: KDLNode) throws -> RendererConfig {
@@ -171,7 +252,7 @@ public enum ConfigLoader {
             item.kind = .group(children)
         default:
             guard let module = node.property("module")?.value.stringValue else {
-                throw KDLError("item \"\(item.name)\" needs module=\"…\"", at: node.position)
+                throw KDLError("\(node.name) \"\(item.name)\" needs module=\"…\"", at: node.position)
             }
             item.kind = .module(module)
         }
@@ -193,6 +274,8 @@ public enum ConfigLoader {
                 item.align = align
             case "style": item.style = try string(property)
             case "hidden-until-set": item.hiddenUntilSet = property.value.boolValue ?? true
+            case "when": item.when = try string(property)
+            case "unless": item.unless = try string(property)
             case "interval": item.interval = try interval(property)
             case "on-click": item.actions.click = try string(property)
             case "on-right-click": item.actions.rightClick = try string(property)

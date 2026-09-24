@@ -91,6 +91,15 @@ public actor ExecModule: Module {
         if (state.value("exit-code")?.intValue ?? 0) != 0 { classes.append("error") }
         let tooltip = state.value("tooltip")?.stringValue
             ?? state.value("stderr")?.stringValue?.trimmed.nonEmpty
+        // A line carrying a whole content tree shows it, as one pushed to a `data` item does.
+        if let tree = state.value("content"), !tree.isNull {
+            do {
+                let node = try JSONDecoder().decode(Node.self, from: tree.encoded())
+                return RenderResult(content: node, classes: classes, tooltip: tooltip)
+            } catch let error as DecodingError {
+                throw ModuleError("content: \(error.contentMessage)")
+            }
+        }
         return RenderResult(content: try renderer.render(state), classes: classes, tooltip: tooltip)
     }
 

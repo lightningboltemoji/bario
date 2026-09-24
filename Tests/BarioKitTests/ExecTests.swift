@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import BarioKit
 
+/// Real time: every test here but the parsing one runs a process, so they are in the Makefile's
+/// `REAL_TIME` and run in the serial pass.
 @Suite("exec")
 struct ExecTests {
     func module(_ kdl: String) throws -> (ExecModule, StateStore, String) {
@@ -49,6 +51,17 @@ struct ExecTests {
         """)
         #expect(state["temp"]?.intValue == 21)
         #expect(state["city"]?.stringValue == "YVR")
+    }
+
+    @Test("a line carrying a whole content tree shows it")
+    func contentTree() async throws {
+        let (result, _) = try await run("""
+        item "a" module="exec" {
+          command "echo '{\\"content\\": {\\"row\\": {\\"children\\": [{\\"text\\": \\"x\\", \\"class\\": \\"focused\\"}]}}, \\"class\\": \\"on\\"}'"
+        }
+        """)
+        #expect(result.content == .row([.text("x", classes: ["focused"])]))
+        #expect(result.classes == ["on"])
     }
 
     @Test("waybar's own keys keep their meaning")
@@ -109,8 +122,9 @@ struct ExecTests {
             }
             return seen
         }
-        // A ceiling, so a line that never arrives fails this test rather than hanging it.
-        let ceiling = Task { try? await Task.sleep(nanoseconds: 5_000_000_000); reader.cancel() }
+        // A ceiling, so a line that never arrives fails this test rather than hanging it. It is
+        // for a slow machine, not for three lines 50ms apart: the reader leaves at line-3.
+        let ceiling = Task { try? await Task.sleep(nanoseconds: 30_000_000_000); reader.cancel() }
         let seen = await reader.value
         ceiling.cancel()
         await module.stop()
@@ -127,13 +141,15 @@ struct ExecTests {
           command "echo x >> \(path); echo tick"
         }
         """)
+        func runs() -> Int {
+            (try? String(contentsOfFile: path, encoding: .utf8))?.split(separator: "\n").count ?? 0
+        }
         await module.start()
-        try? await Task.sleep(nanoseconds: 1_600_000_000)
+        // A second run, half a second of backoff after the first: waited for, not timed.
+        let restarted = await eventually { runs() >= 2 }
         await module.stop()
-        let runs = (try? String(contentsOfFile: path, encoding: .utf8))?
-            .split(separator: "\n").count ?? 0
+        #expect(restarted, "expected the command to be restarted, ran \(runs()) times")
         try? FileManager.default.removeItem(atPath: path)
-        #expect(runs >= 2, "expected the command to be restarted, ran \(runs) times")
     }
 
     @Test("output parsing, without running anything")

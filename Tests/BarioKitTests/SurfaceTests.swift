@@ -129,7 +129,13 @@ struct SurfaceTests {
         #expect(top?.isClose(to: Offscreen.Pixel(r: 1, g: 0, b: 0, a: 1), tolerance: 0.05) == true, "\(String(describing: top))")
         #expect(bottom?.isClose(to: Offscreen.Pixel(r: 0, g: 0, b: 1, a: 1), tolerance: 0.05) == true, "\(String(describing: bottom))")
     }
+}
 
+/// Real time: a real Mach port and a producer that blocks on its answer, so this is in the
+/// Makefile's `REAL_TIME` and runs in the serial pass.
+@Suite("Shared surfaces over Mach")
+@MainActor
+struct SurfaceHandOffTests {
     @Test("a producer hands surfaces over a Mach port; its name is its own; its surfaces go with it")
     func handOff() async throws {
         let surfaces = SharedSurfaces()
@@ -137,7 +143,7 @@ struct SurfaceTests {
         let listener = try SurfaceListener(service: service, surfaces: surfaces)
         defer { listener.stop() }
 
-        let pair = [Self.surface(0, 0, 255), Self.surface(255, 0, 0)]
+        let pair = [SurfaceTests.surface(0, 0, 255), SurfaceTests.surface(255, 0, 0)]
         func owner() -> mach_port_t {
             var port = mach_port_t(MACH_PORT_NULL)
             mach_port_allocate(mach_task_self_, MACH_PORT_RIGHT_RECEIVE, &port)
@@ -149,13 +155,15 @@ struct SurfaceTests {
             let (a, b) = (ports[0], ports[1])
             // Off the main actor, and off the cooperative pool: the hand-off blocks until the
             // listener answers, and the listener needs a thread to answer on. See Blocking.swift.
-            // The listener replies from the main queue, which in a test run is shared with every
-            // `@MainActor` test there is — hence a timeout far longer than a real one needs.
-            return await offPool { bario_surfaces_hand_off(service, name, a, b, owner, 10_000) }
+            // It answers from a queue of its own, not the main one, so the timeout is for a
+            // busy machine, not for a backlog of `@MainActor` tests.
+            return await offPool { bario_surfaces_hand_off(service, name, a, b, owner, 30_000) }
         }
 
         let first = owner(), second = owner()
         #expect(await handOff("gpu", first) == BARIO_SURFACES_ACCEPTED)
+        // The registry hears of it on the main actor, after the producer has its answer.
+        #expect(await eventually { surfaces.entries["gpu"] != nil })
         let entry = try #require(surfaces.entries["gpu"])
         #expect(entry.surfaces.map { IOSurfaceGetID($0) } == pair.map { IOSurfaceGetID($0) },
                 "the same surfaces, across a port")
@@ -164,10 +172,7 @@ struct SurfaceTests {
 
         // The producer goes: its port dies, and bario hears of it.
         mach_port_mod_refs(mach_task_self_, first, MACH_PORT_RIGHT_RECEIVE, -1)
-        for _ in 0..<100 where surfaces.entries["gpu"] != nil {
-            try await Task.sleep(nanoseconds: 10_000_000)
-        }
-        #expect(surfaces.entries["gpu"] == nil)
+        #expect(await eventually { surfaces.entries["gpu"] == nil })
         #expect(await handOff("gpu", second) == BARIO_SURFACES_ACCEPTED, "the name is free again")
         mach_port_mod_refs(mach_task_self_, second, MACH_PORT_RIGHT_RECEIVE, -1)
     }

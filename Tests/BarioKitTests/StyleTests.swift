@@ -281,7 +281,7 @@ struct StyleTests {
         #expect(message("item:sleepy { color: red }").contains("unknown pseudo-class"))
         #expect(message("item > text { color: red }").contains("only combinator"))
         #expect(message("item[x=1] { color: red }").contains("attribute selectors"))
-        #expect(message("@import \"x\";").contains("two at-rules, @media and @keyframes"))
+        #expect(message("@import \"x\";").contains("three at-rules, @media, @keyframes and @starting-style"))
         #expect(message("@media (width: 3) { item { color: red } }").contains("only media feature"))
         #expect(message("item { color red }").contains("expected :"))
         #expect(message("item { color: }").contains("no value"))
@@ -380,7 +380,7 @@ struct StyleTests {
         #expect(halfway.transform == Transform(translateX: 5, rotate: 180),
                 "a full turn eases through half a turn, not through no turn at all")
 
-        #expect(message("item { transform: skew(10deg) }").contains("translate(), rotate() and scale()"))
+        #expect(message("item { transform: skew(10deg) }").contains("rotateY(), scale() and perspective()"))
         #expect(message("item { transform: rotate(10) }").contains("angles are in deg or turn"))
         #expect(message("item { transform: rotate(1deg) rotate(2deg) }").contains("once"))
         #expect(message("item { transform: translate(1pt, 2pt, 3pt) }").contains("an x and an optional y"))

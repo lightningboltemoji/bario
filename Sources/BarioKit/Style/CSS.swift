@@ -126,6 +126,9 @@ public struct StyleRule: Sendable, Hashable {
     /// Source order, the cascade's last tie-break.
     public var order: Int
     public var position: CSSPosition
+    /// Written inside `@starting-style`: what an item that has just appeared transitions from,
+    /// and part of no other cascade.
+    public var starting = false
 }
 
 /// `@keyframes name { from { … } 40% { … } to { … } }`, as written: declarations are resolved
@@ -249,9 +252,11 @@ struct CSSParser {
                 case "keyframes":
                     let rule = try keyframes(at: start)
                     sheet.keyframes[rule.name] = rule
+                case "starting-style":
+                    sheet.rules.append(contentsOf: try startingStyle(at: start))
                 case let name:
-                    throw CSSError("bario's stylesheet has two at-rules, @media and @keyframes; found @\(name)",
-                                   at: start)
+                    throw CSSError("bario's stylesheet has three at-rules, @media, @keyframes and "
+                                   + "@starting-style; found @\(name)", at: start)
                 }
             } else {
                 sheet.rules.append(try rule(media: nil))
@@ -303,6 +308,24 @@ struct CSSParser {
         }
         guard !rule.stops.isEmpty else { throw CSSError("@keyframes \(name) has no keyframes", at: start) }
         return rule
+    }
+
+    /// `@starting-style { #names { opacity: 0 } }`: the styles an item that has just appeared
+    /// starts from, as in CSS.
+    mutating func startingStyle(at start: CSSPosition) throws -> [StyleRule] {
+        try skipTrivia()
+        guard peek() == "{" else { throw CSSError("expected { after @starting-style", at: position) }
+        advance()
+        var rules: [StyleRule] = []
+        while true {
+            try skipTrivia()
+            guard let c = peek() else { throw CSSError("unterminated @starting-style block", at: start) }
+            if c == "}" { advance(); return rules }
+            if c == "@" { throw CSSError("@starting-style blocks do not nest", at: position) }
+            var rule = try rule(media: nil)
+            rule.starting = true
+            rules.append(rule)
+        }
     }
 
     mutating func media(at start: CSSPosition) throws -> [StyleRule] {

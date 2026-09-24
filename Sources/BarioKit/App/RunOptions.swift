@@ -23,13 +23,15 @@ public struct RunOptions: Sendable {
     public var windowShadows = true
     public var diagnose = false
     public var traceFrames = false
+    /// `--mode <name>`, repeatable: modes to hold on for `--shot` and `--diagnose`.
+    public var modes: Set<String> = []
 
     public init() {}
 
     public static let usage = """
     bario — a system bar for macOS, in the spirit of waybar.
 
-    USAGE: bario --run [options]          run the bar
+    USAGE: bario --run [options]          run the bar (what opening Bario.app does)
            bario --shot <path> [options]   render one bar to a PNG and exit
            bario <verb> [args]             talk to a running bar over its socket
 
@@ -44,6 +46,7 @@ public struct RunOptions: Sendable {
       --debug-tint          tint the cover so you can see exactly what it covers
       --no-window-shadows   do not cast the shadows of windows near the top of the screen
       --diagnose            print the resolved scene as text and exit
+      --mode <name>         with --shot or --diagnose, show the bar with this mode on
       --trace-frames        print a line for every frame: what was dirty, what was painted
 
     --shot options:
@@ -54,7 +57,7 @@ public struct RunOptions: Sendable {
       --scale <n>           points per pixel (default 2)
       --window <gap>        cast the shadow of a focused window this many points below the bar
 
-    Quit with Ctrl-C, or `killall bario`.
+    Quit from the menu bar item, or with Ctrl-C.
     """
 
     public static func parse(_ args: [String]) throws -> RunOptions {
@@ -83,6 +86,7 @@ public struct RunOptions: Sendable {
             case "--dark": o.dark = true
             case "--light": o.dark = false
             case "--diagnose": o.diagnose = true
+            case "--mode": o.modes.insert(try value("--mode"))
             case "--trace-frames": o.traceFrames = true
             case "--shot": o.shot = try value("--shot")
             case "--width": o.shotWidth = try number("--width")

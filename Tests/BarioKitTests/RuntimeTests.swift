@@ -21,6 +21,18 @@ struct StateStoreTests {
         #expect(await store.value(at: "battery.pct")?.intValue == 1)
     }
 
+    @Test("an item's content tree is replaced whole, never merged into the last one")
+    func contentReplaces() async throws {
+        let store = StateStore()
+        await store.merge(.object(["content": ["row": ["children": [["text": "a"]]]], "classes": ["x"]]), at: "names")
+        await store.merge(.object(["content": ["text": "b"]]), at: "names")
+        #expect(await store.value(at: "names.content") == ["text": "b"])
+        #expect(await store.value(at: "names.classes") == ["x"], "everything else still merges")
+        await store.merge(.object(["deep": ["content": ["a": 1]]]), at: "other")
+        await store.merge(.object(["deep": ["content": ["b": 2]]]), at: "other")
+        #expect(await store.value(at: "other.deep.content") == ["a": 1, "b": 2], "only an item's own")
+    }
+
     @Test("a write invalidates exactly the items that read it")
     func readTracking() async throws {
         let store = StateStore()
@@ -39,7 +51,7 @@ struct StateStoreTests {
         await store.recordReads(["battery.pct"], for: "battery")
         #expect(await store.merge(.object(["pct": 9]), at: "battery").contains("battery"))
         await store.recordReads(["battery"], for: "battery")
-        #expect(await store.merge(.number(9), at: "battery.pct").contains("battery"))
+        #expect(await store.merge(.number(10), at: "battery.pct").contains("battery"))
     }
 
     @Test("a reader records absolute paths for relative reads")
@@ -230,6 +242,8 @@ struct ModuleTests {
     }
 }
 
+/// Real time: modules here poll, sleep and blow their budgets on real tasks, so these are in the
+/// Makefile's `REAL_TIME` and run in the serial pass.
 @Suite("Module host")
 struct ModuleHostTests {
     @Test("an unknown module becomes an error bubble, not a dead bar")
@@ -262,6 +276,28 @@ struct ModuleHostTests {
         await host.renderPending()
         #expect(host.state(for: "slow")?.stale == true)
         #expect(host.state(for: "slow")?.result.content == .text("first"))
+        await host.shutdown()
+    }
+
+    @Test("a source writes state, never renders, and holds up nobody's first render")
+    @MainActor
+    func sources() async throws {
+        ModuleRegistry.registerBuiltIns()
+        ModuleRegistry.register("feed-test") { _ in FeedModule() }
+        let config = try ConfigLoader.parse("""
+        source "feed" module="feed-test"
+        bar { item "a" module="text" text="hi" }
+        """)
+        let host = ModuleHost(firstStateDeadline: 10)
+        await host.load(config.bars[0].items, sources: config.sources)
+        #expect(await eventually { await host.store.value(at: "feed.value") != nil })
+
+        await host.renderPending()
+        #expect(host.state(for: "a")?.rendered == true)
+        #expect(host.state(for: "feed")?.rendered == false)
+        #expect(host.needsRender == false)
+        host.markDirty(["feed"])
+        #expect(host.needsRender == false, "nothing asks a source to render")
         await host.shutdown()
     }
 
@@ -335,11 +371,12 @@ struct ModuleHostTests {
     @MainActor
     func firstPolls() async throws {
         ModuleRegistry.register("polled-test") { _ in PolledModule(delay: 0.05) }
-        // A deadline far enough off that a busy test run cannot reach it first.
-        let host = ModuleHost(firstStateDeadline: 5)
+        // Deadlines far enough off that a busy test run cannot reach them first. The wait ends
+        // when the poll does, 50ms in, so a passing run never gets near them.
+        let host = ModuleHost(firstStateDeadline: 60)
         let config = try ConfigLoader.parse(#"bar { item "p" module="polled-test" }"#)
         await host.load(config.bars[0].items)
-        await host.firstPolls(within: 2)
+        await host.firstPolls(within: 30)
         await host.renderPending()
         #expect(host.state(for: "p")?.result.content == .text("polled"))
         await host.shutdown()
@@ -414,12 +451,14 @@ actor PolledModule: Module {
     }
 }
 
+/// Renders once, then never again inside any budget: the second render takes a minute, unless
+/// the budget cancels it first — which is the only way it ends in a test run.
 actor SlowModule: Module {
     private var calls = 0
     func render(_ state: StateReader) async throws -> RenderResult {
         calls += 1
         if calls == 1 { return RenderResult(content: .text("first")) }
-        try await Task.sleep(nanoseconds: 400_000_000)
+        try await Task.sleep(nanoseconds: 60_000_000_000)
         return RenderResult(content: .text("late"))
     }
 }

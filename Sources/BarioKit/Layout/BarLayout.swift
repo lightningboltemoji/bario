@@ -267,10 +267,13 @@ public struct BarLayout: Sendable {
         case .spacer, .notch: kind = .spacer
         case .module: kind = .item
         }
-        return SceneItem(name: styled.config.name, kind: kind, style: styled.style,
-                         content: measured.node, states: styled.states, classes: styled.classes,
-                         tooltip: styled.tooltip, priority: styled.config.priority,
-                         actions: styled.config.actions)
+        var item = SceneItem(name: styled.config.name, kind: kind, style: styled.style,
+                             content: measured.node, states: styled.states, classes: styled.classes,
+                             tooltip: styled.tooltip, priority: styled.config.priority,
+                             actions: styled.config.actions)
+        item.starting = styled.starting
+        item.leaving = styled.leaving
+        return item
     }
 
     private func layoutContents(of item: inout SceneItem, measured: Measured) {
