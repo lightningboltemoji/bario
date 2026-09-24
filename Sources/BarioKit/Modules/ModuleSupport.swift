@@ -144,8 +144,9 @@ public enum Humanise {
     /// `1.2 MB/s`. A format string cannot scale units, so the module writes the scaled form
     /// alongside the raw number.
     /// `  12 kB/s`: a byte rate right-aligned to the widest one, so a number that changes
-    /// every second never changes the width of what shows it. Figure spaces are as wide as a
-    /// digit in any font with tabular figures, not only a monospaced one.
+    /// every second never changes the width of what shows it. Figure spaces are drawn exactly
+    /// as wide as a digit whatever the font (`CoreTextMetrics.line`), which fonts do not all
+    /// promise on their own.
     public static func rate(_ value: Double) -> String {
         let text = bytes(value, perSecond: true)
         return String(repeating: "\u{2007}", count: max(0, 8 - text.count)) + text

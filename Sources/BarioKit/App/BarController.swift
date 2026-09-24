@@ -170,17 +170,23 @@ public final class BarController: NSObject, NSApplicationDelegate {
 
     // MARK: - Displays
 
+    /// A display as its bar covers it: the menu bar, and the bar where it hangs lower.
+    private func strip(on screen: NSScreen) -> DisplayInfo? {
+        DisplayInfo(screen: screen).map(loop.config.strip(on:))
+    }
+
     /// One bar per display. A display that appears gets a bar that waits off screen for its
-    /// first frame; one that moves, resizes or hides its menu bar invalidates its bar's layout.
+    /// first frame; one that moves, resizes or hides its menu bar invalidates its bar's layout,
+    /// as does a config that changes how tall its bar is.
     private func syncDisplays() {
         var seen: Set<CGDirectDisplayID> = []
         var changed = false
         for screen in NSScreen.screens {
-            guard let info = DisplayInfo(screen: screen) else { continue }
+            guard let info = strip(on: screen) else { continue }
             seen.insert(info.displayID)
             let menuBarShown = screen.menuBarInset > 1
             if let cover = covers[info.displayID] {
-                cover.fit(to: screen)
+                cover.fit(to: screen, strip: info)
                 if loop.bars.first(where: { $0.id == info.displayID })?.display != info { changed = true }
                 loop.updateBar(info.displayID, display: info, menuBarShown: menuBarShown)
             } else {
@@ -265,9 +271,10 @@ public final class BarController: NSObject, NSApplicationDelegate {
     }
 
     /// A click on a bar that falls through to the real menu bar uncovers everything until the
-    /// pointer leaves, so the menu you clicked is usable.
+    /// pointer leaves, so the menu you clicked is usable. One below the menu bar, where a tall
+    /// bar hangs over a window, is on the window, and opened no menu.
     private func clicked(at point: CGPoint) {
-        if let bar = loop.bars.first(where: { $0.isVisible && $0.surface.frame.contains(point)
+        if let bar = loop.bars.first(where: { $0.isVisible && $0.menuBarFrame.contains(point)
                                               && $0.config?.hole.click == .reveal }) {
             loop.revealed = bar.id
         }
@@ -311,7 +318,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         }
         let pending = covers.values.compactMap { cover -> (BarCover, DisplayInfo, WallpaperSpec)? in
             guard let screen = NSScreen.screens.first(where: { $0.displayID == cover.displayID }),
-                  let info = DisplayInfo(screen: screen) else { return nil }
+                  let info = strip(on: screen) else { return nil }
             return (cover, info, WallpaperSpec(screen: screen))
         }
         guard !pending.isEmpty else { return }
@@ -523,6 +530,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
         loop.liveStyle = Stylesheet()      // a socket delta lasts until the file it was iterating on
         loop.stylesheet = next.stylesheet
         loop.config = next.config
+        // A bar's height is how tall its cover is, and how much desktop to photograph.
+        syncDisplays()
         // Renderers and decoded rasters are layout inputs.
         loop.renderers.load(next.config.renderers, store: host.store, events: host.events)
         loop.rasters.clear()

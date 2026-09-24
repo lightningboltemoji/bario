@@ -12,6 +12,7 @@ See [17-frame-loop.md](17-frame-loop.md) for when either runs.
 ```
 Scene
   display, frame, style (the bar's own)
+  bounds, bar, menuBar      the cover; the bar's box at its top; the part over the menu bar
   rows: [SceneRow]          one, or two with a notch between them
     items: [SceneItem]
       name, style, frame, states, tooltip
@@ -90,9 +91,22 @@ and the marker share a node name; the loader tells them apart by argument (`"avo
 
 ## Vertical placement
 
-The bar's height is the display's menu bar height unless the config overrides it. Items are
-placed inside the bar's padding box by `bar { align … }`: `center` (the default), `start`,
-`end`, or `stretch` to fill. Inside an item, the content row aligns the same way.
+Two heights, kept apart (DESIGN.md §6): `DisplayInfo.menuBarHeight` is the system's, per
+display; `BarConfig.height` is the bar's, the same everywhere, defaulting to the menu bar.
+`Config.strip(on:)` sets `stripHeight` to the larger, and everything that sizes or photographs
+the cover — `BarCover`, the capture, `WindowSurvey`'s bar coordinates, `scene.bounds` — reads
+`stripHeight`. The controller fits the strip in `syncDisplays`, which a reload calls too.
+
+`scene.bar` is the bar's box, the top `height` points of the cover; `scene.menuBar` is the top
+`menuBarHeight` points. Items are placed inside the bar's padding box by `bar { align … }`:
+`center` (the default), `start`, `end`, or `stretch` to fill. Inside an item, the content row
+aligns the same way. An item taller than its row is squeezed to fit and listed in
+`scene.squeezed` with the bar height that would hold it; the frame loop warns once per item and
+height, and `--diagnose` prints them.
+
+The compositor clips a `backdrop` bar background to `scene.bar ∩ scene.menuBar` (the photograph
+stands in for the menu bar only) and fills any menu bar below a shorter bar with the plain
+backdrop (`Compositor.rest`). Colours, gradients and item fills are not clipped.
 
 ## Tests
 
@@ -100,4 +114,5 @@ placed inside the bar's padding box by `bar { align … }`: `center` (the defaul
 items apart; overflow drops the right items in the right order; the notch split in all three
 modes including the straddling spacer; both marker modes on a notched and a plain display,
 and under `notch "ignore"`;
-every frame lands inside the bar.
+a `height` that is the same distance from the top on a 30pt and a 39pt menu bar; squeezing
+reported with the height that fits; every frame lands inside the bar.

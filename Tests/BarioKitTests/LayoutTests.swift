@@ -152,6 +152,53 @@ struct SceneLayoutTests {
         #expect(abs(item.frame.cy - 12) < 0.01)
     }
 
+    // MARK: Height
+
+    /// Laid out on a display whose menu bar is `menuBar` tall, with the strip fitted to the bar
+    /// as the controller fits it.
+    func scene(_ kdl: String, css: String = "", menuBar: CGFloat) throws -> Scene {
+        let plain = DisplayInfo(displayID: 1, name: "Test", frame: CGRect(x: 0, y: 0, width: 400, height: 900),
+                                scale: 2, stripHeight: menuBar)
+        return try scene(kdl, css: css, display: try ConfigLoader.parse(kdl).strip(on: plain))
+    }
+
+    @Test("a bar with a height is that tall on every display, hanging from the top")
+    func definedHeight() throws {
+        for menuBar: CGFloat in [30, 39] {
+            let scene = try scene(#"bar { height 34; item "a" module="text" }"#,
+                                  css: "bar { padding: 0 } item { padding: 0 }", menuBar: menuBar)
+            #expect(scene.bar.h == 34)
+            #expect(scene.bar.top == scene.bounds.top)
+            // The cover still hides the whole menu bar where that is taller.
+            #expect(scene.bounds.h == max(34, Double(menuBar)))
+            #expect(scene.menuBar.h == Double(menuBar))
+            // So an item is as far from the top of the screen on both.
+            let item = scene.rows[0].items[0]
+            #expect(abs(scene.bounds.top - item.frame.cy - 17) < 0.01)
+            #expect(scene.squeezed.isEmpty)
+        }
+    }
+
+    @Test("a bar without a height is each display's menu bar")
+    func menuBarHeight() throws {
+        for menuBar: CGFloat in [30, 39] {
+            let scene = try scene(#"bar { item "a" module="text" }"#, menuBar: menuBar)
+            #expect(scene.bar.h == Double(menuBar))
+            #expect(scene.bounds.h == Double(menuBar))
+        }
+    }
+
+    @Test("an item taller than the bar is squeezed, and the scene says what would hold it")
+    func squeezed() throws {
+        let scene = try scene(#"bar { item "a" module="text"; item "b" module="text" }"#,
+                              css: "bar { padding: 1pt 0 } item { padding: 0 } #b { padding: 10pt 0 }",
+                              menuBar: 30)
+        // b is 14 + 20 = 34pt, in a row of 30 − 2.
+        #expect(scene.rows[0].items[1].frame.h == 28)
+        #expect(scene.squeezed.map { $0.item } == ["b"])
+        #expect(scene.squeezed.first?.needs == 36)
+    }
+
     @Test("content sits inside the item's padding box")
     func contentPlacement() throws {
         let scene = try scene(#"bar { item "a" module="text" }"#,

@@ -6,23 +6,40 @@ public struct Scene: Sendable {
     public var display: DisplayInfo
     /// The cover's bounds, origin at the bottom left, as the painter draws in.
     public var bounds: CGRect
+    /// The bar's own box: the top of the cover, as tall as the bar. Its background fills it
+    /// and its items are laid out inside it. Below it, on a display whose menu bar is taller,
+    /// the rest of the menu bar is covered by the desktop and nothing else. DESIGN.md §6.
+    public var bar: CGRect
     public var style: Style
     public var rows: [SceneRow]
     /// Dropped for lack of room. Still rendered into the store, so a catch-all item can list
     /// them later.
     public var hidden: [SceneItem]
+    /// Items taller than the bar has room for, which it squeezed to fit, with the bar height
+    /// that would have held each one.
+    public var squeezed: [(item: String, needs: Double)] = []
     public var notch: CGRect?
     public var hole: HoleConfig
 
-    public init(display: DisplayInfo, bounds: CGRect, style: Style, rows: [SceneRow] = [],
-                hidden: [SceneItem] = [], notch: CGRect? = nil, hole: HoleConfig = HoleConfig()) {
+    public init(display: DisplayInfo, bounds: CGRect, bar: CGRect? = nil, style: Style,
+                rows: [SceneRow] = [], hidden: [SceneItem] = [], notch: CGRect? = nil,
+                hole: HoleConfig = HoleConfig()) {
         self.display = display
         self.bounds = bounds
+        self.bar = bar ?? bounds
         self.style = style
         self.rows = rows
         self.hidden = hidden
         self.notch = notch
         self.hole = hole
+    }
+
+    /// The part of the cover over the real menu bar, which is all the photograph of the
+    /// desktop stands in for. A bar taller than the menu bar hangs below it, over the live
+    /// screen.
+    public var menuBar: CGRect {
+        let height = min(bounds.height, display.menuBarHeight)
+        return CGRect(x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height)
     }
 
     public var items: [SceneItem] { rows.flatMap(\.items) }

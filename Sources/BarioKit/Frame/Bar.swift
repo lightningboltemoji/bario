@@ -50,6 +50,8 @@ public final class Bar {
     /// Whether anything was still moving at the last frame, so the next one has to commit the
     /// scene again.
     var moving = false
+    /// What has been said about items too tall for the bar, so each is said once.
+    var squeezeWarnings: Set<String> = []
 
     /// Set once the bar has had a frame worth showing, or waited long enough.
     public internal(set) var isReady = false
@@ -66,6 +68,14 @@ public final class Bar {
         compositor = Compositor(host: surface.hostLayer)
         self.menuBarShown = menuBarShown
         self.config = config
+    }
+
+    /// The part of the bar over the real menu bar, in screen coordinates. A bar taller than the
+    /// menu bar hangs past it, over whatever is below.
+    public var menuBarFrame: CGRect {
+        let frame = surface.frame
+        let height = min(frame.height, display.menuBarHeight)
+        return CGRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height)
     }
 
     /// Every item on this bar that a module renders: what its first frame waits for.

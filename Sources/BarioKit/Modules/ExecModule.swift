@@ -7,6 +7,8 @@ public actor ExecModule: Module {
     private let command: Command
     private let interval: Interval
     private let timeout: Double
+    /// The longest wait between restarts of a watched command.
+    private let maxBackoff: Double
     private var watcher: Task<Void, Never>?
     private var running: Process?
     private var backoff: Double = 0.5
@@ -42,6 +44,8 @@ public actor ExecModule: Module {
         self.renderer = FormatRenderer(context, format: "{text}", fallback: "text")
         self.interval = context.interval ?? .seconds(context.double("interval", default: 5) ?? 5)
         self.timeout = context.double("timeout", default: 10) ?? 10
+        self.maxBackoff = try ExecModule.seconds(context.option("max-backoff"), default: 30,
+                                                 option: "max-backoff")
 
         let raw = context.config["command"] ?? context.config["exec"]
         switch raw {
@@ -134,8 +138,8 @@ public actor ExecModule: Module {
             guard !Task.isCancelled else { return }
             // A process that stayed up has earned a fresh start.
             if Date().timeIntervalSince(started) > 10 { backoff = 0.5 }
-            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-            backoff = min(30, backoff * 2)
+            try? await Task.sleep(nanoseconds: UInt64(min(backoff, maxBackoff) * 1_000_000_000))
+            backoff = min(maxBackoff, backoff * 2)
         }
     }
 
@@ -151,6 +155,7 @@ public actor ExecModule: Module {
         process.standardError = err
         // Its own group, so terminate() reaches the children too.
         process.qualityOfService = .utility
+        let exited = ExecModule.termination(of: process)
 
         do {
             try process.run()
@@ -159,7 +164,7 @@ public actor ExecModule: Module {
                 "exit-code": .number(127),
                 "stderr": .string("could not start `\(command.description)`: \(error.localizedDescription)"),
             ]), at: context.item)
-            backoff = min(30, max(backoff, 5))
+            backoff = min(maxBackoff, max(backoff, 5))
             return
         }
         running = process
@@ -173,12 +178,12 @@ public actor ExecModule: Module {
         } catch {
             // A closed pipe is how this ends; it is not news.
         }
-        process.waitUntilExit()
+        let status = await ExecModule.status(exited)
         running = nil
-        if process.terminationStatus != 0, !Task.isCancelled {
+        if status != 0, !Task.isCancelled {
             let stderr = String(decoding: (try? err.fileHandleForReading.readToEnd()) ?? Data(), as: UTF8.self)
             await context.store.merge(.object([
-                "exit-code": .number(Double(process.terminationStatus)),
+                "exit-code": .number(Double(status)),
                 "stderr": .string(stderr.trimmed),
             ]), at: context.item)
         }
@@ -207,13 +212,36 @@ public actor ExecModule: Module {
         let err = Pipe()
         process.standardOutput = out
         process.standardError = err
+        // Not waitUntilExit(); see termination(of:).
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
         let stdout = (try? out.fileHandleForReading.readToEnd()) ?? Data()
         let stderr = (try? err.fileHandleForReading.readToEnd()) ?? Data()
-        process.waitUntilExit()
+        exited.wait()
         return ExecResult(stdout: String(decoding: stdout, as: UTF8.self),
                           stderr: String(decoding: stderr, as: UTF8.self),
                           status: process.terminationStatus)
+    }
+
+    /// The process's exit, to await. Not `waitUntilExit()`: without a termination handler,
+    /// Foundation hands the exit to the run loop of the thread that launched the process and
+    /// waits there for it, and on a concurrency thread it can wait for good — a watch sat
+    /// in it for minutes on an `emira watch` long since reaped. A handler is called from a
+    /// dispatch queue instead. Set here, before `run()`, so an exit cannot come first.
+    static func termination(of process: Process) -> AsyncStream<Int32> {
+        AsyncStream { continuation in
+            process.terminationHandler = { process in
+                continuation.yield(process.terminationStatus)
+                continuation.finish()
+            }
+        }
+    }
+
+    /// The exit status, or -1 if the wait was cancelled first.
+    static func status(_ exited: AsyncStream<Int32>) async -> Int32 {
+        for await status in exited { return status }
+        return -1
     }
 
     /// Stdout is plain text, or JSON if it parses. A JSON object is the item's state; anything
@@ -231,6 +259,21 @@ public actor ExecModule: Module {
             patch["text"] = .string(trimmed)
         }
         return .object(patch)
+    }
+
+    /// A duration like `"5s"`, or a number of seconds.
+    static func seconds(_ value: JSONValue?, default fallback: Double, option: String) throws -> Double {
+        let seconds: Double?
+        switch value {
+        case nil, .null?: return fallback
+        case .number(let number)?: seconds = number
+        case .string(let raw)?: seconds = ConfigLoader.parseDuration(raw)
+        default: seconds = nil
+        }
+        guard let seconds, seconds > 0 else {
+            throw ModuleError("\(option) takes a duration like \"5s\"")
+        }
+        return seconds
     }
 
     static func classes(from value: JSONValue?) -> [String] {

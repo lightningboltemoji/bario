@@ -41,10 +41,7 @@ public final class CoreTextMetrics: Metrics, @unchecked Sendable {
 
         let transformed = style.textTransform.apply(to: text)
         let font = CoreTextMetrics.font(for: style.font)
-        var attributes: [NSAttributedString.Key: Any] = [.font: font]
-        if style.letterSpacing != 0 { attributes[.kern] = style.letterSpacing }
-        let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: transformed, attributes: attributes))
+        let line = CoreTextMetrics.line(transformed, font: font, letterSpacing: style.letterSpacing)
         var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
         let width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
         let size = CGSize(width: ceil(width), height: ceil(ascent + descent))
@@ -127,6 +124,46 @@ public final class CoreTextMetrics: Metrics, @unchecked Sendable {
             if let font = NSFont(name: name, size: spec.size) { return font }
             return NSFont.systemFont(ofSize: spec.size, weight: weight)
         }
+    }
+
+    /// The line a text node is measured as and drawn as, from one place so the two agree.
+    ///
+    /// A figure space comes out exactly as wide as the font's `0`. Padding with them is how a
+    /// number that changes keeps its width (`Humanise.rate`), and that only holds if they are
+    /// as wide as a digit, which not every font makes them: SF Mono has no figure space, so
+    /// CoreText draws Menlo's, 5.418pt at 9pt to SF Mono's 5.563pt digit, and a padded rate
+    /// measured a point narrower than a full one. The whole bar slid whenever the padding
+    /// changed.
+    static func line(_ text: String, font: NSFont, letterSpacing: Double,
+                     color: NSColor? = nil) -> CTLine {
+        var attributes: [NSAttributedString.Key: Any] = [.font: font]
+        if let color { attributes[.foregroundColor] = color }
+        if letterSpacing != 0 { attributes[.kern] = letterSpacing }
+        let string = NSMutableAttributedString(string: text, attributes: attributes)
+        let slack = text.contains(figureSpace) ? figureSlack(font) : 0
+        if slack != 0 {
+            let characters = text as NSString
+            var range = characters.range(of: figureSpace)
+            while range.location != NSNotFound {
+                string.addAttribute(.kern, value: letterSpacing + slack, range: range)
+                let rest = range.upperBound
+                range = characters.range(of: figureSpace,
+                                         range: NSRange(location: rest, length: characters.length - rest))
+            }
+        }
+        return CTLineCreateWithAttributedString(string)
+    }
+
+    private static let figureSpace = "\u{2007}"
+
+    /// How much wider the font's `0` draws than its figure space. Measured as drawn, since the
+    /// figure space may come from a fallback font and the font's own glyphs would not say so.
+    private static func figureSlack(_ font: NSFont) -> CGFloat {
+        func width(_ text: String) -> CGFloat {
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+            return CTLineGetTypographicBounds(line, nil, nil, nil)
+        }
+        return width("0") - width(figureSpace)
     }
 }
 

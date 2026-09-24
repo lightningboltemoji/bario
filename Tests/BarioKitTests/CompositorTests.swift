@@ -18,13 +18,14 @@ struct CompositorTests {
         backdrop.set(Shot.checkerboard(width: 400, height: 48))
     }
 
+    /// On a display with a 24pt menu bar; `height` is the bar's own.
     func scene(_ items: String, css: String = "", content: [String: Node] = [:],
-               width: Double = 200) throws -> Scene {
-        let config = try ConfigLoader.parse("bar { \(items) }")
+               width: Double = 200, height: Double? = nil) throws -> Scene {
+        let config = try ConfigLoader.parse("bar { \(height.map { "height \($0); " } ?? "")\(items) }")
         let sheet = try Stylesheet.parse(CompositorTests.base + css)
-        let display = DisplayInfo(displayID: 1, name: "T",
-                                  frame: CGRect(x: 0, y: 0, width: width, height: 900),
-                                  scale: 2, stripHeight: 24)
+        let display = config.strip(on: DisplayInfo(displayID: 1, name: "T",
+                                                   frame: CGRect(x: 0, y: 0, width: width, height: 900),
+                                                   scale: 2, stripHeight: 24))
         var states: [String: ModuleHost.ItemState] = [:]
         for item in config.bars[0].items.flatMap(\.flattened) {
             states[item.name] = ModuleHost.ItemState(
@@ -369,6 +370,34 @@ struct CompositorTests {
         let b = try #require(compositor.item(.item("b"))?.chrome.fill)
         #expect(b.cornerRadius == 0)
         #expect(b.mask is CAShapeLayer)
+    }
+
+    // MARK: The bar's height
+
+    @Test("a photograph stops at the bottom of the menu bar; a colour fills the whole bar")
+    func hangingBar() throws {
+        // 34pt on a 24pt menu bar: 10pt hang below it, over the live screen.
+        commit(try scene(#"item "a" module="text""#, css: "bar { background: backdrop }", height: 34))
+        #expect(compositor.root.bounds == CGRect(x: 0, y: 0, width: 200, height: 34))
+        #expect(compositor.bar.fill?.bounds == CGRect(x: 0, y: 10, width: 200, height: 24))
+        #expect(compositor.bar.fill?.contents as AnyObject? === backdrop.image)
+        #expect(compositor.rest.fill == nil)
+
+        commit(try scene(#"item "a" module="text""#, css: "bar { background: #336699 }", height: 34))
+        #expect(compositor.bar.fill?.bounds == CGRect(x: 0, y: 0, width: 200, height: 34))
+        #expect(compositor.bar.fill?.contents == nil)
+    }
+
+    @Test("under a bar shorter than the menu bar, the rest of the menu bar is the desktop")
+    func shortBar() throws {
+        commit(try scene(#"item "a" module="text""#, css: "bar { background: #336699 }", height: 16))
+        #expect(compositor.root.bounds == CGRect(x: 0, y: 0, width: 200, height: 24))
+        #expect(compositor.bar.fill?.bounds == CGRect(x: 0, y: 8, width: 200, height: 16))
+        #expect(compositor.rest.fill?.bounds == CGRect(x: 0, y: 0, width: 200, height: 8))
+        #expect(compositor.rest.fill?.contents as AnyObject? === backdrop.image)
+        // Beneath the bar, not over it.
+        let order = compositor.root.sublayers ?? []
+        #expect(order.firstIndex { $0 === compositor.rest.fill }! < order.firstIndex { $0 === compositor.bar.fill }!)
     }
 
     // MARK: The hole

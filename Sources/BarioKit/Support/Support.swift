@@ -61,37 +61,47 @@ public struct DisplayInfo: Sendable, Hashable {
     public var name: String
     public var frame: CGRect
     public var scale: CGFloat
+    /// The strip bario covers and photographs, down from the top of the screen: the real menu
+    /// bar, or the bar's own height where that is taller. See `Config.strip(on:)`.
     public var stripHeight: CGFloat
+    /// The system's menu bar on this display, which varies with the display (30pt on most on
+    /// macOS 27, 38–39pt on a notched MacBook) and is not the bar's height. DESIGN.md §6.
+    public var menuBarHeight: CGFloat
     public var isBuiltIn: Bool
     /// In screen coordinates; nil on a display without a notch.
     public var notch: CGRect?
 
     public init(displayID: CGDirectDisplayID, name: String, frame: CGRect, scale: CGFloat,
-                stripHeight: CGFloat, isBuiltIn: Bool = false, notch: CGRect? = nil) {
+                stripHeight: CGFloat, menuBarHeight: CGFloat? = nil, isBuiltIn: Bool = false,
+                notch: CGRect? = nil) {
         self.displayID = displayID
         self.name = name
         self.frame = frame
         self.scale = scale
         self.stripHeight = stripHeight
+        self.menuBarHeight = menuBarHeight ?? stripHeight
         self.isBuiltIn = isBuiltIn
         self.notch = notch
     }
 
+    /// The display as the system has it, with a strip exactly over its menu bar.
     public init?(screen: NSScreen) {
         guard let id = screen.displayID else { return nil }
         displayID = id
         name = screen.localizedName
         frame = screen.frame
         scale = screen.backingScaleFactor
-        stripHeight = screen.menuBarHeight
+        menuBarHeight = screen.menuBarHeight
+        stripHeight = menuBarHeight
         isBuiltIn = CGDisplayIsBuiltin(id) != 0
         notch = screen.notchFrame
     }
 
-    /// The notch in the cover view's own coordinates, where x is measured from the left of
-    /// the strip.
+    /// The notch in the cover view's own coordinates: x from the left of the strip, y up from
+    /// its bottom, so the notch hangs from the top.
     public var notchInStrip: CGRect? {
-        notch.map { CGRect(x: $0.minX - frame.minX, y: 0, width: $0.width, height: $0.height) }
+        notch.map { CGRect(x: $0.minX - frame.minX, y: stripHeight - $0.height,
+                           width: $0.width, height: $0.height) }
     }
 }
 

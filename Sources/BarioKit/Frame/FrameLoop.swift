@@ -387,12 +387,25 @@ public final class FrameLoop {
             guard let styled = bar.styled else { continue }
 
             let scene = layout.layout(styled, on: bar.display)
+            warnSqueezed(scene, on: bar)
 
             // A bar that is not on screen has nothing on screen to ease from.
             bar.animator.retarget(scene, at: now, animated: bar.isVisible)
             laidOut.insert(bar.id)
         }
         return laidOut
+    }
+
+    /// An item taller than its bar is squeezed to fit, which is easy to miss on one display
+    /// and not another, since the default height is each display's menu bar. Said once per
+    /// item and height, with the height that would hold it everywhere.
+    private func warnSqueezed(_ scene: Scene, on bar: Bar) {
+        for (item, needs) in scene.squeezed {
+            let message = String(format: "'%@' needs a %.0fpt bar but the bar on %@ is %.0fpt, so it"
+                                 + " is squeezed; `height %.0f` in the bar fits it on every display",
+                                 item, needs, scene.display.name, scene.bar.height, needs)
+            if bar.squeezeWarnings.insert(message).inserted { warn(message) }
+        }
     }
 
     /// Returns what the commit did, if the bar was committed.

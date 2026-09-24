@@ -182,8 +182,19 @@ public actor VolumeModule: Module {
     /// Bluetooth outputs that are speakers, by name: Bluetooth audio is headphones unless this
     /// says otherwise.
     private let speakers: [String]
-    private var block: AudioObjectPropertyListenerBlock?
+    /// The `CallbackBox` every listener is registered with, nil once stopped. Listeners are
+    /// registered as a proc and this pointer rather than as a block: CoreAudio never matches a
+    /// Swift block on removal, so a removed block kept firing and every re-registration added
+    /// one more. The box is never released, so a callback already under way when `stop`
+    /// removes it still has something to call.
+    private var listener: UnsafeMutableRawPointer?
     private var registrations: [(AudioObjectID, AudioObjectPropertyAddress)] = []
+    /// The device whose properties are being listened to.
+    private var followed: AudioDeviceID?
+    /// A burst of changes, like a volume key held down, is one read at a time: a change that
+    /// lands mid-read asks for one more after it, and the last read is the one that stays.
+    private var reading = false
+    private var readAgain = false
 
     public init(context: ModuleContext) {
         self.context = context
@@ -196,16 +207,9 @@ public actor VolumeModule: Module {
     }
 
     public func start() async {
-        let store = context.store
-        let item = context.item
-        let speakers = speakers
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            Task {
-                await store.merge(VolumeModule.read(speakers: speakers), at: item)
-                await self?.followDeviceChanges()
-            }
-        }
-        block = listener
+        listener = Unmanaged.passRetained(CallbackBox { [weak self] in
+            Task { await self?.changed() }
+        }).toOpaque()
         listen(to: AudioObjectID(kAudioObjectSystemObject),
                selector: kAudioHardwarePropertyDefaultOutputDevice,
                scope: kAudioObjectPropertyScopeGlobal)
@@ -214,7 +218,23 @@ public actor VolumeModule: Module {
 
     public func stop() async {
         unlistenAll()
-        block = nil
+        listener = nil
+    }
+
+    /// What every listener calls, for the default device and for its properties alike.
+    private func changed() async {
+        guard listener != nil else { return }
+        if reading {
+            readAgain = true
+            return
+        }
+        reading = true
+        repeat {
+            readAgain = false
+            followDeviceChanges()
+            await context.store.merge(VolumeModule.read(speakers: speakers), at: context.item)
+        } while readAgain && listener != nil
+        reading = false
     }
 
     public func poll() async -> PollResult {
@@ -291,13 +311,17 @@ public actor VolumeModule: Module {
     }
 
     /// The volume and mute properties live on the device, so they have to be re-attached when
-    /// the default output device changes.
+    /// the default output device changes, and only then.
     private func followDeviceChanges() {
+        let device = VolumeModule.defaultOutputDevice()
+        guard device != followed else { return }
+        followed = device
+
         let system = AudioObjectID(kAudioObjectSystemObject)
         registrations.filter { $0.0 != system }.forEach { unlisten($0.0, $0.1) }
         registrations.removeAll { $0.0 != system }
 
-        guard let device = VolumeModule.defaultOutputDevice() else { return }
+        guard let device else { return }
         // The data source too: on a Mac whose headphone jack is part of the built-in device,
         // plugging in changes the source from speakers to headphones and not the device.
         for selector in [VolumeModule.virtualMainVolume, kAudioDevicePropertyVolumeScalar,
@@ -308,19 +332,25 @@ public actor VolumeModule: Module {
 
     private func listen(to object: AudioObjectID, selector: AudioObjectPropertySelector,
                         scope: AudioObjectPropertyScope) {
-        guard let block else { return }
+        guard let listener else { return }
         var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope,
                                                  mElement: kAudioObjectPropertyElementMain)
         guard AudioObjectHasProperty(object, &address) else { return }
-        if AudioObjectAddPropertyListenerBlock(object, &address, nil, block) == noErr {
+        if AudioObjectAddPropertyListener(object, &address, VolumeModule.proc, listener) == noErr {
             registrations.append((object, address))
         }
     }
 
     private func unlisten(_ object: AudioObjectID, _ address: AudioObjectPropertyAddress) {
-        guard let block else { return }
+        guard let listener else { return }
         var address = address
-        AudioObjectRemovePropertyListenerBlock(object, &address, nil, block)
+        AudioObjectRemovePropertyListener(object, &address, VolumeModule.proc, listener)
+    }
+
+    /// Called on CoreAudio's own thread, so it only hands the change on.
+    private static let proc: AudioObjectPropertyListenerProc = { _, _, _, box in
+        if let box { Unmanaged<CallbackBox>.fromOpaque(box).takeUnretainedValue().run() }
+        return noErr
     }
 
     private func unlistenAll() {

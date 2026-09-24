@@ -242,6 +242,22 @@ struct ContentTemplateTests {
         #expect(Humanise.bytes(9_960) == "10 kB")
         #expect(FormatString.format(.string("x"), spec: "rate") == "")
     }
+
+    /// The width has to hold on screen, not just in characters. SF Mono draws its figure space
+    /// narrower than a digit, which moved the whole bar a point whenever the padding changed.
+    /// Measured before rounding: rounded up to a whole point, a bare rate hides the difference
+    /// and one after an arrow, as the `net` preset has it, does not.
+    @Test("a padded rate draws as wide as a full one")
+    func rateWidth() {
+        for family in [FontFamily.monospace, .named("Menlo")] {
+            let font = CoreTextMetrics.font(for: FontSpec(family: family, weight: 500, size: 9))
+            let widths = [0.0, 12, 999.7, 12_345, 123_456, 1_234_567].map {
+                let line = CoreTextMetrics.line(Humanise.rate($0), font: font, letterSpacing: 0)
+                return CTLineGetTypographicBounds(line, nil, nil, nil)
+            }
+            #expect(widths.max()! - widths.min()! < 0.001, "\(family): \(widths)")
+        }
+    }
 }
 
 @Suite("Stats presets")

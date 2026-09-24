@@ -77,11 +77,11 @@ if options.diagnose {
     let semaphore = DispatchSemaphore(value: 0)
     Task { @MainActor in
         let screens = NSScreen.screens.compactMap { DisplayInfo(screen: $0) }
-        let displays = screens.isEmpty
+        let displays = (screens.isEmpty
             ? [DisplayInfo(displayID: 1, name: "offscreen",
                            frame: CGRect(x: 0, y: 0, width: options.shotWidth, height: 900),
                            scale: 2, stripHeight: options.shotHeight ?? 24)]
-            : screens
+            : screens).map(theme.config.strip(on:))
         for display in displays {
             guard let bar = theme.config.bar(for: display) else {
                 warn("no bar matches \(display.name)")

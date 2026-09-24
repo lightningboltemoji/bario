@@ -113,7 +113,8 @@ Then in `config.kdl`:
 
 ```kdl
 // emira's desktop, a snapshot per change, under `emira` in the store. No bubble.
-source "emira" module="exec" interval="watch" {
+// `emira watch` exits at once while the daemon is down, so retry often: back within 5s of it.
+source "emira" module="exec" interval="watch" max-backoff="5s" {
   command "emira" "watch"
 }
 

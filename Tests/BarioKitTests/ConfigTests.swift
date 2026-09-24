@@ -98,6 +98,22 @@ struct ConfigTests {
         #expect(pick("Some Other Monitor", builtIn: false) == "a")
     }
 
+    @Test("the strip covers the whole menu bar and reaches the bottom of the bar")
+    func strips() throws {
+        let config = try ConfigLoader.parse("""
+        bar { item "a" module="clock" }
+        bar display="built-in" { height 34; item "b" module="clock" }
+        """)
+        func strip(builtIn: Bool, menuBar: CGFloat) -> CGFloat {
+            config.strip(on: DisplayInfo(displayID: 1, name: "T", frame: .zero, scale: 2,
+                                         stripHeight: menuBar, isBuiltIn: builtIn)).stripHeight
+        }
+        #expect(strip(builtIn: true, menuBar: 30) == 34)       // the bar hangs past the menu bar
+        #expect(strip(builtIn: true, menuBar: 39) == 39)       // the menu bar is still all covered
+        #expect(strip(builtIn: false, menuBar: 30) == 30)      // no height: the menu bar's
+        #expect(strip(builtIn: false, menuBar: 39) == 39)
+    }
+
     @Test("durations")
     func durations() throws {
         #expect(ConfigLoader.parseDuration("500ms") == 0.5)
@@ -147,6 +163,7 @@ struct ConfigTests {
         #expect(message("baz { }").contains("not a top-level node"))
         #expect(message("bar { item \"a\" }").contains("needs module="))
         #expect(message("bar { sidebar 1 }").contains("not something a bar contains"))
+        #expect(message("bar { height 0 }").contains("height takes the bar's height in points"))
         #expect(message("bar { hole wobble=2 }").contains("hole takes radius"))
         #expect(message("bar { hole click=\"maybe\" }").contains("\"reveal\" or \"none\""))
         #expect(message("bar { align sideways\n item \"a\" module=\"clock\" }").contains("align is one of"))

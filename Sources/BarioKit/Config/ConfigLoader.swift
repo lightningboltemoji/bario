@@ -173,7 +173,12 @@ public enum ConfigLoader {
                 throw movedToStylesheet(child.name, child.arguments.map(\.value), selector: "bar",
                                         at: child.position)
             case "height":
-                bar.height = try number(child, "height")
+                let height = try number(child, "height")
+                guard height > 0 else {
+                    throw KDLError("height takes the bar's height in points, from the top of the screen",
+                                   at: child.position)
+                }
+                bar.height = height
             case "align":
                 bar.align = try enumeration(child, "align", Align.self)
             case "hole":

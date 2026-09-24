@@ -72,14 +72,14 @@ public final class BarCover: BarSurface {
         }
     }
 
-    /// Follow the screen's menu bar: its height, and where the screen now is. Returns false if
-    /// nothing moved. While the menu bar is hidden there is nothing to follow.
+    /// Follow the strip: where the screen now is, and how far down from its top the menu bar
+    /// and the bar reach. Returns false if nothing moved. While the menu bar is hidden there is
+    /// nothing to follow.
     @discardableResult
-    public func fit(to screen: NSScreen) -> Bool {
-        let inset = screen.menuBarInset
-        guard inset > 1 else { return false }
-        let target = CGRect(x: screen.frame.minX, y: screen.frame.maxY - inset,
-                            width: screen.frame.width, height: inset)
+    public func fit(to screen: NSScreen, strip info: DisplayInfo) -> Bool {
+        guard screen.menuBarInset > 1 else { return false }
+        let target = CGRect(x: screen.frame.minX, y: screen.frame.maxY - info.stripHeight,
+                            width: screen.frame.width, height: info.stripHeight)
         guard window.frame != target else { return false }
         window.setFrame(target, display: false)
         view.frame = CGRect(origin: .zero, size: target.size)

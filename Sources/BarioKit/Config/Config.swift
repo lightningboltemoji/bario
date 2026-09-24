@@ -23,6 +23,15 @@ public struct Config: Sendable, Equatable {
         bars.compactMap { bar in bar.display.score(for: display).map { (bar, $0) } }
             .max { $0.1 < $1.1 }?.0
     }
+
+    /// `display` with its strip as tall as it has to be: over the whole menu bar, which must
+    /// stay covered, and down to the bottom of the bar, which may hang past it. DESIGN.md §6.
+    public func strip(on display: DisplayInfo) -> DisplayInfo {
+        var display = display
+        let bar = bar(for: display)?.height(on: display) ?? Double(display.menuBarHeight)
+        display.stripHeight = max(display.menuBarHeight, CGFloat(bar))
+        return display
+    }
 }
 
 public enum DisplayFilter: Sendable, Hashable {
@@ -45,13 +54,18 @@ public enum DisplayFilter: Sendable, Hashable {
 
 public struct BarConfig: Sendable, Equatable {
     public var display: DisplayFilter = .any
-    /// nil means "this display's menu bar height".
+    /// The same on every display, down from the top of the screen. nil means "this display's
+    /// menu bar height", which differs from display to display.
     public var height: Double?
     public var align: Align = .center
     public var hole = HoleConfig()
     public var notch: NotchPolicy = .avoid
     public var items: [ItemConfig] = []
     public var position: KDLPosition = .start
+
+    public func height(on display: DisplayInfo) -> Double {
+        height ?? Double(display.menuBarHeight)
+    }
 }
 
 /// The probe's knobs, moved into config. DESIGN.md §8.

@@ -99,13 +99,8 @@ struct NodeRasterizer {
         let transformed = style.textTransform.apply(to: text)
         guard !transformed.isEmpty else { return }
         let font = CoreTextMetrics.font(for: style.font)
-        var attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color.nsColor,
-        ]
-        if style.letterSpacing != 0 { attributes[.kern] = style.letterSpacing }
-        let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: transformed, attributes: attributes))
+        let line = CoreTextMetrics.line(transformed, font: font, letterSpacing: style.letterSpacing,
+                                        color: color.nsColor)
         // Centre the ascender/descender box on the frame, which is what looks level next to
         // an icon of the same point size.
         let baseline = frame.midY - (font.ascender + font.descender) / 2

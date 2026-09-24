@@ -152,6 +152,57 @@ struct ExecTests {
         try? FileManager.default.removeItem(atPath: path)
     }
 
+    @Test("max-backoff takes a duration or seconds, and nothing else")
+    func maxBackoff() throws {
+        #expect(try ExecModule.seconds(nil, default: 30, option: "max-backoff") == 30)
+        #expect(try ExecModule.seconds(.string("5s"), default: 30, option: "max-backoff") == 5)
+        #expect(try ExecModule.seconds(.string("500ms"), default: 30, option: "max-backoff") == 0.5)
+        #expect(try ExecModule.seconds(.number(2), default: 30, option: "max-backoff") == 2)
+        #expect(throws: ModuleError.self) {
+            _ = try ExecModule.seconds(.string("soon"), default: 30, option: "max-backoff")
+        }
+        #expect(throws: ModuleError.self) {
+            _ = try ExecModule.seconds(.number(0), default: 30, option: "max-backoff")
+        }
+        // Read from the config, where a bad one fails the item rather than the restart loop.
+        #expect(throws: ModuleError.self) {
+            _ = try module(#"item "a" module="exec" interval="watch" max-backoff="soon" { command "true" }"#)
+        }
+    }
+
+    @Test("a watch that fails fast is retried at max-backoff, and picks up within it")
+    func maxBackoffRetries() async throws {
+        // `emira watch` with the daemon down: exit 69 at once, until the file says it is up.
+        let up = NSTemporaryDirectory() + "bario-exec-test-\(getpid()).up"
+        try? FileManager.default.removeItem(atPath: up)
+        let (module, store, name) = try module("""
+        item "a" module="exec" interval="watch" max-backoff="100ms" {
+          command "test -e \(up) || exit 69; echo up; sleep 30"
+        }
+        """)
+        let changes = await store.changes(matching: name)
+        await module.start()
+        // Down long enough that the default backoff would be 2s from its next try, by now;
+        // each failed run's exit has to be seen for the next one to start at all.
+        try await Task.sleep(nanoseconds: 1_600_000_000)
+        #expect(await store.value(at: name)?["exit-code"]?.intValue == 69)
+        FileManager.default.createFile(atPath: up, contents: nil)
+        let back = Date()
+        let reader = Task {
+            for await change in changes where change.value["text"]?.stringValue == "up" { return true }
+            return false
+        }
+        let ceiling = Task { try? await Task.sleep(nanoseconds: 30_000_000_000); reader.cancel() }
+        let pickedUp = await reader.value
+        let took = Date().timeIntervalSince(back)
+        ceiling.cancel()
+        await module.stop()
+        try? FileManager.default.removeItem(atPath: up)
+        #expect(pickedUp)
+        // 100ms of backoff and a shell's start, not the 1.9s the default ceiling leaves.
+        #expect(took < 1, "picked up \(took)s after the command came back")
+    }
+
     @Test("output parsing, without running anything")
     func parsing() {
         #expect(ExecModule.patch(stdout: " hi \n", stderr: "", status: 0)["text"]?.stringValue == "hi")

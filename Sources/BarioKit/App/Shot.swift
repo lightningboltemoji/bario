@@ -14,12 +14,11 @@ public enum Shot {
         if let notchWidth = options.shotNotch, notchWidth > 0 {
             notch = CGRect(x: (width - notchWidth) / 2, y: 0, width: notchWidth, height: height)
         }
-        let display = DisplayInfo(displayID: 1, name: "offscreen",
-                                  frame: CGRect(x: 0, y: 0, width: width, height: 900),
-                                  scale: CGFloat(options.shotScale), stripHeight: height,
-                                  isBuiltIn: notch != nil,
-                                  notch: notch.map { CGRect(x: $0.minX, y: 900 - height,
-                                                            width: $0.width, height: height) })
+        // `--height` is the pretend display's menu bar; a bar with a height of its own keeps it.
+        let display = theme.config.strip(on: DisplayInfo(
+            displayID: 1, name: "offscreen", frame: CGRect(x: 0, y: 0, width: width, height: 900),
+            scale: CGFloat(options.shotScale), stripHeight: height, isBuiltIn: notch != nil,
+            notch: notch.map { CGRect(x: $0.minX, y: 900 - height, width: $0.width, height: height) }))
 
         guard let bar = theme.config.bar(for: display) else {
             throw OptionError("no bar in the config matches a display called '\(display.name)'")
@@ -37,7 +36,7 @@ public enum Shot {
             backdrop.set(cgImage)
         } else {
             backdrop.set(checkerboard(width: Int(width * options.shotScale),
-                                      height: Int(height * options.shotScale)))
+                                      height: Int(display.stripHeight * options.shotScale)))
         }
 
         // `--window <gap>`: one full-width focused window that far below the bar, which is the
@@ -95,8 +94,9 @@ public enum Shot {
     /// that bubble there".
     public static func describe(_ scene: Scene) -> String {
         var lines: [String] = []
-        lines.append(String(format: "bar %.0f×%.0f on %@%@", scene.bounds.width, scene.bounds.height,
-                            scene.display.name, scene.notch != nil ? " (notched)" : ""))
+        lines.append(String(format: "bar %.0f×%.0f on %@%@ · menu bar %.0f", scene.bar.width,
+                            scene.bar.height, scene.display.name, scene.notch != nil ? " (notched)" : "",
+                            scene.display.menuBarHeight))
         lines.append("  background: \(scene.style.background)  font: \(scene.style.font)")
         for (index, row) in scene.rows.enumerated() {
             lines.append(String(format: "  row %d  x %.0f…%.0f", index, row.frame.minX, row.frame.maxX))
@@ -104,6 +104,10 @@ public enum Shot {
         }
         if !scene.hidden.isEmpty {
             lines.append("  overflowed: \(scene.hidden.map(\.name).joined(separator: ", "))")
+        }
+        if !scene.squeezed.isEmpty {
+            lines.append("  squeezed: " + scene.squeezed
+                .map { String(format: "%@ (needs %.0fpt)", $0.item, $0.needs) }.joined(separator: ", "))
         }
         return lines.joined(separator: "\n")
     }

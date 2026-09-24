@@ -29,7 +29,9 @@ public struct CommitReport: Sendable, Equatable, CustomStringConvertible {
 /// ```
 /// host layer (the surface's)
 /// └─ root              bounds = scene.bounds; opacity = 1 − reveal; mask = the hole
-///    ├─ bar chrome     the bar's background, while there is a backdrop
+///    ├─ rest           the desktop, over any menu bar left below a shorter bar
+///    ├─ bar chrome     the bar's background in scene.bar, while there is a backdrop; a
+///    │                 photograph stops at the bottom of the menu bar
 ///    └─ item           bounds = item.frame; opacity, as a group
 ///       ├─ chrome      shadow, fill, border, in the margin box
 ///       ├─ content     clipped to the bubble's rounded box
@@ -77,7 +79,9 @@ public final class Compositor {
     }
 
     private var factory = LayerFactory()
-    private let bar = Chrome()
+    let bar = Chrome()
+    /// The menu bar below a bar shorter than it.
+    let rest = Chrome()
     let hole: HoleMask
     private var items: [LayerID: ItemRecord] = [:]
     private var nodes: [LayerID: NodeRecord] = [:]
@@ -156,15 +160,29 @@ public final class Compositor {
                                      shadows: inputs.shadows, barSize: scene.bounds.size)
 
         // No backdrop yet (or ever): stay out of the way rather than showing a black bar.
+        let hasBackdrop = inputs.backdrop.image != nil
         var barStyle = Style()
         barStyle.color = scene.style.color
-        barStyle.background = inputs.backdrop.image == nil ? .none : scene.style.background
-        bar.apply(barStyle, in: scene.bounds, shadows: false, borders: false, context: context,
-                  factory: &factory)
+        barStyle.background = hasBackdrop ? scene.style.background : .none
+        // The photograph stands in for the real menu bar and for nothing below it, where a bar
+        // taller than the menu bar hangs over the live screen. Anything else fills the bar.
+        var box = scene.bar
+        if case .backdrop = barStyle.background { box = box.intersection(scene.menuBar) }
+        bar.apply(barStyle, in: box.isNull ? .zero : box, shadows: false, borders: false,
+                  context: context, factory: &factory)
+
+        // Under a bar shorter than the menu bar, the rest of the menu bar is still covered,
+        // by the desktop.
+        var restStyle = Style()
+        if hasBackdrop { restStyle.background = .backdrop(Backdrop()) }
+        let menuBar = scene.menuBar
+        rest.apply(restStyle, in: CGRect(x: menuBar.minX, y: menuBar.minY, width: menuBar.width,
+                                         height: max(0, scene.bar.minY - menuBar.minY)),
+                   shadows: false, borders: false, context: context, factory: &factory)
 
         var walk = Walk(inputs: inputs, context: context, scene: scene, isMoving: isMoving)
         let layers = scene.items.map { apply($0, walk: &walk, report: &report) }
-        root.updateSublayers(bar.layers + layers)
+        root.updateSublayers(rest.layers + bar.layers + layers)
 
         for (id, record) in items where !walk.seen.contains(id) {
             record.layer.removeFromSuperlayer()

@@ -22,13 +22,17 @@ public struct BarLayout: Sendable {
 
     public func layout(_ bar: StyledBar, on display: DisplayInfo) -> Scene {
         let config = bar.config
-        let height = config.height ?? Double(display.stripHeight)
-        let bounds = CGRect(x: 0, y: 0, width: display.frame.width, height: height)
-        var scene = Scene(display: display, bounds: bounds, style: bar.style,
+        // The cover is the strip; the bar hangs from its top edge, the same height on every
+        // display. The strip is never shorter than the bar but for a moment after a reload,
+        // before the cover has followed it.
+        let bounds = CGRect(x: 0, y: 0, width: display.frame.width, height: display.stripHeight)
+        let height = min(config.height(on: display), bounds.height)
+        let box = CGRect(x: 0, y: bounds.maxY - height, width: bounds.width, height: height)
+        var scene = Scene(display: display, bounds: bounds, bar: box, style: bar.style,
                           notch: config.notch == .avoid ? display.notchInStrip : nil,
                           hole: config.hole)
 
-        let content = bar.style.padding.inset(bounds)
+        let content = bar.style.padding.inset(box)
         let gap = bar.style.gap
         // Measure everything first: the split, the drops and the flex pass all need naturals.
         let measured = bar.items.map(measure)
@@ -37,7 +41,7 @@ public struct BarLayout: Sendable {
         // wide as a gap so the two halves sit as far apart as any two items.
         var obstacle = scene.notch.flatMap { $0.width > 1 ? $0 : nil }
         if obstacle == nil, bar.notchMarker?.mode == .always {
-            obstacle = CGRect(x: bounds.midX - gap / 2, y: 0, width: gap, height: height)
+            obstacle = CGRect(x: box.midX - gap / 2, y: box.minY, width: gap, height: height)
         }
 
         var rows: [(rect: CGRect, items: [Measured])] = []
@@ -60,6 +64,10 @@ public struct BarLayout: Sendable {
         for (rect, items) in rows {
             let (kept, dropped) = fit(items, in: rect.width, gap: gap)
             scene.hidden.append(contentsOf: dropped.map { overflowed($0, styler: bar.styler) })
+            for item in kept where item.natural.height > rect.height + 0.001 {
+                scene.squeezed.append((item.config.name,
+                                       (item.natural.height + bar.style.padding.vertical).rounded(.up)))
+            }
             scene.rows.append(SceneRow(frame: rect,
                                        items: place(kept, in: rect, gap: gap, align: config.align)))
         }

@@ -381,9 +381,27 @@ the ones that come and go transition in and out (section 7). Modes are the same 
 ### Multiple displays
 
 One config, one bar per display. `bar` can be filtered: `bar display="built-in" { … }`,
-`bar display="external" { … }`, or `bar display="DELL U2723QE"`, most specific wins. The
-bar's height defaults to that display's menu bar height (24pt normally, ~37pt on a notched
-MacBook); items align to `bar { align "center" }` within it.
+`bar display="external" { … }`, or `bar display="DELL U2723QE"`, most specific wins.
+
+**Height.** The menu bar is a different height on every display (30pt on most under macOS 27,
+38–39pt on a notched MacBook, and not always the same number twice), and a bar laid out in
+whatever it is given cannot be designed: every point up there is spoken for, so a bubble that
+fits one display is squeezed on the next. So `bar { height 38 }` is the bar's height on every
+display, hanging from the top edge of the screen, and items align to `bar { align "center" }`
+within it. Without `height`, the bar is each display's menu bar, and an item too tall for it is
+squeezed with a warning naming the height that would hold it.
+
+The cover is as tall as whichever reaches further down, the menu bar or the bar:
+
+- a menu bar taller than the bar is still covered to its bottom, by the desktop: the
+  photograph, as an invisible bar would show;
+- a bar taller than the menu bar hangs below it, over the live screen. macOS has no way to push
+  other apps' windows down, so it overlaps the top of a window there. The config is drawn in
+  full — a colour or gradient fills the whole bar, and a `background: backdrop` bubble shows the
+  desktop across all of itself — but the bar's own photograph stops at the bottom of the menu
+  bar, since it only ever stood in for what the cover hides. Below it the screen is live, and so
+  are its windows' shadows. A click there is on a window and opens no menu, so it does not
+  latch the reveal.
 
 ## 7. Appearance
 

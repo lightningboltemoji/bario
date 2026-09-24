@@ -51,7 +51,8 @@ public struct RunOptions: Sendable {
 
     --shot options:
       --width <pt>          bar width (default 1440)
-      --height <pt>         bar height (default: the menu bar height)
+      --height <pt>         the menu bar's height (default 24); a bar with its own
+                            `height` keeps that
       --notch <pt>          pretend the display has a notch this wide, centred
       --backdrop <path>     an image to use as the photographed backdrop
       --scale <n>           points per pixel (default 2)

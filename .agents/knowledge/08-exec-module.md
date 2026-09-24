@@ -45,14 +45,23 @@ the same rule modules follow everywhere else.
 - Interval runs get a budget (`timeout`, default 10s); over it, the process is terminated,
   then killed, and the item goes `.stale`.
 - A watched process that exits is restarted with exponential backoff from 0.5s to 30s, and
-  the backoff resets once it has run for a while. A command that cannot start at all becomes
-  one `.error` bubble, not a restart storm.
+  the backoff resets once it has run for a while. `max-backoff` lowers (or raises) that 30s
+  ceiling: a watch on a daemon that fails fast when the daemon is down — `emira watch` exits
+  69 — can afford `max-backoff="5s"`, and then finds the daemon within 5s of it coming back.
+  A command that cannot start at all becomes one `.error` bubble, not a restart storm.
+- An exit is waited for through `terminationHandler`, never `waitUntilExit()`. Without a
+  handler, Foundation delivers the exit through the run loop of the thread that launched the
+  process, and `waitUntilExit()` on that thread waits for the delivery, not just the exit. On a
+  concurrency thread it waited for good: a watch sat there for minutes, with `isRunning`
+  already false, while `emira watch` had long since exited 69 and been reaped. With a handler
+  set, Foundation marks the exit delivered itself and calls the handler from a dispatch queue.
 - `stop()` terminates the process group, so a watched `sh -c` does not leave its child behind.
 - The environment is inherited plus `BARIO_ITEM`, so one script can serve several items.
 
 ## Tests
 
 Plain text, JSON object, waybar-shaped JSON with classes, a non-zero exit, a command that
-does not exist, a watched command emitting several lines, and a watched command that exits
-being restarted. All of them run real `/bin/sh`, because the point of this module is that it
+does not exist, a watched command emitting several lines, a watched command that exits
+being restarted, and one that fails fast being retried at `max-backoff` and picked up within
+it once it works again. All of them run real `/bin/sh`, because the point of this module is that it
 runs real commands.
