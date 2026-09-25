@@ -136,6 +136,9 @@ The initial set, chosen because each one replaces something the cover is hiding:
   like waybar's `exec` with continuous output). Stdout is either plain text or, if it parses,
   JSON, which is written into the store as-is. Format strings apply as usual, and a line with
   a `content` key shows that content tree, so a script can draw anything a module can.
+  Commands see the environment a terminal would give them: a bario opened from Finder or at
+  login first takes on the user's login shell's, since under launchd's `PATH` nothing that
+  Homebrew or cargo installed is found.
 - The socket (section 4): any process writes state under any item's key, or pushes a whole
   content tree to a `data` item. The `bario` CLI wraps this for shell use.
 - `source`: a module that only writes state. It is configured like an item, runs like one, and

@@ -49,7 +49,7 @@ release:
 # hosted runner, several times slower than a laptop, a wait that takes a millisecond here can take
 # seconds. So they run afterwards, one at a time. A test that waits on the real world belongs in a
 # suite listed here, and waits the way Tests/BarioKitTests/Waiting.swift says.
-REAL_TIME := \.(FileWatcherTests|ExecTests|SocketServerTests|SocketClientTests|SurfaceHandOffTests|ModuleHostTests|WasmModuleTests)/
+REAL_TIME := \.(FileWatcherTests|ExecTests|SocketServerTests|SocketClientTests|SurfaceHandOffTests|ModuleHostTests|WasmModuleTests|LoginShellTests)/
 
 test:
 	swift test $(TEST_FLAGS) --skip '$(REAL_TIME)' $(QUIET)

@@ -56,12 +56,19 @@ the same rule modules follow everywhere else.
   already false, while `emira watch` had long since exited 69 and been reaped. With a handler
   set, Foundation marks the exit delivered itself and calls the handler from a dispatch queue.
 - `stop()` terminates the process group, so a watched `sh -c` does not leave its child behind.
-- The environment is inherited plus `BARIO_ITEM`, so one script can serve several items.
+- The environment is inherited plus `BARIO_ITEM`, so one script can serve several items. A bario
+  that launchd started (Finder, `open`, a login item) has first taken on the login shell's
+  environment (`LoginShell.adopt()`, from `main.swift`), so what it inherits is what a terminal
+  would have: launchd's `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`, and under it `emira watch`
+  exited 127 in Bario.app while working under `bario --run`, with no bubble to say so. The shell
+  runs `-l -i -c`, and its output is read up to a closing marker rather than to the end, because
+  a startup file can leave something running that holds stdout. 5s at most, then launchd's.
 
 ## Tests
 
 Plain text, JSON object, waybar-shaped JSON with classes, a non-zero exit, a command that
 does not exist, a watched command emitting several lines, a watched command that exits
 being restarted, and one that fails fast being retried at `max-backoff` and picked up within
-it once it works again. All of them run real `/bin/sh`, because the point of this module is that it
+it once it works again. `LoginShellTests` runs a stub shell that prints around the environment
+and leaves a child holding stdout, and one that never answers. All of them run real `/bin/sh`, because the point of this module is that it
 runs real commands.

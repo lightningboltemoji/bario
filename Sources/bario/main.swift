@@ -9,10 +9,15 @@ if arguments.first == "--version" {
     note(barioVersion)
     exit(0)
 }
-// Opened from Finder, with `open`, or as a login item, the executable gets no arguments and
-// launchd for a parent: that is a request to run the bar. The same empty command line typed in a
+// Opened from Finder, with `open`, or as a login item, the executable has launchd for a parent and
+// almost no environment. It takes on the one a terminal would have given it, before anything
+// reads it, so Bario.app finds the same commands and overrides that `bario --run` does.
+let startedByLaunchd = getppid() == 1
+if startedByLaunchd { LoginShell.adopt() }
+
+// No arguments from launchd is a request to run the bar. The same empty command line typed in a
 // terminal is a request for help.
-let launchedAsApp = arguments.isEmpty && getppid() == 1
+let launchedAsApp = arguments.isEmpty && startedByLaunchd
 
 if !launchedAsApp && (arguments.isEmpty || arguments.first == "-h" || arguments.first == "--help") {
     note(RunOptions.usage)
