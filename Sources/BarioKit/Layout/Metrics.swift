@@ -97,7 +97,13 @@ public final class CoreTextMetrics: Metrics, @unchecked Sendable {
             return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
                 .withSymbolConfiguration(configuration)
         case .file(let path):
-            return NSImage(contentsOfFile: (path as NSString).expandingTildeInPath)
+            let path = (path as NSString).expandingTildeInPath
+            // An app is a folder, with no image of its own to read: it draws as Finder shows it.
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+                return NSWorkspace.shared.icon(forFile: path)
+            }
+            return NSImage(contentsOfFile: path)
         }
     }
 

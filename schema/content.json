@@ -55,7 +55,7 @@
           ]
         },
         "icon": {
-          "description": "An SF Symbol name, or a file. A string containing a slash or leading ~ is a file.",
+          "description": "An SF Symbol name, or a file. A string containing a slash or leading ~ is a file. A file that is an app, or any folder, draws its Finder icon.",
           "oneOf": [
             { "type": "string" },
             { "type": "object", "properties": { "file": { "type": "string" } }, "required": ["file"] },

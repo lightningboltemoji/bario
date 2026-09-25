@@ -55,6 +55,11 @@ the same rule modules follow everywhere else.
   concurrency thread it waited for good: a watch sat there for minutes, with `isRunning`
   already false, while `emira watch` had long since exited 69 and been reaped. With a handler
   set, Foundation marks the exit delivered itself and calls the handler from a dispatch queue.
+- A watch's stdout is read by a `readabilityHandler` of its own (`ExecModule.lines(of:)`), never
+  `FileHandle.bytes`. Every `AsyncBytes` in a process reads on one serial queue, with a blocking
+  `read`, so beside a quiet `emira watch` a second watch got its first line and then nothing until
+  emira spoke again. **Measured:** a quiet watch and one printing a line every 500ms left the second at
+  its first line of six; each reading its own pipe, it gets all six.
 - `stop()` terminates the process group, so a watched `sh -c` does not leave its child behind.
 - The environment is inherited plus `BARIO_ITEM`, so one script can serve several items. A bario
   that launchd started (Finder, `open`, a login item) has first taken on the login shell's
@@ -66,9 +71,10 @@ the same rule modules follow everywhere else.
 
 ## Tests
 
-Plain text, JSON object, waybar-shaped JSON with classes, a non-zero exit, a command that
-does not exist, a watched command emitting several lines, a watched command that exits
-being restarted, and one that fails fast being retried at `max-backoff` and picked up within
-it once it works again. `LoginShellTests` runs a stub shell that prints around the environment
-and leaves a child holding stdout, and one that never answers. All of them run real `/bin/sh`, because the point of this module is that it
-runs real commands.
+Plain text, JSON object, waybar-shaped JSON with classes, a non-zero exit, a command that does
+not exist, a watched command emitting several lines, one doing so beside a watch that has gone
+quiet, a watched command that exits being restarted, and one that fails fast being retried at
+`max-backoff` and picked up within it once it works again. `LoginShellTests` runs a stub shell
+that prints around the environment and leaves a child holding stdout, and one that never
+answers. All of them run real `/bin/sh`, because the point of this module is that it runs real
+commands.

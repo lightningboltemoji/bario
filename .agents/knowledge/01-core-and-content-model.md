@@ -69,7 +69,8 @@ Decoding rules, which are the schema in executable form:
   add node types at runtime (§9.2) and the decoder cannot know the registry;
 - `class` accepts a string or an array of strings, `id` a string;
 - shorthands: `{"text": "hi"}` and `{"text": {"value": "hi"}}`; `{"icon": "wifi"}` and
-  `{"icon": {"file": "..."}}`; `{"spacer": {}}` and `{"spacer": null}`.
+  `{"icon": {"file": "..."}}`; `{"spacer": {}}` and `{"spacer": null}`. A file icon naming a folder,
+  which an app is, draws its Finder icon rather than nothing.
 
 `canvas.ops` and `raster.source` stay as `JSONValue` until increments 12 and 16 give them
 typed forms — the display list is data that the host paints, and the parser for the op set

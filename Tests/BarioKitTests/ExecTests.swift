@@ -132,6 +132,38 @@ struct ExecTests {
         #expect(seen.last == "line-3")
     }
 
+    @Test("a watch that has gone quiet does not hold up another watch's lines")
+    func quietNeighbour() async throws {
+        let (quiet, _, _) = try module("""
+        item "q" module="exec" interval="watch" { command "echo quiet; sleep 30" }
+        """)
+        let (ticker, store, name) = try module("""
+        item "t" module="exec" interval="watch" {
+          command "sleep 0.3; for i in 1 2 3; do echo line-$i; sleep 0.1; done; sleep 30"
+        }
+        """)
+        await quiet.start()
+        let changes = await store.changes(matching: name)
+        await ticker.start()
+        let reader = Task {
+            var seen: [String] = []
+            for await change in changes {
+                if let text = change.value["text"]?.stringValue, seen.last != text {
+                    seen.append(text)
+                }
+                if seen.last == "line-3" { break }
+            }
+            return seen
+        }
+        // Three lines 100ms apart; the quiet watch says nothing more for 30s.
+        let ceiling = Task { try? await Task.sleep(nanoseconds: 5_000_000_000); reader.cancel() }
+        let seen = await reader.value
+        ceiling.cancel()
+        await quiet.stop()
+        await ticker.stop()
+        #expect(seen.last == "line-3", "\(seen)")
+    }
+
     @Test("a watched command that exits is restarted")
     func restarts() async throws {
         let path = NSTemporaryDirectory() + "bario-exec-test-\(getpid()).count"
@@ -214,5 +246,16 @@ struct ExecTests {
         #expect(ExecModule.classes(from: .string("a b")) == ["a", "b"])
         #expect(ExecModule.classes(from: .array([.string("a")])) == ["a"])
         #expect(ExecModule.classes(from: nil).isEmpty)
+    }
+
+    @Test("a pipe's bytes become whole lines, however they are cut")
+    func lineSplitting() {
+        let splitter = LineSplitter()
+        #expect(splitter.append(Data("{\"a\"".utf8)).isEmpty)
+        #expect(splitter.append(Data(": 1}\nnext\r\nhalf".utf8)) == [#"{"a": 1}"#, "next"])
+        #expect(splitter.append(Data("\n\n".utf8)) == ["half", ""])
+        #expect(splitter.append(Data("tail".utf8)).isEmpty)
+        #expect(splitter.rest() == "tail")
+        #expect(splitter.rest() == nil)
     }
 }

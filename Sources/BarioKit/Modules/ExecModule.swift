@@ -169,14 +169,10 @@ public actor ExecModule: Module {
         }
         running = process
 
-        do {
-            for try await line in out.fileHandleForReading.bytes.lines {
-                guard !Task.isCancelled else { break }
-                await context.store.merge(ExecModule.patch(stdout: line, stderr: "", status: 0),
-                                          at: context.item)
-            }
-        } catch {
-            // A closed pipe is how this ends; it is not news.
+        for await line in ExecModule.lines(of: out.fileHandleForReading) {
+            guard !Task.isCancelled else { break }
+            await context.store.merge(ExecModule.patch(stdout: line, stderr: "", status: 0),
+                                      at: context.item)
         }
         let status = await ExecModule.status(exited)
         running = nil
@@ -238,6 +234,26 @@ public actor ExecModule: Module {
         }
     }
 
+    /// A pipe's lines as they arrive, ending when it closes. Not `FileHandle.bytes`: every
+    /// `AsyncBytes` in a process reads on one serial queue, with a blocking `read`, so a watch
+    /// that had gone quiet held every other watch's lines until it spoke again.
+    static func lines(of handle: FileHandle) -> AsyncStream<String> {
+        let splitter = LineSplitter()
+        return AsyncStream { continuation in
+            handle.readabilityHandler = { handle in
+                let chunk = handle.availableData
+                guard !chunk.isEmpty else {
+                    handle.readabilityHandler = nil
+                    if let rest = splitter.rest() { continuation.yield(rest) }
+                    continuation.finish()
+                    return
+                }
+                for line in splitter.append(chunk) { continuation.yield(line) }
+            }
+            continuation.onTermination = { _ in handle.readabilityHandler = nil }
+        }
+    }
+
     /// The exit status, or -1 if the wait was cancelled first.
     static func status(_ exited: AsyncStream<Int32>) async -> Int32 {
         for await status in exited { return status }
@@ -282,6 +298,35 @@ public actor ExecModule: Module {
         case .some(.array(let list)): return list.compactMap(\.stringValue)
         default: return []
         }
+    }
+}
+
+/// Bytes in, whole lines out, without their `\n` or `\r\n`.
+final class LineSplitter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending = Data()
+
+    func append(_ chunk: Data) -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        pending.append(chunk)
+        var lines: [String] = []
+        while let newline = pending.firstIndex(of: 0x0A) {
+            lines.append(LineSplitter.text(pending[pending.startIndex..<newline]))
+            pending = Data(pending[pending.index(after: newline)...])
+        }
+        return lines
+    }
+
+    /// What is left after the last newline: the last line of output that did not end in one.
+    func rest() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        defer { pending = Data() }
+        return pending.isEmpty ? nil : LineSplitter.text(pending)
+    }
+
+    private static func text(_ bytes: Data) -> String {
+        let line = bytes.last == 0x0D ? bytes.dropLast() : bytes
+        return String(decoding: line, as: UTF8.self)
     }
 }
 

@@ -448,6 +448,35 @@ struct PainterTests {
                 "the waves are lighter than the speaker: \(shaded.count) against \(flat.count)")
     }
 
+    @Test("a path to an app draws the app's icon: its shape in the tint, or itself when asked")
+    func appIcon() throws {
+        // What the icon looks like is the machine's icon style (Clear icons are grey), so the
+        // test asks only whether the tint was applied.
+        func opaque(_ rendering: String) throws -> (count: Int, allRed: Bool) {
+            let image = try paint(#"bar { item "a" module="text" }"#, css: """
+            bar { padding: 0; background: none }
+            item { padding: 0; background: none; color: rgb(255, 0, 0) }
+            icon { icon-size: 20pt; icon-rendering: \(rendering) }
+            """, content: ["a": Node(.icon(.file("/System/Applications/Calculator.app")))])
+            var count = 0
+            var allRed = true
+            for x in stride(from: 0.0, to: 24.0, by: 0.5) {
+                for y in stride(from: 0.0, to: 24.0, by: 0.5) {
+                    let p = pixel(image, x, y)
+                    guard p.a > 0.9 else { continue }
+                    count += 1
+                    if !(p.r > 0.9 && p.g < 0.1 && p.b < 0.1) { allRed = false }
+                }
+            }
+            return (count, allRed)
+        }
+        let tinted = try opaque("monochrome")
+        let itself = try opaque("multicolor")
+        #expect(tinted.count > 400 && itself.count > 400, "\(tinted.count), \(itself.count)")
+        #expect(tinted.allRed)
+        #expect(!itself.allRed)
+    }
+
     @Test("offscreen, an animation is shown as far into it as asked: a quarter of a clockwise turn")
     func animationOffscreen() throws {
         // A bar from the centre of a 20×20 canvas to its right edge.

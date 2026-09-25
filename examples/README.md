@@ -11,6 +11,7 @@ actually write; these are the same contracts with the sugar taken off.
 | `weather/` | the design's worked example, in Rust: `http`, permissions, state, render |
 | `surface/` | a native process drawing into shared IOSurfaces with Metal, shown with no copy |
 | `emira/` | another program's stream as a source, a mode that takes part of the bar over, a roll, and a Rust module rendering from the source |
+| `ping/` | one source feeding several items: an app's Dock badge per item, its state as classes for the stylesheet |
 
 ## counter.wat
 
@@ -175,3 +176,64 @@ The stylesheet is the same for both, since both draw the same tree.
 The pieces are general. `source` puts any program's stream in the store, `mode` turns a
 condition into an arrangement, and `@starting-style` and `:leaving` animate whatever comes and
 goes. The module and the filter are the only parts that know emira's schema.
+
+## ping
+
+[Ping](https://github.com/lightningboltemoji/Ping)'s reading of the Dock in the bar: an app's icon
+beside its badge, the count or word the Dock shows, or a dot. What state the badge is in is a
+class, so how it looks is the stylesheet's business. Nothing in bario reads the Dock or needs
+Accessibility; Ping does, and `ping-dot-app watch` streams what it read. It needs a Ping with
+`watch`.
+
+```sh
+rustup target add wasm32-unknown-unknown
+ping/badge/build.sh     # installs ~/.config/bario/modules/ping-badge.wasm
+```
+
+Then in `config.kdl`, one source and an item per app:
+
+```kdl
+// Ping's reading of the Dock, under `ping`: every app's badge, and whether it was acknowledged
+// or snoozed. No bubble. `watch` exits at once while Ping is down, so retry often.
+source "ping" module="exec" interval="watch" max-backoff="5s" {
+  command "/Applications/Ping.app/Contents/MacOS/ping-dot-app" "watch"
+}
+
+bar {
+  // A group with nothing shown in it is not drawn, so it goes with the last quiet app.
+  group "badges" {
+    item "slack" module="wasm" path="~/.config/bario/modules/ping-badge.wasm" on-click="exec open -a Slack" {
+      config app="Slack" warn=5 critical=10 hide="quiet"
+    }
+    item "messages" module="wasm" path="~/.config/bario/modules/ping-badge.wasm" on-click="exec open -a Messages" {
+      config app="Messages" hide="quiet"
+    }
+  }
+  // …
+}
+```
+
+`app` is the title under the icon in the Dock. `warn` and `critical` are counts; `hide="clear"`
+hides an app while it has no badge, and `hide="quiet"` also while Ping has it acknowledged or
+snoozed. `icon` takes an SF Symbol name in place of the app's own icon, and `dot` what a bare dot
+shows. The item wears one of `.clear`, `.dot`, `.count` and `.text`, `.badged` with any but the
+first, and `.warn`, `.critical`, `.acknowledged`, `.snoozed`, `.absent` (not in the Dock) and
+`.silent` (Ping stopped answering, so this is the last thing it said). In `style.css`:
+
+```css
+/* The app's own icon in colour while it has something to say, its shape alone while it has not,
+   and the count in red once it is worth dropping things for. */
+#badges .app { icon-rendering: multicolor; icon-size: 15pt; }
+#badges .clear .app { icon-rendering: monochrome; }
+#badges .badge { font-weight: bold; }
+#badges .warn .badge { color: rgb(255, 190, 90); }
+#badges .critical .badge { color: rgb(255, 95, 85); }
+#badges .acknowledged, #badges .snoozed, #badges .silent { opacity: 0.5; }
+```
+
+The icon is `{"icon": {"file": "/Applications/Slack.app"}}`, from the path Ping publishes: a file
+icon naming an app draws the app's icon, as Finder does, so it follows the system's icon style.
+
+Where emira's module renders one row from the whole source, this one renders one app, and each
+item keeps only its own app's part of the source under its own key, so a badge on Slack does not
+re-render Messages.
