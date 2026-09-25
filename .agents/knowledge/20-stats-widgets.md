@@ -85,8 +85,8 @@ written in KDL like a user's own, and the root node carries the preset's name as
 | `net` | `stacked` | upload over download |
 | `net` | `graph` | the download history, and the rate |
 | `mem` | `stacked` | used over the pressure level |
-| `mem` | `meter` | a meter and the percentage |
-| `mem` | `graph` | the history as an area, and the percentage |
+| `mem` | `meter` | a meter and the percentage, of pressure |
+| `mem` | `graph` | the pressure history as an area, and the percentage |
 
 A preset beside `format=` or `content` is an error: an item shows one of them. `scroll=` and
 `kind=` on the item reach the preset's graph.
@@ -118,7 +118,7 @@ sample of latency: the newest value slides into view rather than appearing at on
 |---|---|
 | `cpu` | `load-<w>` per window (0…100); `history` null padded |
 | `net` | `rx-<w>`, `tx-<w>` per window (bytes/s); `interface`; histories null padded |
-| `mem` | `pct-<w>` per window; `pressure` (`normal`, `warn`, `critical`); `swap-used`; `history` null padded |
+| `mem` | `pct-<w>` per window; `pressure` (`normal`, `warn`, `critical`); `pressure-pct`, `pressure-fraction`, `pressure-pct-<w>`, `pressure-history`; `swap-used`; `history` null padded |
 
 **`net` counts the primary interface by default**, the one the system routes through
 (`State:/Network/Global/IPv4` in the dynamic store), looked up again every few seconds so a
@@ -136,8 +136,22 @@ one adds nothing on the sample it changes rather than a jump.
 what decides whether the machine is short of memory: a Mac using most of its memory is normal.
 It sets `pressure-warn` and `pressure-critical` classes.
 
+**Pressure is the headline, not used.** `pressure-pct` is 100 less `kern.memorystatus_level`,
+the free percentage `memory_pressure` prints, which tracks what wired and compressed memory
+take: the part that runs out. Used cannot show a Mac running out, because the compressor keeps
+it under the RAM there is however far past it demand goes. Measured on a 24 GB machine, eating
+16.5 GB of pages that compress 2:1 took used from 56% to 75% and pressure from 19% to 57%, and
+the kernel's level went to `warn` there: 75% used already meant trouble. A build that took the
+same machine past critical to a watchdog panic had the compressor holding 19 GB of the 24. So
+`meter` and `graph` show pressure, and `stacked` keeps used bytes over the level.
+
+`used` is what Activity Monitor calls Memory Used: app memory (anonymous pages, less the
+purgeable ones), wired, and what the compressor occupies. Counting `active` pages instead read
+high at rest, since they include file cache, and low under pressure, since app pages waiting to
+be compressed sit inactive.
+
 **Thresholds.** `warn` and `critical`, like `battery`'s `low`, set a `warn` or `critical` class
-from `cpu`'s `load` and `mem`'s `pct`, one or the other, never both.
+from `cpu`'s `load` and `mem`'s `pressure-pct`, one or the other, never both.
 
 **Tooltips** say everything the module knows, every window included, for the item that shows
 only two numbers.
@@ -151,4 +165,5 @@ whole-slot values keep their type, mixed strings format, missing slots, `{{` esc
 rows, classes from slots, read tracking, a malformed template refused at load. The two specs.
 Graph decoding with nulls, `kind`, `floor` and `scroll`; pixels for area and bars; a smooth
 graph gets a clip, a strip one step wider, and an animation only after its second set of values.
-Presets for every module parse and render.
+Presets for every module parse and render, and `mem`'s meter and graph read pressure. Used from
+synthetic page counts; pressure from the free percentage, clamped.

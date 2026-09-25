@@ -301,6 +301,58 @@ struct ModuleHostTests {
         await host.shutdown()
     }
 
+    @Test("an overrun render that finishes after all still lands")
+    @MainActor
+    func lateRender() async throws {
+        let module = GatedModule(held: [2])
+        ModuleRegistry.register("late-test") { _ in module }
+        let host = ModuleHost()
+        let config = try ConfigLoader.parse(#"bar { item "late" module="late-test" }"#)
+        await host.load(config.bars[0].items)
+        await host.renderPending()
+        #expect(host.state(for: "late")?.result.content == .text("render 1"))
+
+        await host.store.merge(.object(["tick": 1]), at: "late")
+        host.markDirty(["late"])
+        await host.renderPending()
+        #expect(host.state(for: "late")?.stale == true, "over budget while it waits")
+        #expect(host.state(for: "late")?.result.content == .text("render 1"))
+
+        await module.open(2)
+        #expect(await eventually { host.state(for: "late")?.result.content == .text("render 2") })
+        #expect(host.state(for: "late")?.stale == false)
+        await host.shutdown()
+    }
+
+    @Test("a late render never replaces a newer one")
+    @MainActor
+    func lateRenderLosesToNewer() async throws {
+        let module = GatedModule(held: [2])
+        ModuleRegistry.register("late-order-test") { _ in module }
+        let host = ModuleHost()
+        var shown: [Node?] = []
+        host.onRendered = { [unowned host] name in shown.append(host.state(for: name)?.result.content) }
+        let config = try ConfigLoader.parse(#"bar { item "late" module="late-order-test" }"#)
+        await host.load(config.bars[0].items)
+        await host.renderPending()
+
+        for tick in 1...2 {
+            await host.store.merge(.object(["tick": .number(Double(tick))]), at: "late")
+            host.markDirty(["late"])
+            await host.renderPending()
+        }
+        #expect(host.state(for: "late")?.result.content == .text("render 3"), "the newer render landed")
+
+        await module.open(2)
+        #expect(await eventually { await module.finished.contains(2) })
+        await host.store.merge(.object(["tick": 3]), at: "late")
+        host.markDirty(["late"])
+        await host.renderPending()
+        #expect(host.state(for: "late")?.result.content == .text("render 4"))
+        #expect(!shown.contains(.text("render 2")), "render 2 finished after render 3 landed")
+        await host.shutdown()
+    }
+
     @Test("a source writes state, never renders, and holds up nobody's first render")
     @MainActor
     func sources() async throws {
@@ -482,6 +534,34 @@ actor SlowModule: Module {
         if calls == 1 { return RenderResult(content: .text("first")) }
         try await Task.sleep(nanoseconds: 60_000_000_000)
         return RenderResult(content: .text("late"))
+    }
+}
+
+/// Renders "render N" for its Nth render. The renders named in `held` wait until the test
+/// opens them, so one can overrun its budget for as long as a test needs and then finish.
+actor GatedModule: Module {
+    private let held: Set<Int>
+    private var calls = 0
+    private var opened: Set<Int> = []
+    private var gates: [Int: CheckedContinuation<Void, Never>] = [:]
+    private(set) var finished: [Int] = []
+
+    init(held: Set<Int>) { self.held = held }
+
+    func render(_ state: StateReader) async throws -> RenderResult {
+        calls += 1
+        let call = calls
+        _ = state.own
+        if held.contains(call), !opened.contains(call) {
+            await withCheckedContinuation { gates[call] = $0 }
+        }
+        finished.append(call)
+        return RenderResult(content: .text("render \(call)"))
+    }
+
+    func open(_ call: Int) {
+        opened.insert(call)
+        gates.removeValue(forKey: call)?.resume()
     }
 }
 

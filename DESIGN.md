@@ -272,6 +272,7 @@ Behind a `WasmEngine` protocol with two candidate implementations:
 Each module instance runs on its own actor with a per-call budget (50ms for `render`, more
 for `poll`). Over budget: the call is abandoned, the item shows its last content plus a
 `.stale` class, and the module is restarted after backoff. A module cannot take the bar down.
+A render that finishes late still lands, unless a newer one has.
 
 Memory: 16MB default linear memory cap per instance. Modules are instantiated once and live
 for the config's lifetime; `reload` reinstantiates.

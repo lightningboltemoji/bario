@@ -56,7 +56,9 @@ as `JSONValue` — the same bytes a WASM module gets from `init(ptr, len)`.
 `ModuleHost` owns the instances: it runs each module's poll timer, feeds it events, calls
 `render` when its state is dirty, and caches the last good `RenderResult`. A module that
 throws or overruns keeps its last content and gains the `.stale` class; it never takes the
-bar down.
+bar down. An overrun render is not thrown away: it lands when it finishes, unless a newer
+render already has (renders are numbered as they start). Under memory pressure every render
+can overrun, and discarding them froze an item on whatever it showed last.
 
 Periodic polls keep one clock, `Tick`: an item polled every N seconds polls at the next
 multiple of N on the wall clock, 5ms past it, so every item on one period polls at the same
@@ -98,4 +100,4 @@ extra configuration.
 Store merge/replace/delete and path semantics; read tracking invalidates the right items and
 only those; glob subscriptions; format string compilation, every spec form, missing slots,
 literal braces; the clock's alignment maths; a module that throws keeps its last content and
-gains `.stale`.
+gains `.stale`; an overrun render lands when it finishes, and never over a newer one.

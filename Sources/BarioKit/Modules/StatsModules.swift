@@ -297,14 +297,24 @@ public actor CPUModule: Module {
 }
 
 /// `host_statistics64` page counts, plus the memory pressure the system itself reports.
+///
+/// Pressure is the headline, not used: the compressor keeps used memory under the RAM there
+/// is however far past it demand goes, so used barely moves as a Mac runs out
+/// ([20-stats-widgets.md]).
 public actor MemModule: Module {
     private let context: ModuleContext
     private let view: StatsRenderer
     private let sampling: Sampling
     private let thresholds: Thresholds
     /// Memory is a gauge, not a counter, so a window is the mean of the samples in it.
-    private var samples: Ring<Double>
+    private var samples: Ring<Sample>
     private var history: History
+    private var pressureHistory: History
+
+    struct Sample: Sendable {
+        var used: Double
+        var pressure: Double
+    }
 
     public init(context: ModuleContext) throws {
         self.context = context
@@ -320,26 +330,29 @@ public actor MemModule: Module {
                 """,
             "meter": """
                 row class="meter" align="center" {
-                  meter value="{fraction}"
-                  text "{pct:%3.0f}%"
+                  meter value="{pressure-fraction}"
+                  text "{pressure-pct:%3.0f}%"
                 }
                 """,
             "graph": """
                 row class="graph" align="center" {
-                  graph values="{history}" max=1 \(try StatsRenderer.graph(context))
-                  text "{pct:%3.0f}%"
+                  graph values="{pressure-history}" max=1 \(try StatsRenderer.graph(context))
+                  text "{pressure-pct:%3.0f}%"
                 }
                 """,
         ])
         self.thresholds = Thresholds(context)
         self.samples = Ring(capacity: sampling.depth)
         self.history = History(capacity: sampling.history)
+        self.pressureHistory = History(capacity: sampling.history)
     }
 
     public func poll() async -> PollResult {
         let usage = MemModule.read()
-        samples.append(usage.fraction)
+        let pressure = MemModule.pressureFraction()
+        samples.append(Sample(used: usage.fraction, pressure: pressure))
         history.append(usage.fraction)
+        pressureHistory.append(pressure)
         var patch: [String: JSONValue] = [
             "used": .number(usage.used),
             "total": .number(usage.total),
@@ -349,34 +362,39 @@ public actor MemModule: Module {
             "total-human": .string(Humanise.bytes(usage.total)),
             "history": history.padded,
             "pressure": .string(MemModule.pressure().rawValue),
+            "pressure-fraction": .number((pressure * 1000).rounded() / 1000),
+            "pressure-pct": .number((pressure * 100).rounded()),
+            "pressure-history": pressureHistory.padded,
             "swap-used": .number(MemModule.swapUsed()),
             "icon": .string("memorychip"),
         ]
         for window in sampling.windows {
-            patch["pct-\(window.name)"] = .number((MemModule.mean(samples.suffix(window.samples)) * 100).rounded())
+            let recent = samples.suffix(window.samples)
+            patch["pct-\(window.name)"] = .number((MemModule.mean(recent.map(\.used)) * 100).rounded())
+            patch["pressure-pct-\(window.name)"] = .number((MemModule.mean(recent.map(\.pressure)) * 100).rounded())
         }
         return PollResult(patch: .object(patch), every: sampling.interval)
     }
 
     public func render(_ state: StateReader) async throws -> RenderResult {
-        var classes = thresholds.classes(state.value("pct")?.doubleValue)
+        var classes = thresholds.classes(state.value("pressure-pct")?.doubleValue)
         let pressure = state.value("pressure")?.stringValue ?? Pressure.normal.rawValue
         if pressure != Pressure.normal.rawValue { classes.append("pressure-\(pressure)") }
         var tooltip = "\(state.value("used-human")?.stringValue ?? "") of "
-            + "\(state.value("total-human")?.stringValue ?? "") used  pressure \(pressure)  "
+            + "\(state.value("total-human")?.stringValue ?? "") used  "
+            + "pressure \(state.value("pressure-pct")?.intValue ?? 0)% \(pressure)  "
             + "swap \(Humanise.bytes(state.value("swap-used")?.doubleValue ?? 0))"
         for window in sampling.windows {
-            tooltip += "\n\(window.name): \(state.value("pct-\(window.name)")?.intValue ?? 0)%"
+            tooltip += "\n\(window.name): pressure \(state.value("pressure-pct-\(window.name)")?.intValue ?? 0)%"
+                + "  used \(state.value("pct-\(window.name)")?.intValue ?? 0)%"
         }
         return RenderResult(content: try view.render(state), classes: classes, tooltip: tooltip)
     }
 
-    static func mean(_ values: ArraySlice<Double>) -> Double {
+    static func mean(_ values: some Collection<Double>) -> Double {
         values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
     }
 
-    /// "Used" is what Activity Monitor calls App Memory plus wired plus compressed: the pages
-    /// that are not available to anyone else.
     static func read() -> (used: Double, total: Double, fraction: Double) {
         let total = Double(ProcessInfo.processInfo.physicalMemory)
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
@@ -389,10 +407,32 @@ public actor MemModule: Module {
         guard status == KERN_SUCCESS else { return (0, total, 0) }
         var pageSize = vm_size_t(0)
         host_page_size(mach_host_self(), &pageSize)
-        let page = Double(pageSize)
-        let used = (Double(stats.active_count) + Double(stats.wire_count)
-                    + Double(stats.compressor_page_count)) * page
+        let used = MemModule.used(stats, pageSize: Double(pageSize))
         return (used, total, total > 0 ? min(1, used / total) : 0)
+    }
+
+    /// What Activity Monitor calls Memory Used: App Memory (anonymous pages, less those their
+    /// owner marked purgeable), wired, and what the compressor occupies. Not `active`, which
+    /// counts file cache that is free for the taking and misses app pages waiting, inactive,
+    /// to be compressed.
+    static func used(_ stats: vm_statistics64, pageSize: Double) -> Double {
+        let app = max(0, Double(stats.internal_page_count) - Double(stats.purgeable_count))
+        return (app + Double(stats.wire_count) + Double(stats.compressor_page_count)) * pageSize
+    }
+
+    /// The share of memory the kernel counts as spoken for, 0…1: the complement of
+    /// `kern.memorystatus_level`, the free percentage `memory_pressure` prints. It tracks what
+    /// wired and compressed memory take, which is what runs out, so unlike used it keeps
+    /// climbing as demand passes RAM.
+    static func pressureFraction() -> Double {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname("kern.memorystatus_level", &level, &size, nil, 0) == 0 else { return 0 }
+        return pressureFraction(freePercent: level)
+    }
+
+    static func pressureFraction(freePercent: Int32) -> Double {
+        max(0, min(1, Double(100 - freePercent) / 100))
     }
 
     public enum Pressure: String, Sendable {

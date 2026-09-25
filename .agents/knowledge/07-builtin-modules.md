@@ -11,7 +11,7 @@ because it replaces something the cover is hiding.
 | `volume` | CoreAudio's default output device, with a property listener | `level`, `muted`, `device`, `transport`, `headphones`, `icon`, `level-icon` |
 | `net` | `getifaddrs` counters on an interval | `rx`, `tx`, `rx-total`, `tx-total`, and rolling history for `graph` |
 | `cpu` | `host_statistics` tick deltas | `load`, `user`, `system`, history |
-| `mem` | `host_statistics64` | `used`, `total`, `pressure`, history |
+| `mem` | `host_statistics64`, `kern.memorystatus_level` | `used`, `total`, `pressure`, `pressure-pct`, history |
 
 `net`, `cpu` and `mem` grew time windows, content templates and presets in
 [20-stats-widgets.md](20-stats-widgets.md), which also has their full list of keys.

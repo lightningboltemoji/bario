@@ -8,21 +8,21 @@ public struct BudgetExceeded: Error, CustomStringConvertible {
     public var description: String { String(format: "over its %.0fms budget", seconds * 1000) }
 }
 
+/// With `late`, work that overruns is not cancelled but finishes, and its outcome goes to
+/// `late` instead: for a caller that would still rather have a slow answer than none.
 public func withBudget<T: Sendable>(_ seconds: Double,
+                                    late: (@Sendable (Result<T, any Error>) -> Void)? = nil,
                                     _ work: @escaping @Sendable () async throws -> T) async throws -> T {
     let box = OnceFlag()
     return try await withCheckedThrowingContinuation { continuation in
         let task = Task.detached {
-            do {
-                let value = try await work()
-                if box.claim() { continuation.resume(returning: value) }
-            } catch {
-                if box.claim() { continuation.resume(throwing: error) }
-            }
+            let outcome: Result<T, any Error>
+            do { outcome = .success(try await work()) } catch { outcome = .failure(error) }
+            if box.claim() { continuation.resume(with: outcome) } else { late?(outcome) }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
             if box.claim() {
-                task.cancel()
+                if late == nil { task.cancel() }
                 continuation.resume(throwing: BudgetExceeded(seconds: seconds))
             }
         }
@@ -42,7 +42,8 @@ final class OnceFlag: @unchecked Sendable {
 
 /// Owns every module instance, runs their poll timers, and keeps the last good render of
 /// each. A module that throws or overruns keeps its last content and gains `.stale`; it never
-/// takes the bar down. DESIGN.md §3, §5.
+/// takes the bar down. An overrun render that finishes after all still lands, unless a newer
+/// one has. DESIGN.md §3, §5.
 ///
 /// This is the render stage of DESIGN.md §10, and the only asynchronous one: a frame starts
 /// renders and never waits for them, and a render that changed something says so, which
@@ -73,7 +74,7 @@ public final class ModuleHost {
         public var rendered = false
     }
 
-    final class Instance {
+    @MainActor final class Instance {
         let name: String
         let moduleName: String
         let module: any Module
@@ -89,6 +90,10 @@ public final class ModuleHost {
         /// landed, something wrote under its key, or the host stopped waiting.
         var held: Bool
         var renderTask: Task<Void, Never>?
+        /// Renders are numbered as they start, and `landed` is the newest to have reached
+        /// `state`, so a late one never replaces a newer one.
+        var renders = 0
+        var landed = 0
         var pollTask: Task<Void, Never>?
         var startTask: Task<Void, Never>?
 
@@ -351,18 +356,24 @@ public final class ModuleHost {
     private func render(_ instance: Instance) async {
         let reader = await store.reader(for: instance.name)
         let module = instance.module
-        var next = instance.state
+        instance.renders += 1
+        let number = instance.renders
         do {
-            next.result = try await withBudget(ModuleHost.renderBudget) {
+            // Under memory pressure every render can overrun, and throwing each one away would
+            // freeze the item on whatever it showed last. So a late one lands when it finishes.
+            let result = try await withBudget(ModuleHost.renderBudget, late: { [weak self] outcome in
+                guard case .success(let result) = outcome else { return }
+                Task { @MainActor in
+                    guard let self, let next = await self.landing(result, number: number, read: reader,
+                                                                  on: instance) else { return }
+                    self.show(next, on: instance)
+                }
+            }) {
                 try await module.render(reader)
             }
-            // A write that landed mid-render, to something the render read, means it is
-            // already out of date.
-            if await store.recordReads(reader.paths, for: instance.name, since: reader.version) {
-                instance.needsRender = true
-            }
-            next.stale = false
-            next.error = instance.permanentError
+            let next = await landing(result, number: number, read: reader, on: instance)
+            instance.renderTask = nil
+            show(next ?? instance.state, on: instance)
         } catch {
             // Keep the last content, wear `.stale`, say why once. What it read before it was
             // abandoned still counts as a reason to try again.
@@ -371,12 +382,39 @@ public final class ModuleHost {
                                        replacing: false) {
                 instance.needsRender = true
             }
+            var next = instance.state
             next.stale = true
             next.error = "\(error)"
+            next.rendered = true
+            // A render that failed outright is newer news than one still running; one that ran
+            // out of time may yet land.
+            if !(error is BudgetExceeded) { instance.landed = max(instance.landed, number) }
+            instance.renderTask = nil
+            show(next, on: instance)
         }
-        next.rendered = true
+    }
 
-        instance.renderTask = nil
+    /// What the item shows once a render lands, in time or late, or nil if a newer render
+    /// already has.
+    private func landing(_ result: RenderResult, number: Int, read reader: StateReader,
+                         on instance: Instance) async -> ItemState? {
+        guard number > instance.landed else { return nil }
+        instance.landed = number
+        // A write that landed mid-render, to something the render read, means it is
+        // already out of date.
+        if await store.recordReads(reader.paths, for: instance.name, since: reader.version) {
+            instance.needsRender = true
+        }
+        guard instance.landed == number else { return nil }
+        var next = instance.state
+        next.result = result
+        next.stale = false
+        next.error = instance.permanentError
+        next.rendered = true
+        return next
+    }
+
+    private func show(_ next: ItemState, on instance: Instance) {
         guard instances[instance.name] === instance else { return }
         let changed = next != instance.state
         instance.state = next

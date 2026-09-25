@@ -115,6 +115,29 @@ struct SamplingTests {
         #expect(MemModule.mean([]) == 0)
     }
 
+    @Test("used is Activity Monitor's: app memory less purgeable, wired and compressed, not active")
+    func memUsed() {
+        var stats = vm_statistics64()
+        stats.internal_page_count = 100
+        stats.purgeable_count = 20
+        stats.wire_count = 30
+        stats.compressor_page_count = 10
+        stats.active_count = 999
+        stats.inactive_count = 999
+        #expect(MemModule.used(stats, pageSize: 16384) == 120 * 16384)
+        stats.purgeable_count = 500
+        #expect(MemModule.used(stats, pageSize: 1) == 40, "more purgeable than app memory is none")
+    }
+
+    @Test("pressure is the complement of the kernel's free percentage, within 0…1")
+    func memPressure() {
+        #expect(abs(MemModule.pressureFraction(freePercent: 81) - 0.19) < 1e-12)
+        #expect(MemModule.pressureFraction(freePercent: 100) == 0)
+        #expect(MemModule.pressureFraction(freePercent: 0) == 1)
+        #expect(MemModule.pressureFraction(freePercent: -3) == 1)
+        #expect(MemModule.pressureFraction(freePercent: 140) == 0)
+    }
+
     @Test("thresholds set one class, never both")
     func thresholds() {
         let t = Thresholds(ModuleContext(item: "cpu", config: .object(["warn": 70, "critical": 90]),
@@ -309,8 +332,24 @@ struct StatsPresetTests {
         #expect(net["rx-history"]?.arrayValue?.count == 32)
         let (_, mem) = try await run("mem", ["windows": "1s"])
         #expect((mem["pct-1s"]?.doubleValue ?? -1) > 0)
+        #expect((0...100).contains(mem["pressure-pct-1s"]?.doubleValue ?? -1))
         #expect(["normal", "warn", "critical"].contains(mem["pressure"]?.stringValue ?? ""))
+        #expect(mem["pressure-history"]?.arrayValue?.count == 32)
         #expect(mem["swap-used"]?.doubleValue != nil)
+    }
+
+    @Test("mem's meter and graph show pressure, not used")
+    func memPresetsShowPressure() async throws {
+        let (meter, state) = try await run("mem", ["preset": "meter"])
+        guard case .meter(let gauge) = try #require(meter.content).children[0].kind else {
+            Issue.record("the meter preset starts with its meter"); return
+        }
+        #expect(gauge.value == state["pressure-fraction"]?.doubleValue)
+        let (graph, graphed) = try await run("mem", ["preset": "graph"])
+        guard case .graph(let drawn) = try #require(graph.content).children[0].kind else {
+            Issue.record("the graph preset starts with its graph"); return
+        }
+        #expect(drawn.values == graphed["pressure-history"]?.arrayValue?.map(\.doubleValue))
     }
 
     @Test("a preset beside a format, an unknown preset, or a bad graph kind is a config error")

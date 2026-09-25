@@ -98,7 +98,7 @@ does not react to the pointer at all ([15-interaction.md](15-interaction.md)).
   ([21-sources-modes-arrivals.md](21-sources-modes-arrivals.md)).
 - Renders are cached against the state paths they read, so hover, animation and the hole
   never call a module. An item that has never rendered is not laid out. A module that throws or overruns keeps its last content and wears
-  `.stale`.
+  `.stale`; an overrun render still lands when it finishes, unless a newer one has.
 - Modules push where the system lets them (`front-app`, `battery`, `volume` are notification
   driven) and poll only where a value must be sampled (`net`, `cpu`, `mem`). Each writes an
   `icon` key so `format="{icon} {pct}%"` needs no symbol names in anyone's config.
