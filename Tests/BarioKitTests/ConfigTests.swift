@@ -157,6 +157,12 @@ struct ConfigTests {
         #expect(message(#"bar { notch "sometimes" }"#).contains("\"if-present\" as a marker"))
     }
 
+    @Test("Option makes a bar interactive, unless the bar says it reveals the real menu bar")
+    func optionRole() throws {
+        #expect(try ConfigLoader.parse("bar { }").bars[0].option == .interact)
+        #expect(try ConfigLoader.parse(#"bar { option "reveal" }"#).bars[0].option == .reveal)
+    }
+
     @Test("config errors say what and where")
     func errors() throws {
         #expect(message("").contains("no bar node"))
@@ -166,6 +172,7 @@ struct ConfigTests {
         #expect(message("bar { height 0 }").contains("height takes the bar's height in points"))
         #expect(message("bar { hole wobble=2 }").contains("hole takes radius"))
         #expect(message("bar { hole click=\"maybe\" }").contains("\"reveal\" or \"none\""))
+        #expect(message("bar { option \"invert\" }").contains("option is one of \"interact\", \"reveal\""))
         #expect(message("bar { align sideways\n item \"a\" module=\"clock\" }").contains("align is one of"))
         #expect(message("bar { item \"a\" module=\"exec\" interval=\"soonish\" }").contains("not a duration"))
         #expect(message("bar { group \"g\" { } }").contains("no items in it"))

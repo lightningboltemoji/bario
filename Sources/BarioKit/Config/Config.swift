@@ -59,6 +59,7 @@ public struct BarConfig: Sendable, Equatable {
     public var height: Double?
     public var align: Align = .center
     public var hole = HoleConfig()
+    public var option: OptionRole = .interact
     public var notch: NotchPolicy = .avoid
     public var items: [ItemConfig] = []
     public var position: KDLPosition = .start
@@ -82,6 +83,17 @@ public enum HoleClick: String, Sendable, Equatable {
     /// A click in the bar uncovers everything until the pointer leaves, so menus stay usable.
     case reveal
     case none
+}
+
+/// What holding Option over a bar does, which decides what the bar is the rest of the time.
+/// DESIGN.md §8.
+public enum OptionRole: String, Sendable, Equatable, CaseIterable {
+    /// The bar is a lens onto the real menu bar, and Option makes it bario's: the hole eases
+    /// shut and the bar takes the pointer.
+    case interact
+    /// The other way round: the bar is bario's, and Option opens the lens and lets clicks
+    /// through to the real menu bar.
+    case reveal
 }
 
 public enum NotchPolicy: String, Sendable, Equatable, CaseIterable {

@@ -59,7 +59,7 @@ Config
   renderers: [RendererConfig]  renderer "ring" path="…"
 BarConfig
   display: DisplayFilter       .any | .builtIn | .external | .named(String)
-  padding, gap, height?, align, hole, notch policy, elements
+  padding, gap, height?, align, hole, option (interact | reveal), notch policy, elements
 Element = .item(ItemConfig) | .group(GroupConfig) | .spacer(grow) | .notch
 ItemConfig
   name, module, format?, priority, sizing, interval?, on-click/-scroll/-right-click,

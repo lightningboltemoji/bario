@@ -347,6 +347,67 @@ struct FrameLoopTests {
         #expect(left.presentations.last?.scene.allItems[1].states.contains(.hover) == false)
     }
 
+    @Test("with option \"reveal\", a bar takes the pointer until Option is held, which opens its hole")
+    func optionReveals() async throws {
+        let h = try Harness(#"option "reveal"; item "a" module="echo-test"; item "b" module="echo-test""#,
+                            bars: 2)
+        await h.start()
+        for bar in h.loop.bars { h.loop.setBackdrop(FrameLoopTests.checker, for: bar.id) }
+        await h.settle()
+        let (left, right) = (h.surfaces[0], h.surfaces[1])
+
+        // Onto "b" with nothing held: the bar is bario's, hole shut.
+        h.loop.pointerMoved(to: CGPoint(x: 30, y: 888))
+        #expect(left.takesPointer, "a click on the bar reaches bario")
+        #expect(!right.takesPointer, "only the bar under the pointer")
+        #expect(h.loop.hovered == ItemRef(bar: 1, item: "b"))
+        await h.drain()
+        #expect(left.presentations.last?.hole.isVisible == false)
+        #expect(left.presentations.last?.scene.allItems[1].states.contains(.hover) == true)
+
+        // Option held: the hole eases open and clicks fall through to the real menu bar.
+        h.loop.optionHeld = true
+        #expect(!left.takesPointer)
+        #expect(h.loop.hovered == nil)
+        await h.drain()
+        #expect(left.presentations.last?.hole.isVisible == true)
+        #expect(left.presentations.last?.scene.allItems[1].states.contains(.hover) == false)
+
+        // A click through it opens a menu. Letting go of Option must not take the menu bar back
+        // from under that menu while the pointer is still on it.
+        h.loop.revealed = 1
+        h.loop.optionHeld = false
+        #expect(!left.takesPointer)
+        #expect(h.loop.hovered == nil)
+
+        // Leaving ends the reveal; back on, the bar is bario's again.
+        h.loop.pointerMoved(to: CGPoint(x: 30, y: 600))
+        #expect(h.loop.revealed == nil)
+        #expect(!left.takesPointer)
+        h.loop.pointerMoved(to: CGPoint(x: 30, y: 888))
+        #expect(left.takesPointer)
+        await h.drain()
+        #expect(left.presentations.last?.hole.isVisible == false)
+        #expect(left.presentations.last?.reveal == 0)
+    }
+
+    @Test("a bar a click has revealed takes no clicks, even with Option held")
+    func revealedIsInert() async throws {
+        let h = try Harness(#"item "a" module="echo-test""#)
+        await h.start()
+        h.loop.setBackdrop(FrameLoopTests.checker, for: 1)
+        await h.settle()
+
+        h.loop.pointerMoved(to: CGPoint(x: 5, y: 888))
+        h.loop.revealed = 1
+        h.loop.optionHeld = true
+        #expect(!h.surface.takesPointer, "the bar is not on screen; the menu it uncovered is")
+        #expect(h.loop.hovered == nil)
+        h.loop.pointerMoved(to: CGPoint(x: 5, y: 600))
+        h.loop.pointerMoved(to: CGPoint(x: 5, y: 888))
+        #expect(h.surface.takesPointer)
+    }
+
     @Test("Option pressed with the pointer nowhere near a bar costs nothing")
     func optionFarAway() async throws {
         let h = try Harness(#"item "a" module="echo-test""#)

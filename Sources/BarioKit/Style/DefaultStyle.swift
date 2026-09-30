@@ -27,8 +27,9 @@ item {
   transition: background 120ms ease-out, opacity 120ms, color 120ms;
 }
 
-/* Hover and press only happen while Option is held over the bar, which is when a click
-   reaches an item: the rest of the time the bar ignores the pointer, bar the hole. */
+/* Hover and press only happen while the bar takes the pointer, which is when a click reaches
+   an item: while Option is held over it, or, under `option "reveal"`, while it is not. The
+   rest of the time the bar ignores the pointer, bar the hole. */
 item:hover { background: var(--bubble-hover); }
 item:overflow { opacity: 0; }
 item:stale { opacity: 0.5; }

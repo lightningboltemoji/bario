@@ -246,7 +246,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     }
 
     /// Whether a cover takes the pointer's events is the frame loop's decision: only while
-    /// Option is held over it.
+    /// Option is held over it, or, under `option "reveal"`, while it is not.
     private func pointerMoved() {
         let mouse = NSEvent.mouseLocation
         loop.pointerMoved(to: mouse)

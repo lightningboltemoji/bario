@@ -67,7 +67,7 @@ public final class FrameLoop {
     public private(set) var hovered: ItemRef?
 
     /// Holding Option over a bar makes it interactive: it closes its hole and takes clicks,
-    /// and its items hover. DESIGN.md §8.
+    /// and its items hover. A bar with `option "reveal"` is the other way round. DESIGN.md §8.
     public var optionHeld = false {
         didSet {
             guard optionHeld != oldValue else { return }
@@ -87,7 +87,11 @@ public final class FrameLoop {
 
     /// The bar a click has uncovered, so the menu under it is usable, until the pointer leaves.
     public var revealed: CGDirectDisplayID? {
-        didSet { if revealed != oldValue { invalidate(.present) } }
+        didSet {
+            guard revealed != oldValue else { return }
+            updatePointerTarget()
+            invalidate(.present)
+        }
     }
 
     /// Every bar put away from the menu bar item, leaving the real menu bar alone. The bars keep
@@ -299,12 +303,23 @@ public final class FrameLoop {
         return nil
     }
 
+    /// Whether a bar is bario's right now rather than a lens onto the real menu bar: its hole
+    /// shut, and the pointer its own while it is over it. Option held, or, on a bar whose
+    /// Option reveals the real menu bar instead, Option not held.
+    private func isShut(_ bar: Bar) -> Bool {
+        optionHeld != (bar.config?.option == .reveal)
+    }
+
     /// Which bar is interactive, and which item on it is hovered. Asked when the pointer moves
     /// or Option changes, and again after each frame, since an item can slide under a pointer
     /// that is standing still.
+    ///
+    /// A bar a click has revealed takes nothing until the pointer leaves it: it is not on
+    /// screen, and the menu that click opened is. Under `option "reveal"` that is what lets
+    /// Option go after the click without the bar taking back the menu bar from under the menu.
     private func updatePointerTarget() {
         for bar in bars {
-            let interactive = optionHeld && bar.isVisible
+            let interactive = isShut(bar) && bar.isVisible && revealed != bar.id
                 && pointer.map { bar.surface.frame.contains($0) } == true
             guard interactive != bar.isInteractive else { continue }
             bar.isInteractive = interactive
@@ -433,7 +448,7 @@ public final class FrameLoop {
         }
         let (hole, reveal) = bar.lens.present(pointer: pointer, frame: bar.surface.frame,
                                               config: config.hole, latched: revealed == bar.id,
-                                              closed: optionHeld, at: now)
+                                              closed: isShut(bar), at: now)
         let presentation = Presentation(scene: scene, hole: hole, reveal: reveal,
                                         isMoving: bar.animator.isMoving(at: now))
 

@@ -450,7 +450,7 @@ their friends.
 
 Selectors: type (`bar`, `item`, `group`, `text`, `icon`, `meter`, `graph`, `canvas`, and any
 registered custom node type), `#id`, `.class`, state pseudo-classes (`:hover`, `:active`,
-`:overflow`, `:stale`, `:leaving`; the first two only while Option is held, section 8), the
+`:overflow`, `:stale`, `:leaving`; the first two only while the bar takes the pointer, section 8), the
 modes that are on as classes on `bar`, descendant combinator (`#battery .pct`), and lists. Specificity follows CSS. Cascade order is the stylesheet, then
 per-item `style="…"` in config for one-offs.
 
@@ -607,6 +607,15 @@ pointer on a bar, that bar:
 
 Let go of Option, or move off the bar, and it is a lens again.
 
+`bar { option "reveal" }` turns this round, for a bar used more than it is looked through. At
+rest the bar is bario's: its hole is shut and it takes the pointer, hover and clicks, like the
+menu bar it covers. Holding Option opens the lens and lets clicks fall through to the real menu
+bar. `option "interact"`, the default, is the arrangement above. It is per bar, like `hole`.
+
+Either way, a bar a click has revealed takes no events until the pointer leaves it: it is not on
+screen, and the menu the click opened is. Under `option "reveal"` this is what lets Option go
+once the menu is open, without the bar taking the menu bar back from under it.
+
 The hole's geometry keeps its probe knobs, moved into config:
 `bar { hole radius=40 feather=0 proximity=80 click="reveal" }`. `click="reveal"` is the probe's
 latch: a click that falls through a bar uncovers all of it until the pointer leaves, so the
@@ -614,7 +623,8 @@ menu you opened is usable.
 
 ### Mouse events
 
-The cover ignores mouse events except while Option is held over it. The first plan was to take
+The cover ignores mouse events except while Option is held over it (under `option "reveal"`,
+while Option is not held). The first plan was to take
 events everywhere and let the window server pass clicks on transparent pixels, such as the
 hole, down to the window beneath. Measured on macOS 27, it does not: a click on a fully
 transparent pixel of the cover still reaches the cover. So `ignoresMouseEvents` is switched,
@@ -921,7 +931,7 @@ is dirty, and for which bar if it concerns only one, and asks for a frame.
 |---|---|
 | a store write that changes a value some render read | render, for the items that read it |
 | a render returning different content, classes, visibility or staleness | style, for that item |
-| the pointer entering or leaving an item, a press, both only while Option is held | style, for that bar |
+| the pointer entering or leaving an item, a press, both only while the bar takes the pointer | style, for that bar |
 | Option pressed or let go | style, for the bar under the pointer; present, if a hole is showing |
 | a stylesheet reload, a socket `style` delta, an appearance or accent colour change | style, everywhere |
 | a mode turning on or off | style, everywhere |

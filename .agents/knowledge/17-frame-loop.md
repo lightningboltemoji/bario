@@ -94,7 +94,8 @@ layer tree and never draws; `BarCover` is the window-backed `BarSurface`.
 - **Hover is per bar** (`ItemRef`), and so is the click reveal (`revealed`). Two displays both
   showing `clock` must not hover together, and sliding onto the next display is not a click.
 - **Taking the pointer is a frame output.** A bar is interactive while Option is held with the
-  pointer on it; that and hover are decided from what is on screen, after pointer moves, Option
+  pointer on it (while it is not, under `option "reveal"`), and never while a click has it
+  revealed; that and hover are decided from what is on screen, after pointer moves, Option
   changes *and* frames. Without Option nothing hovers and the bar takes no events.
 - **A hole too far away to show does not ease closed.** It jumps; otherwise pressing Option
   anywhere (Option-arrow in a text field) would start frames on every bar.

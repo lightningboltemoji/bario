@@ -183,6 +183,8 @@ public enum ConfigLoader {
                 bar.align = try enumeration(child, "align", Align.self)
             case "hole":
                 bar.hole = try hole(child)
+            case "option":
+                bar.option = try enumeration(child, "option", OptionRole.self)
             case "notch" where child.argument(0)?.value.stringValue.flatMap(NotchPolicy.init) != nil:
                 bar.notch = try enumeration(child, "notch", NotchPolicy.self)
             case "item", "group", "spacer", "notch":
@@ -190,7 +192,7 @@ public enum ConfigLoader {
                 bar.items.append(try parseItem(child, ordinal: counter))
             default:
                 throw KDLError("'\(child.name)' is not something a bar contains; expected "
-                               + "height, align, hole, notch, item, group or spacer",
+                               + "height, align, hole, option, notch, item, group or spacer",
                                at: child.position)
             }
         }

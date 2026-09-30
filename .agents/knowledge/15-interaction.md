@@ -22,6 +22,14 @@ every click falls through. With Option held and the pointer on a bar, that bar e
 shut, takes the pointer, and its items hover and receive clicks. `mouse`, `interactive`,
 `hole: keep | dodge` and `--verify-clickthrough` are gone.
 
+- `bar { option "reveal" }` inverts it: at rest the bar is shut and takes the pointer, and Option
+  opens the hole and lets clicks through. `FrameLoop.isShut(_:)` is the one place that reads
+  both, for the lens and for the pointer.
+- A bar a click has revealed (`FrameLoop.revealed`) takes no events until the pointer leaves it,
+  in both modes. Under `reveal` that keeps Option's release after the click from putting the bar
+  back over the menu it opened; under `interact` it stops Option making an invisible bar
+  clickable. Going down into that menu and back up to the menu bar ends the reveal, and under
+  `reveal` the bar then covers the menu's titles again until Option is held.
 - The frame loop decides (`FrameLoop.optionHeld`, `Bar.isInteractive`,
   `BarSurface.setTakesPointer`), from what is on screen under the pointer, after pointer moves,
   Option changes and frames — see [17-frame-loop.md](17-frame-loop.md).

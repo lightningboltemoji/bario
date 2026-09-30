@@ -7,8 +7,9 @@ import ServiceManagement
 /// quits.
 ///
 /// It lives in the real menu bar, under the bars — reached the same way as any other status item,
-/// by moving the pointer up until the hole opens. With the bars hidden it is simply there, which
-/// is what makes hiding safe: the way back is never covered.
+/// by moving the pointer up until the hole opens (holding Option, under `option "reveal"`). With
+/// the bars hidden it is simply there, which is what makes hiding safe: the way back is never
+/// covered.
 ///
 /// It holds no state of its own. Everything it shows is read from the controller through the
 /// closures below when the menu opens, so it can never disagree with the frame loop.
