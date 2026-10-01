@@ -139,6 +139,15 @@ The initial set, chosen because each one replaces something the cover is hiding:
   Commands see the environment a terminal would give them: a bario opened from Finder or at
   login first takes on the user's login shell's, since under launchd's `PATH` nothing that
   Homebrew or cargo installed is found.
+  A watch can be a switch, for a command held for what it does rather than what it prints:
+  `running=#false` starts it off, `on-click="toggle"` (or `start`, `stop`) switches it, and
+  while it is on the item is `.running`. Bario ends what it holds when it quits.
+
+  ```kdl
+  item "awake" module="exec" interval="watch" running=#false on-click="toggle" {
+    command "caffeinate" "-d"
+  }
+  ```
 - The socket (section 4): any process writes state under any item's key, or pushes a whole
   content tree to a `data` item. The `bario` CLI wraps this for shell use.
 - `source`: a module that only writes state. It is configured like an item, runs like one, and
@@ -1114,6 +1123,19 @@ item "battery-ish" module="text" {
 item "wave" module="data" {
   content {
     raster width=80 height=20 { source surface="wave" }
+  }
+}
+```
+
+A canvas's child nodes are its ops, in order, since a display list is a sequence: the node's
+name is the op, `fill`, `stroke` and `clip` take their path as child nodes, a command each,
+and every other op takes its fields as for any node.
+
+```kdl
+canvas width=22 height=21 {
+  image "apple.logo" { rect 4.7 2.3 13 16 }
+  stroke "var(--shine)" width=1.5 cap="round" {
+    move 18.6 9; line 20.8 8.6
   }
 }
 ```

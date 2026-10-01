@@ -64,7 +64,8 @@ A handful of verbs are the host's: `exec <command>` (through `/bin/sh -c`, so qu
 `emit <name> [json]`, `set <target> <json>`, and `reload`. **Anything else is delivered to the
 item's module as an event named by the action**, which is why `adjust` and `toggle-mute` need
 no special case in the config layer — they are `volume`'s business, and `volume` implements
-them by actually moving the system volume through CoreAudio.
+them by actually moving the system volume through CoreAudio. `toggle`, `start` and `stop` are
+`exec`'s, for a watch that is a switch ([08-exec-module.md](08-exec-module.md)).
 
 ## Transitions
 

@@ -41,6 +41,32 @@ counter-flips the text matrix, so geometry reads top-down and glyphs still come 
 Arc angles are degrees with 0 at three o'clock, increasing clockwise on screen, which is what
 makes the design's `-90 → 162` mean "70% of a ring, starting at the top".
 
+## Written in the config
+
+A canvas known when the config is written goes in it, like any content (DESIGN.md §11). A KDL
+node's children become a JSON object, which loses their order, and repeated children whose
+values are already lists merge into one list, so a display list cannot go through the general
+mapping. `KDLNode.canvasOp()` reads a canvas's child nodes as its ops instead, in order:
+
+```kdl
+canvas width=22 height=21 {
+  image "apple.logo" { rect 4.7 2.3 13 16 }
+  stroke "var(--shine)" width=1.5 cap="round" {
+    move 18.6 9; line 20.8 8.6
+    dash 2 1
+  }
+  group { opacity 0.5; clip { round-rect 0 0 10 10 2 }; fill { rect 0 0 4 4 } }
+  text "70" align="center" { at 11 10 }
+}
+```
+
+The node's name is the op. `fill`, `stroke` and `clip` take their path as child nodes, a command
+each; the paint is an argument (its colour) and properties, with `dash` as a child. `group`
+takes ops. Every other op takes its value as its argument, and its other fields as properties
+and child nodes, which is the general content rule. Each op without a slot in it is parsed
+while the config loads, so a mistake is an error at its line rather than a warning at every
+layout.
+
 ## Theming reaches it
 
 This is what makes a display list feel native rather than pasted on (§9, "what makes them feel
@@ -66,4 +92,8 @@ The design document's ring example parses op for op. Every op and every path com
 trips from JSON to geometry. Colour strings resolve through `currentColor`, `var()` and
 `accent`. Then pixels: a filled rect lands where the top-left coordinate system says it
 should, a `currentColor` stroke comes out the item's text colour, and text drawn upside-down
-would be caught by comparing the ink above and below the anchor.
+would be caught by comparing the ink above and below the anchor. An `image` symbol is chosen at
+the raster's scale through the current graphics context, as an icon node's is: rendered at 8x,
+past any screen's, a square's edges are a pixel of partial ink each, and without the context,
+scaled up from the screen's 2x, ten. The KDL form round-trips to the same display list as the
+JSON, and its mistakes are errors at the op's line.

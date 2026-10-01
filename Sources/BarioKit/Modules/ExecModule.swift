@@ -12,6 +12,8 @@ public actor ExecModule: Module {
     private var watcher: Task<Void, Never>?
     private var running: Process?
     private var backoff: Double = 0.5
+    /// For a watch with `running=`, whether it is switched on; nil for one that always runs.
+    private var switchedOn: Bool?
 
     enum Command: Sendable {
         /// An argv, executed directly.
@@ -61,13 +63,56 @@ public actor ExecModule: Module {
             throw ModuleError("exec item \"\(context.item)\" needs a command, e.g. "
                               + "`command \"date\" \"+%H:%M\"` or `command \"date +%H:%M\"`")
         }
+
+        if let running = context.option("running") {
+            guard case .watch = interval else {
+                throw ModuleError("running= switches a held command on and off, so exec item "
+                                  + "\"\(context.item)\" needs interval=\"watch\"")
+            }
+            guard let on = running.boolValue else {
+                throw ModuleError("running= is #true or #false: whether the command starts out running")
+            }
+            switchedOn = on
+        }
     }
 
     // MARK: - Lifecycle
 
     public func start() async {
         guard case .watch = interval else { return }
+        if let switchedOn {
+            await context.store.merge(.object(["running": .bool(switchedOn)]), at: context.item)
+            guard switchedOn else { return }
+        }
         watcher = Task { [weak self] in await self?.watch() }
+    }
+
+    /// `toggle`, `start` and `stop`, from `on-click`, switch a watch with `running=`. One without
+    /// it ignores them, so another item's `on-click="emit stop"`, which reaches every module,
+    /// cannot take down every watch at once.
+    public func onEvent(_ event: ModuleEvent) async -> JSONValue? {
+        guard let on = switchedOn else { return nil }
+        let wanted: Bool
+        switch event.name {
+        case "toggle": wanted = !on
+        case "start": wanted = true
+        case "stop": wanted = false
+        default: return nil
+        }
+        guard wanted != on else { return nil }
+        switchedOn = wanted
+        if !wanted { await stop() }
+        // Written before a new run starts, so it cannot land on top of what that run says. How
+        // the last run ended is no news to a command switched on or off since.
+        await context.store.merge(.object([
+            "running": .bool(wanted), "exit-code": .number(0), "stderr": .null,
+        ]), at: context.item)
+        // Unless another switch came in while that was written, and turned it back off.
+        if wanted, switchedOn == true, watcher == nil {
+            backoff = 0.5
+            watcher = Task { [weak self] in await self?.watch() }
+        }
+        return nil
     }
 
     public func stop() async {
@@ -93,6 +138,7 @@ public actor ExecModule: Module {
     public func render(_ state: StateReader) async throws -> RenderResult {
         var classes = ExecModule.classes(from: state.value("class"))
         if (state.value("exit-code")?.intValue ?? 0) != 0 { classes.append("error") }
+        if state.value("running")?.boolValue == true { classes.append("running") }
         let tooltip = state.value("tooltip")?.stringValue
             ?? state.value("stderr")?.stringValue?.trimmed.nonEmpty
         // A line carrying a whole content tree shows it, as one pushed to a `data` item does.
@@ -168,6 +214,8 @@ public actor ExecModule: Module {
             return
         }
         running = process
+        let pid = process.processIdentifier
+        ExecModule.held.insert(pid)
 
         for await line in ExecModule.lines(of: out.fileHandleForReading) {
             guard !Task.isCancelled else { break }
@@ -175,7 +223,9 @@ public actor ExecModule: Module {
                                       at: context.item)
         }
         let status = await ExecModule.status(exited)
-        running = nil
+        ExecModule.held.remove(pid)
+        // A watch switched off and on again is already running its next process.
+        if running === process { running = nil }
         if status != 0, !Task.isCancelled {
             let stderr = String(decoding: (try? err.fileHandleForReading.readToEnd()) ?? Data(), as: UTF8.self)
             await context.store.merge(.object([
@@ -299,6 +349,28 @@ public actor ExecModule: Module {
         default: return []
         }
     }
+}
+
+extension ExecModule {
+    /// Every watch's process, for the one moment `stop()` cannot reach them: bario quitting,
+    /// when no task gets another turn. A watch that is quiet otherwise outlives bario until it
+    /// next writes, and one held for what it does, like `caffeinate`, until it is killed.
+    static let held = HeldProcesses()
+
+    /// Ends every watch's process group. Synchronous, for `applicationWillTerminate` and signal
+    /// handlers.
+    public static func terminateHeld() {
+        for pid in held.all { kill(-pid, SIGTERM) }
+    }
+}
+
+final class HeldProcesses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pids: Set<pid_t> = []
+
+    func insert(_ pid: pid_t) { lock.withLock { _ = pids.insert(pid) } }
+    func remove(_ pid: pid_t) { lock.withLock { _ = pids.remove(pid) } }
+    var all: Set<pid_t> { lock.withLock { pids } }
 }
 
 /// Bytes in, whole lines out, without their `\n` or `\r\n`.

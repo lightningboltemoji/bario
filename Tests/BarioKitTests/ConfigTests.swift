@@ -227,6 +227,62 @@ struct ConfigTests {
         #expect(items[0].content == pushed)
     }
 
+    @Test("a canvas's ops are written as KDL, in order, as the JSON display list")
+    func canvas() throws {
+        let config = try ConfigLoader.parse("""
+        bar {
+          item "a" module="text" {
+            content {
+              canvas width=22 height=21 {
+                image "apple.logo" { rect 4 2 13 16 }
+                stroke "var(--shine)" width=1.5 cap="round" {
+                  move 18 9; line 20 8
+                  dash 2 1
+                }
+                group {
+                  opacity 0.5
+                  translate 3 4
+                  clip { round-rect 0 0 10 10 2 }
+                  fill { rect 0 0 4 4 }
+                }
+                text "70" align="center" { at 11 10 }
+              }
+            }
+          }
+        }
+        """)
+        let pushed = try JSONDecoder().decode(Node.self, from: Data("""
+        {"canvas": {"width": 22, "height": 21, "ops": [
+          {"image": "apple.logo", "rect": [4, 2, 13, 16]},
+          {"stroke": {"color": "var(--shine)", "width": 1.5, "cap": "round", "dash": [2, 1]},
+           "path": [["move", 18, 9], ["line", 20, 8]]},
+          {"group": [
+            {"opacity": 0.5},
+            {"translate": [3, 4]},
+            {"clip": [["round-rect", 0, 0, 10, 10, 2]]},
+            {"fill": {}, "path": [["rect", 0, 0, 4, 4]]}
+          ]},
+          {"text": "70", "align": "center", "at": [11, 10]}
+        ]}}
+        """.utf8))
+        #expect(config.bars[0].items[0].content == pushed)
+    }
+
+    @Test("canvas mistakes are config errors, at the op that has them")
+    func canvasErrors() throws {
+        func canvas(_ ops: String) -> String {
+            message("bar {\n  item \"a\" module=\"text\" {\n    content {\n      canvas width=10 {\n"
+                    + ops + "\n      }\n    }\n  }\n}")
+        }
+        let command = canvas("        fill { rect 0 0 4 4 }\n        stroke { mvoe 1 2 }")
+        #expect(command.contains("'mvoe' is not a path command"))
+        #expect(command.contains(":6:"), "at the stroke, not the canvas: \(command)")
+        #expect(canvas("        clip width=2 { rect 0 0 4 4 }").contains("clip takes only a path"))
+        #expect(canvas("        stroke \"red\" \"blue\" { line 1 2 }").contains("takes one colour"))
+        #expect(canvas("        fill { line x=1 }").contains("a path command is a name and its numbers"))
+        #expect(canvas("        sparkle 3").contains("no op in"))
+    }
+
     @Test("content mistakes are config errors, at the node that has them")
     func contentErrors() throws {
         #expect(message("bar { item \"a\" module=\"text\" { content { text \"a\"; text \"b\" } } }")

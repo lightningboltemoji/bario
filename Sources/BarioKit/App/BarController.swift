@@ -33,6 +33,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var surfaceListener: SurfaceListener?
     private var stateFeed: Task<Void, Never>?
     private var hupSource: DispatchSourceSignal?
+    private var quitSources: [DispatchSourceSignal] = []
     private var menuBarItem: MenuBarItem?
 
     public init(options: RunOptions, theme: Theme, startupError: String? = nil) {
@@ -89,12 +90,28 @@ public final class BarController: NSObject, NSApplicationDelegate {
         hup.resume()
         hupSource = hup
 
+        // Ctrl-C and `kill` end watches' processes on the way out, as Quit does. Off the main
+        // queue, so a bar that has stopped answering still dies when told to.
+        for number in [SIGINT, SIGTERM] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler {
+                ExecModule.terminateHeld()
+                signal(number, SIG_DFL)
+                raise(number)
+            }
+            source.resume()
+            quitSources.append(source)
+        }
+
         if let duration = options.duration {
             DispatchQueue.main.asyncAfter(deadline: .now() + duration) { NSApp.terminate(nil) }
         }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        // Now, not in the shutdown below: that is a task, and the app exits before it runs.
+        ExecModule.terminateHeld()
         shadows.stop()
         stateFeed?.cancel()
         server?.stop()

@@ -140,14 +140,14 @@ struct DisplayListTests {
 struct CanvasPaintTests {
     let size = CGSize(width: 60, height: 24)
 
-    func paint(_ ops: String, css: String = "") throws -> CGImage {
+    func paint(_ ops: String, css: String = "", scale: Double = 2) throws -> CGImage {
         let tree = "{ \"canvas\": { \"width\": 40, \"height\": 20, \"ops\": \(ops) } }"
         let node = try JSONDecoder().decode(Node.self, from: Data(tree.utf8))
         let config = try ConfigLoader.parse(#"bar { item "a" module="text" }"#)
         let sheet = try Stylesheet.parse("bar { padding: 0; background: none } item { padding: 0 }\n" + css)
         let display = DisplayInfo(displayID: 1, name: "T",
                                   frame: CGRect(x: 0, y: 0, width: size.width, height: 900),
-                                  scale: 2, stripHeight: size.height)
+                                  scale: scale, stripHeight: size.height)
         let states = ["a": ModuleHost.ItemState(result: RenderResult(content: node), rendered: true)]
         let builder = SceneBuilder(cascade: Cascade(stylesheet: sheet), metrics: CoreTextMetrics())
         let scene = builder.build(bar: config.bars[0], display: display,
@@ -155,7 +155,7 @@ struct CanvasPaintTests {
         let backdrop = BackdropImage()
         var resolver = ColorResolver()
         resolver.current = resolver.resolve(scene.style.color)
-        guard let image = Offscreen.render(scene, backdrop: backdrop, resolver: resolver, scale: 2) else {
+        guard let image = Offscreen.render(scene, backdrop: backdrop, resolver: resolver, scale: scale) else {
             throw CanvasError("render failed")
         }
         return image
@@ -232,6 +232,19 @@ struct CanvasPaintTests {
         // The canvas is 40pt wide inside a 60pt bar; past it, nothing.
         #expect(pixel(image, 20, 12).a > 0.9)
         #expect(pixel(image, 50, 12).a == 0)
+    }
+
+    @Test("a symbol is drawn at the raster's scale, not the screen's")
+    func symbolScale() throws {
+        // 8x, past any screen's: a symbol chosen for the screen comes out at 2x and is scaled up.
+        let image = try paint(#"[{"image": "square.fill", "rect": [4, 2, 16, 16]}]"#,
+                              css: "item { icon-size: 16pt; color: rgb(255, 0, 0) }", scale: 8)
+        // Across the middle of the square, pixel by pixel: drawn at 8x, each edge is a pixel of
+        // partial ink, and scaled up from 2x, several.
+        let edges = stride(from: 1.0 / 16, to: 40, by: 1.0 / 8)
+            .map { pixel(image, $0, 12).a }
+            .filter { $0 > 0.05 && $0 < 0.95 }
+        #expect(edges.count <= 2, "\(edges)")
     }
 }
 

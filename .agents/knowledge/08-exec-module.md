@@ -69,12 +69,42 @@ the same rule modules follow everywhere else.
   runs `-l -i -c`, and its output is read up to a closing marker rather than to the end, because
   a startup file can leave something running that holds stdout. 5s at most, then launchd's.
 
+## Switched on and off
+
+A watch can hold a command for what it does rather than what it prints, `caffeinate -d` being
+the first: `running=#false` (or `#true`) makes the watch a switch, starting off (or on).
+`toggle`, `start` and `stop` switch it, as module verbs, so `on-click="toggle"` needs nothing
+from the config layer (see [15-interaction.md](15-interaction.md)). A switch off ends the
+process group as `stop()` does; on starts a fresh run with the backoff reset. While on it is an
+ordinary watch, restarted if the command exits.
+
+- The state says `running`, and render adds the `.running` class while it is true, which is
+  what a stylesheet shows the switch with. Each switch also clears `exit-code` and `stderr`:
+  how the last run ended is no news to a command switched since. Both are written before a new
+  run starts, so they cannot land on top of what the run says.
+- A watch without `running=` ignores the verbs. An `on-click="emit stop"` reaches every module
+  (a socket `emit` only reaches subscribers), and it must not take every source down with it.
+- `running=` on an interval command is an error: there is nothing held to switch.
+- A run switched off and straight back on can still be finishing while the next one starts, so
+  the old one clears `running` (the process) only if it is still its own.
+
+**Not outliving bario.** Nothing async runs once bario is quitting: `applicationWillTerminate`'s
+`host.shutdown()` is a task the exit never gets to, so no module's `stop()` runs. A watch that
+prints is ended by `SIGPIPE` at its next line; one held for its effect would go on for good. So
+every watch's pid is in `ExecModule.held`, and `terminateHeld()` signals each group,
+synchronously, from `applicationWillTerminate` and from `SIGINT` and `SIGTERM` handlers on a
+global queue (which then re-raise with the default action, so a wedged main thread still dies
+when told to). A crash or `SIGKILL` reaches none of this; `caffeinate -w $PPID` covers that for
+caffeinate itself.
+
 ## Tests
 
 Plain text, JSON object, waybar-shaped JSON with classes, a non-zero exit, a command that does
 not exist, a watched command emitting several lines, one doing so beside a watch that has gone
 quiet, a watched command that exits being restarted, and one that fails fast being retried at
-`max-backoff` and picked up within it once it works again. `LoginShellTests` runs a stub shell
+`max-backoff` and picked up within it once it works again. A switch that starts off runs
+nothing, on starts it with `.running`, and off ends the process; a watch without `running=`
+ignores `toggle`. `LoginShellTests` runs a stub shell
 that prints around the environment and leaves a child holding stdout, and one that never
 answers. All of them run real `/bin/sh`, because the point of this module is that it runs real
 commands.

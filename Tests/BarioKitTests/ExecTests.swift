@@ -184,6 +184,68 @@ struct ExecTests {
         try? FileManager.default.removeItem(atPath: path)
     }
 
+    @Test("running= switches a watch on and off, and the state and the class say which")
+    func switching() async throws {
+        let path = NSTemporaryDirectory() + "bario-exec-test-\(getpid()).pid"
+        try? FileManager.default.removeItem(atPath: path)
+        let (module, store, name) = try module("""
+        item "a" module="exec" interval="watch" running=#false {
+          command "echo $$ > \(path); exec sleep 30"
+        }
+        """)
+        func pid() -> pid_t? {
+            (try? String(contentsOfFile: path, encoding: .utf8)).flatMap { pid_t($0.trimmed) }
+        }
+        func running() async -> Bool? { await store.value(at: name)?["running"]?.boolValue }
+
+        await module.start()
+        #expect(await running() == false)
+        #expect(try await module.render(await store.reader(for: name)).classes.isEmpty)
+        // Switched off, it was never started.
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(pid() == nil)
+
+        _ = await module.onEvent(ModuleEvent(name: "toggle"))
+        #expect(await running() == true)
+        #expect(try await module.render(await store.reader(for: name)).classes == ["running"])
+        let started = await eventually { pid() != nil }
+        let process = try #require(pid(), "the command never started: \(started)")
+        #expect(kill(process, 0) == 0)
+
+        // `start` while running changes nothing; `stop` ends the process, as `toggle` would.
+        _ = await module.onEvent(ModuleEvent(name: "start"))
+        #expect(pid() == process)
+        _ = await module.onEvent(ModuleEvent(name: "stop"))
+        #expect(await running() == false)
+        let ended = await eventually { kill(process, 0) != 0 }
+        await module.stop()
+        try? FileManager.default.removeItem(atPath: path)
+        #expect(ended, "the command outlived being switched off")
+    }
+
+    @Test("a watch without running= ignores toggle, so an emitted one cannot stop every watch")
+    func notSwitchable() async throws {
+        let (module, store, name) = try module("""
+        item "a" module="exec" interval="watch" { command "echo up; sleep 30" }
+        """)
+        await module.start()
+        _ = await module.onEvent(ModuleEvent(name: "toggle"))
+        let up = await eventually { await store.value(at: name)?["text"]?.stringValue == "up" }
+        #expect(up)
+        #expect(await store.value(at: name)?["running"] == nil)
+        await module.stop()
+    }
+
+    @Test("running= is a boolean, on a watch")
+    func runningOption() throws {
+        #expect(throws: ModuleError.self) {
+            _ = try module(#"item "a" module="exec" running=#false { command "true" }"#)
+        }
+        #expect(throws: ModuleError.self) {
+            _ = try module(#"item "a" module="exec" interval="watch" running="sometimes" { command "true" }"#)
+        }
+    }
+
     @Test("max-backoff takes a duration or seconds, and nothing else")
     func maxBackoff() throws {
         #expect(try ExecModule.seconds(nil, default: 30, option: "max-backoff") == 30)

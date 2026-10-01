@@ -114,7 +114,10 @@ public struct CanvasPainter {
     private func draw(_ op: CanvasImage, ctx: CGContext) {
         guard let image = CoreTextMetrics.image(for: op.icon, style: style) else { return }
         var box = op.rect
-        guard let cgImage = image.cgImage(forProposedRect: &box, context: nil, hints: nil) else { return }
+        // The current context, as an icon node's does, so the symbol is chosen at the raster's
+        // scale; without one it is the main screen's, scaled up and blurred in a 6x `--shot`.
+        guard let cgImage = image.cgImage(forProposedRect: &box, context: NSGraphicsContext.current,
+                                          hints: nil) else { return }
         ctx.saveGState()
         // Undo the flip for this one draw so the image is not upside down.
         ctx.translateBy(x: 0, y: op.rect.midY)

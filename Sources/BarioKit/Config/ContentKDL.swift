@@ -18,7 +18,7 @@ import Foundation
 /// and `align=`. Any other kind takes its payload either as one argument (`text "73%"`,
 /// `icon "wifi"`, `meter 0.7`), as several (a list, for `graph`), or as properties and child
 /// nodes, which become the payload's fields (`meter value=0.7 width=24`,
-/// `source surface="wave"`).
+/// `source surface="wave"`). A canvas's child nodes are its ops, in order (`canvasOp()`).
 ///
 /// A tree with a slot in any of its strings (`graph values="{history}"`) is a template instead,
 /// filled from state on every render ([20-stats-widgets.md]). Its values are not known until
@@ -74,6 +74,15 @@ extension KDLNode {
                 return json
             })
             object[name] = .object(payload)
+        case "canvas":
+            guard arguments.isEmpty else {
+                throw KDLError("canvas takes width= and height=, and its ops as nodes inside it",
+                               at: position)
+            }
+            var payload: [String: JSONValue] = [:]
+            for property in fields { payload[property.name] = property.value.json }
+            payload["ops"] = .array(try children.map { try $0.canvasOp() })
+            object[name] = .object(payload)
         default:
             if fields.isEmpty && children.isEmpty {
                 switch arguments.count {
@@ -92,6 +101,69 @@ extension KDLNode {
             }
         }
         return .object(object)
+    }
+
+    /// One op of a canvas's display list, in order, which is what a JSON object of child nodes
+    /// cannot keep ([12-canvas-node.md]). The op's name is its key. `fill`, `stroke` and `clip`
+    /// take their path as child nodes, a command each (`line 4 8`), and the paint as an
+    /// argument and properties (`stroke "accent" width=2`); `group` takes ops. Any other op
+    /// takes its value as its argument, and its other fields as properties and child nodes, as
+    /// content does: `image "gear" { rect 0 0 16 16 }`.
+    private func canvasOp() throws -> JSONValue {
+        var op: [String: JSONValue] = [:]
+        switch name {
+        case "fill", "stroke", "clip":
+            var paint: [String: JSONValue] = [:]
+            if let color = arguments.first { paint["color"] = color.value.json }
+            for property in properties { paint[property.name] = property.value.json }
+            var path: [JSONValue] = []
+            for command in children {
+                if command.name == "dash" {
+                    paint["dash"] = .array(command.arguments.map(\.value.json))
+                    continue
+                }
+                guard command.properties.isEmpty, command.children.isEmpty else {
+                    throw KDLError("a path command is a name and its numbers, e.g. line 4 8",
+                                   at: command.position)
+                }
+                path.append(.array([.string(command.name)] + command.arguments.map(\.value.json)))
+            }
+            guard arguments.count <= 1, name != "clip" || paint.isEmpty else {
+                throw KDLError(name == "clip" ? "clip takes only a path, as nodes inside it"
+                               : "\(name) takes one colour; give the rest as width=, cap= or join=",
+                               at: position)
+            }
+            if name == "clip" {
+                op[name] = .array(path)
+            } else {
+                op[name] = .object(paint)
+                op["path"] = .array(path)
+            }
+        case "group":
+            guard arguments.isEmpty, properties.isEmpty else {
+                throw KDLError("group takes only ops, as nodes inside it", at: position)
+            }
+            op[name] = .array(try children.map { try $0.canvasOp() })
+        default:
+            switch arguments.count {
+            case 0: op[name] = .object([:])
+            case 1: op[name] = arguments[0].value.json
+            default: op[name] = .array(arguments.map(\.value.json))
+            }
+            for property in properties { op[property.name] = property.value.json }
+            for child in children { op[child.name] = child.json }
+        }
+        let json = JSONValue.object(op)
+        // Checked now, so a mistake points at its line rather than warning at every layout; an
+        // op with a slot in it is checked once it is filled.
+        if try !template(of: json).hasSlots {
+            do {
+                _ = try CanvasOp.parse(json)
+            } catch let error as CanvasError {
+                throw KDLError(error.description, at: position)
+            }
+        }
+        return json
     }
 }
 
