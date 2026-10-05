@@ -38,6 +38,17 @@ extension NSScreen {
     }
 }
 
+extension CGRect {
+    /// Whether a pointer at `point`, in Cocoa's coordinates, is over this rect. Not `contains`,
+    /// which is half open the wrong way up for a pointer: Cocoa flips it from the window
+    /// server's top-down pixel rows, so a pointer pressed against the top of a screen is at
+    /// its `maxY` exactly (1169.0 on a 1169pt screen, measured on macOS 27), which `contains`
+    /// leaves out, and one on the row just below a rect is at its `minY`.
+    public func containsPointer(_ point: CGPoint) -> Bool {
+        point.x >= minX && point.x < maxX && point.y > minY && point.y <= maxY
+    }
+}
+
 public struct RGBA: Sendable, Hashable {
     public var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
 

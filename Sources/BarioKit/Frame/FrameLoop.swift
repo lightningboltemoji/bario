@@ -301,7 +301,7 @@ public final class FrameLoop {
     /// The item on screen at a point, which is what the pointer is over: hit testing reads
     /// what is presented, not what is heading there.
     public func item(at point: CGPoint) -> (bar: Bar, item: SceneItem)? {
-        for bar in bars where bar.isVisible && bar.surface.frame.contains(point) {
+        for bar in bars where bar.isVisible && bar.surface.frame.containsPointer(point) {
             let frame = bar.surface.frame
             let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
             guard let item = bar.presentation?.scene.item(at: local) else { continue }
@@ -327,7 +327,7 @@ public final class FrameLoop {
     private func updatePointerTarget() {
         for bar in bars {
             let interactive = isShut(bar) && bar.isVisible && revealed != bar.id
-                && pointer.map { bar.surface.frame.contains($0) } == true
+                && pointer.map { bar.surface.frame.containsPointer($0) } == true
             guard interactive != bar.isInteractive else { continue }
             bar.isInteractive = interactive
             bar.surface.setTakesPointer(interactive)

@@ -288,7 +288,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         // Pressing or releasing Option with the pointer resting on a bar moves nothing, and
         // without Accessibility permission sends nothing either. So while the pointer is on a
         // bar, and only then, Option is read a few times a second.
-        let onBar = loop.bars.contains { $0.isVisible && $0.surface.frame.contains(mouse) }
+        let onBar = loop.bars.contains { $0.isVisible && $0.surface.frame.containsPointer(mouse) }
         if onBar, modifierPoll == nil {
             let poll = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -307,7 +307,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// pointer leaves, so the menu you clicked is usable. One below the menu bar, where a tall
     /// bar hangs over a window, is on the window, and opened no menu.
     private func clicked(at point: CGPoint) {
-        if let bar = loop.bars.first(where: { $0.isVisible && $0.menuBarFrame.contains(point)
+        if let bar = loop.bars.first(where: { $0.isVisible && $0.menuBarFrame.containsPointer(point)
                                               && $0.config?.hole.click == .reveal }) {
             loop.revealed = bar.id
         }

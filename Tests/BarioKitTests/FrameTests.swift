@@ -433,6 +433,22 @@ struct FrameLoopTests {
         #expect(left.presentations.last?.reveal == 0)
     }
 
+    @Test("a pointer pressed against the top of the screen is on the bar")
+    func pointerAtTopEdge() async throws {
+        let h = try Harness(#"option "reveal"; item "a" module="echo-test""#)
+        await h.start()
+        h.loop.setBackdrop(FrameLoopTests.checker, for: 1)
+        await h.settle()
+
+        // The bar is 876…900. Cocoa puts a pointer flush with the top of the screen at y = 900
+        // exactly, where the Apple menu is one click away if the bar lets it through.
+        h.loop.pointerMoved(to: CGPoint(x: 5, y: 900))
+        #expect(h.surface.takesPointer, "a click flush with the top of the screen reaches bario")
+        // And y = 876 is the row just below the bar, over whatever is under it.
+        h.loop.pointerMoved(to: CGPoint(x: 5, y: 876))
+        #expect(!h.surface.takesPointer)
+    }
+
     @Test("a bar a click has revealed takes no clicks, even with Option held")
     func revealedIsInert() async throws {
         let h = try Harness(#"item "a" module="echo-test""#)

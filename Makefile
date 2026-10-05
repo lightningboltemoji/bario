@@ -82,11 +82,18 @@ print-version:
 # `codesign` is not told one — it reads `CFBundleIdentifier` from the plist it just copied, so the
 # identity is stated once. The version is stamped into the bundle's *copy*, never the source.
 #
-# **Signing defaults to ad-hoc (`--sign -`)**, which is enough for the permission to stick to this
-# identifier across rebuilds as long as the identifier does not change. A machine that cannot sign
-# at all still gets a bundle that runs, so that failure is a warning rather than an error;
-# `CODESIGN_IDENTITY` overrides it with a Developer ID, which brings the hardened runtime and a
-# secure timestamp with it, and is asked for deliberately enough that failing it should fail.
+# **Signing defaults to ad-hoc (`--sign -`), and an ad-hoc bundle loses its grants on every
+# rebuild.** With no certificate behind it, its designated requirement is the cdhash of that one
+# build (`codesign -d -r- dist/Bario.app` prints `designated => cdhash H"…"`), so to TCC each
+# `make app` is a new app that has never been granted anything, whatever its identifier.
+# `CODESIGN_IDENTITY` overrides it with a Developer ID, whose requirement names the identifier and
+# the team and so survives a rebuild; it brings the hardened runtime and a secure timestamp with
+# it, and is asked for deliberately enough that failing it should fail. A machine that cannot sign
+# at all still gets a bundle that runs, so that failure is a warning rather than an error.
+#
+# So to try a change, don't `make install`: quit Bario.app and run `swift build &&
+# .build/debug/bario --run` from a terminal that has Screen Recording. It runs on the terminal's
+# grant, which a rebuild does not touch.
 #
 # The bundle is `Bario.app` while the executable inside it stays `bario`: the file name is what Finder
 # and the Homebrew cask show, the executable is what a script calls. It is built into $(DIST), the one
@@ -102,7 +109,7 @@ ifeq ($(CODESIGN_IDENTITY),-)
   SIGN_FLAGS :=
   # SwiftPM ad-hoc signs the binary it builds, so codesign always has a signature to replace and
   # always says so. Nothing to act on, and the fallback below says the only thing worth reading.
-  SIGN_FALLBACK := >/dev/null 2>&1 || echo "  (could not codesign; permissions may be re-requested after each build)"
+  SIGN_FALLBACK := >/dev/null 2>&1 || echo "  (could not codesign)"
 else
   SIGN_FLAGS    := --options runtime --timestamp
   SIGN_FALLBACK :=

@@ -51,7 +51,7 @@ public struct Scene: Sendable {
     /// and an item on its way out is not there to be pointed at.
     public func item(at point: CGPoint) -> SceneItem? {
         for item in allItems.reversed()
-        where item.kind != .spacer && !item.states.contains(.leaving) && item.frame.contains(point) {
+        where item.kind != .spacer && !item.states.contains(.leaving) && item.frame.containsPointer(point) {
             return item
         }
         return nil
