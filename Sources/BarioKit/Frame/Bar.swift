@@ -32,9 +32,12 @@ public final class Bar {
     public internal(set) var shadows = ShadowField.empty
 
     public internal(set) var display: DisplayInfo
-    /// Whether the system's menu bar is showing on this display. A full screen app or an
-    /// auto-hidden menu bar takes the bar off screen with it.
+    /// Whether the system's menu bar is showing on this display. An auto-hidden menu bar takes
+    /// the bar off screen with it.
     public internal(set) var menuBarShown: Bool
+    /// Whether a native full screen app has this display. It decides whether the bar is on
+    /// screen, not `menuBarShown`, which a notched display reports the same either way.
+    public internal(set) var fullscreen = false
     /// The config's bar for this display, if any matches.
     public internal(set) var config: BarConfig?
 
@@ -68,6 +71,18 @@ public final class Bar {
         compositor = Compositor(host: surface.hostLayer)
         self.menuBarShown = menuBarShown
         self.config = config
+    }
+
+    /// Whether the bar belongs on screen, as far as the screen goes: over the menu bar while
+    /// there is one, and over a full screen app only if the config asks.
+    var placeOnScreen: Bool {
+        fullscreen ? config?.fullscreen == .show : menuBarShown
+    }
+
+    /// The modes the bar wears: every bar's, and `fullscreen` while it is over a full screen
+    /// app, which is the one that differs from display to display.
+    func modes(_ modes: Set<String>) -> Set<String> {
+        fullscreen ? modes.union(["fullscreen"]) : modes
     }
 
     /// The part of the bar over the real menu bar, in screen coordinates. A bar taller than the

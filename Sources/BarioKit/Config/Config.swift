@@ -61,6 +61,9 @@ public struct BarConfig: Sendable, Equatable {
     public var hole = HoleConfig()
     public var option: OptionRole = .interact
     public var notch: NotchPolicy = .avoid
+    /// `position` in the config; `position` here is where the node is in the file.
+    public var placement: BarPlacement = .space
+    public var fullscreen: FullscreenPolicy = .hide
     public var items: [ItemConfig] = []
     public var position: KDLPosition = .start
 
@@ -102,6 +105,24 @@ public enum NotchPolicy: String, Sendable, Equatable, CaseIterable {
     case ignore
 }
 
+/// What a bar does while Spaces slide: entering or leaving a full screen app, swiping between
+/// desktops. DESIGN.md §6.
+public enum BarPlacement: String, Sendable, Equatable, CaseIterable {
+    /// On every Space, as the menu bar is, so it slides away with the desktop and comes back
+    /// with it.
+    case space
+    /// Fixed to the screen, in a Space of its own above the rest, so it holds still while they
+    /// slide past underneath. Where macOS does not offer that, it is `space`.
+    case fixed
+}
+
+/// Whether a bar shows over a native full screen app. DESIGN.md §6.
+public enum FullscreenPolicy: String, Sendable, Equatable, CaseIterable {
+    case hide
+    /// Shown, and wearing `fullscreen` as a class, so the stylesheet can dim it there.
+    case show
+}
+
 /// When a `notch` marker splits the bar. DESIGN.md §6.
 public enum NotchMarker: String, Sendable, Equatable {
     /// At the notch on a notched display and at the screen's centre on any other, so one
@@ -122,6 +143,11 @@ public struct ModeConfig: Sendable, Equatable {
     /// How long it stays on after the last thing that turned it on, in seconds.
     public var hold: Double = 0
     public var position: KDLPosition = .start
+
+    /// Modes bario turns on itself, which `when` and `unless` can name without a mode node.
+    /// `fullscreen` is the one that differs from bar to bar: it is on for a bar while a full
+    /// screen app has its display.
+    public static let builtIn: Set<String> = ["fullscreen"]
 
     public init(name: String, position: KDLPosition = .start) {
         self.name = name

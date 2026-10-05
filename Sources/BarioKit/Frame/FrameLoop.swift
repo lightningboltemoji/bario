@@ -210,9 +210,11 @@ public final class FrameLoop {
 
     /// A bar appears with a display. It stays off screen until its first frame.
     @discardableResult
-    public func addBar(display: DisplayInfo, surface: any BarSurface, menuBarShown: Bool = true) -> Bar {
+    public func addBar(display: DisplayInfo, surface: any BarSurface, menuBarShown: Bool = true,
+                       fullscreen: Bool = false) -> Bar {
         let bar = Bar(display: display, surface: surface, menuBarShown: menuBarShown,
                       config: config.bar(for: display))
+        bar.fullscreen = fullscreen
         bars.append(bar)
         scheduler.after(revealDeadline) { [weak self, weak bar] in
             // A bar that made its first frame in time has nothing to wait for.
@@ -233,14 +235,19 @@ public final class FrameLoop {
         if pressed?.bar == id { pressed = nil }
     }
 
-    /// A display resized, or its menu bar hid or showed.
-    public func updateBar(_ id: CGDirectDisplayID, display: DisplayInfo, menuBarShown: Bool) {
+    /// A display resized, its menu bar hid or showed, or a full screen app took it or gave it
+    /// back. That last changes the bar's classes, so it restyles.
+    public func updateBar(_ id: CGDirectDisplayID, display: DisplayInfo, menuBarShown: Bool,
+                          fullscreen: Bool = false) {
         guard let bar = bars.first(where: { $0.id == id }),
-              bar.display != display || bar.menuBarShown != menuBarShown else { return }
+              bar.display != display || bar.menuBarShown != menuBarShown
+                || bar.fullscreen != fullscreen else { return }
+        let restyle = bar.fullscreen != fullscreen
         bar.display = display
         bar.menuBarShown = menuBarShown
+        bar.fullscreen = fullscreen
         let config = config.bar(for: display)
-        if config != bar.config {
+        if config != bar.config || restyle {
             bar.config = config
             invalidate(.style, bar: id)
         } else {
@@ -413,7 +420,8 @@ public final class FrameLoop {
                     hovered: hovered?.bar == bar.id ? hovered?.item : nil,
                     active: pressed?.bar == bar.id ? pressed?.item : nil)
                 bar.styled = styler.style(bar: config, items: (banner.map { [$0.config] } ?? []) + config.items,
-                                          states: states, interaction: interaction, modes: modes)
+                                          states: states, interaction: interaction,
+                                          modes: bar.modes(modes))
             }
             guard let styled = bar.styled else { continue }
 
@@ -478,7 +486,7 @@ public final class FrameLoop {
         if !bar.isReady, bar.deadlinePassed || (bar.backdrop.image != nil && hasRendered(bar)) {
             bar.isReady = true
         }
-        setVisible(bar, bar.isReady && bar.menuBarShown && !hidden)
+        setVisible(bar, bar.isReady && bar.placeOnScreen && !hidden)
         return report
     }
 

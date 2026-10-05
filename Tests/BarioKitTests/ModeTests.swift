@@ -114,6 +114,8 @@ struct ModeConfigTests {
         #expect(message(#"mode "guide" { hold "1s" }"# + "\n" + bar).contains("has nothing to turn it on"))
         #expect(message(#"mode "g" { changed "x" }; mode "g" { changed "y" }"# + "\n" + bar)
             .contains("two modes called"))
+        #expect(message(#"mode "fullscreen" { changed "x" }"# + "\n" + bar).contains("bario's own mode"))
+        #expect((try? ConfigLoader.parse(#"bar { item "a" module="text" unless="fullscreen" }"#)) != nil)
         #expect(message(#"mode "g" { soon "x" }"# + "\n" + bar).contains("expected while, changed or hold"))
         #expect(message(#"source "a" module="exec" { command "x" }"# + "\n" + bar).contains("already has"))
         #expect(message(#"source "s" module="exec" format="{text}" { command "x" }"# + "\n" + bar)

@@ -389,7 +389,9 @@ notch
 `when` decides only whether an item is laid out. Its module runs either way, so an item a mode
 brings in has its content the moment it appears. A path's first value is not a change, so
 starting up turns nothing on. Items that stay in both arrangements slide to their new places;
-the ones that come and go transition in and out (section 7). Modes are the same on every bar.
+the ones that come and go transition in and out (section 7). Modes are the same on every bar,
+but for `fullscreen`, which bario turns on for a bar while a full screen app has its display
+(below).
 
 ### Multiple displays
 
@@ -415,6 +417,43 @@ The cover is as tall as whichever reaches further down, the menu bar or the bar:
   bar, since it only ever stood in for what the cover hides. Below it the screen is live, and so
   are its windows' shadows. A click there is on a window and opens no menu, so it does not
   latch the reveal.
+
+### Spaces and full screen
+
+A bar is on every Space, as the menu bar is, so when a full screen app takes a display the bar
+slides away with the desktop and slides back with it, as macOS 27's own menu bar does.
+`bar { position "fixed" }` holds it still instead: the cover moves into a Space of bario's own,
+above the rest, and the Spaces slide past underneath. No collection behaviour does this.
+Measured in October 2026, every combination of `canJoinAllSpaces`, `stationary`,
+`fullScreenAuxiliary` and `canJoinAllApplications` slid. So it is SkyLight's, the window
+server's private API; where its calls are missing, `fixed` is `space`. A window in a Space
+AppKit does not know of is one AppKit "adjusts" back onto the screen, halfway down, whenever a
+display changes, so nothing but `fit` moves a cover.
+
+Over a native full screen app a bar is hidden, `bar { fullscreen "hide" }`, the default.
+Which displays have one is SkyLight's to say too: each display's current Space, and whether a
+full screen app made it. That is asked when the active Space changes and on the quarter-second
+timer, since clicking into a full screen app on another display announces nothing. The menu bar
+is no guide: a notched display reports it the same either way, because the app sits below the
+notch and leaves the strip beside it black. A fixed bar holds still through the slide and fades
+as the full screen app lands; one riding its Space has already slid off with the desktop.
+
+`fullscreen "show"` keeps it there, and while a full screen app has its display the bar wears
+`fullscreen`, a mode bario turns on itself. So the stylesheet can dim the bar there, and items
+can step aside:
+
+```kdl
+bar display="built-in" {
+  position "fixed"
+  fullscreen "show"                         // in the black strip beside the notch
+  item "clock" module="clock" format="HH:mm"
+  item "net" module="net" unless="fullscreen"
+}
+```
+
+```css
+bar.fullscreen item { opacity: 0.4; transition: opacity 250ms; }
+```
 
 ## 7. Appearance
 
@@ -1178,6 +1217,12 @@ Each phase ends with something you can run and look at.
 
 - **Wi-Fi SSID needs Location Services** on macOS 14+. The module has to work without it,
   and the docs have to say why the SSID is missing.
+- **Holding still while Spaces slide, and knowing a full screen Space when it comes**, have no
+  public API. bario's own covers use SkyLight for both (section 6), looked up at run time so
+  nothing links against it, and where it is missing a bar rides its Space and never hides for a
+  full screen app. There is a public way to tell a full screen Space, measured and not used: a
+  plain `NSWindow` (not a panel) with `.canJoinAllSpaces` at normal level is left off them, so
+  its `isOnActiveSpace` turns false the moment one arrives. Panels join them whatever they say.
 - **Now Playing and Spaces** have no public API. Media is `MediaRemote` (private); Spaces come
   from yabai or AeroSpace over `exec`. Neither is a built-in module for that reason.
 - **Screen Recording permission** must attach to a stable bundle identifier, hence the `.app`

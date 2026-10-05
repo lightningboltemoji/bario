@@ -9,11 +9,16 @@ public final class BarCover: BarSurface {
     public let window: NSWindow
     public let view: BarView
     public var lastSource: String?
+    /// Asked to hold still while Spaces slide, `position "fixed"`. A cover is fixed or not from
+    /// the start, and one that should change is replaced.
+    public let fixed: Bool
+    private let panel: CoverPanel
     private var shown = false
 
-    public init(info: DisplayInfo, screen: NSScreen, debugTint: Bool) {
+    public init(info: DisplayInfo, screen: NSScreen, debugTint: Bool, fixed: Bool = false) {
         displayID = info.displayID
         name = info.name
+        self.fixed = fixed
 
         let frame = CGRect(x: info.frame.minX,
                            y: info.frame.maxY - info.stripHeight,
@@ -25,8 +30,8 @@ public final class BarCover: BarSurface {
 
         // A panel that never activates bario: Option-clicking an item must not take focus from
         // the app you are in, or swap the real menu bar for bario's own.
-        let panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
-                            backing: .buffered, defer: false, screen: screen)
+        panel = CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+                           backing: .buffered, defer: false, screen: screen)
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
         window = panel
@@ -42,6 +47,7 @@ public final class BarCover: BarSurface {
         // Above the menu bar (24) and above status items (25), below open menus (101).
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.placed = true
     }
 
     public var frame: CGRect { window.frame }
@@ -60,12 +66,27 @@ public final class BarCover: BarSurface {
         guard visible != shown else { return }
         shown = visible
         guard visible else {
-            window.orderOut(nil)
+            // A fixed bar held still while its Space slid away, so it is on screen when it
+            // goes, and fades as it came. One that rode the Space has just slid off with it.
+            guard fixed else {
+                window.orderOut(nil)
+                return
+            }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.15
+                window.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, !self.shown else { return }
+                    self.window.orderOut(nil)
+                }
+            })
             return
         }
         // A short cross-fade with the real menu bar underneath, rather than a pop.
         window.alphaValue = 0
         window.orderFrontRegardless()
+        if fixed { SkyLight.fix(window) }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             window.animator().alphaValue = 1
@@ -81,7 +102,7 @@ public final class BarCover: BarSurface {
         let target = CGRect(x: screen.frame.minX, y: screen.frame.maxY - info.stripHeight,
                             width: screen.frame.width, height: info.stripHeight)
         guard window.frame != target else { return false }
-        window.setFrame(target, display: false)
+        panel.place(target)
         view.frame = CGRect(origin: .zero, size: target.size)
         return true
     }
@@ -89,5 +110,25 @@ public final class BarCover: BarSurface {
     public func close() {
         window.orderOut(nil)
         window.close()
+    }
+}
+
+/// The cover's window, which only `fit` moves. A fixed cover is in no Space AppKit knows of, so
+/// when a display changes, AppKit "adjusts" it back onto the screen, halfway down; and no cover
+/// needs AppKit's help to find its display, since `fit` follows the strip.
+private final class CoverPanel: NSPanel {
+    /// Set once the cover is made, after which only `place` moves it.
+    var placed = false
+    private var placing = false
+
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        guard !placed || placing else { return }
+        super.setFrame(frameRect, display: flag)
+    }
+
+    func place(_ frame: CGRect) {
+        placing = true
+        defer { placing = false }
+        setFrame(frame, display: false)
     }
 }

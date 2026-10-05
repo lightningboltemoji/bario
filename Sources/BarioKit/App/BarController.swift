@@ -155,11 +155,13 @@ public final class BarController: NSObject, NSApplicationDelegate {
         // The desktop behind the bar is the wallpaper and the shading under the menu bar, and
         // nothing announces a change to either, so these are the moments one is likely: a
         // space with its own wallpaper, and waking or unlocking, after which a dynamic
-        // wallpaper has moved on and an aerial has stopped somewhere new.
+        // wallpaper has moved on and an aerial has stopped somewhere new. A new Space may also
+        // be a full screen app's, which decides whether a bar shows at all.
         let workspace = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.screensDidWakeNotification] {
             workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.syncDisplays()
                     self?.captureBackdrops()
                     self?.shadows.poke()
                 }
@@ -194,27 +196,41 @@ public final class BarController: NSObject, NSApplicationDelegate {
 
     /// One bar per display. A display that appears gets a bar that waits off screen for its
     /// first frame; one that moves, resizes or hides its menu bar invalidates its bar's layout,
-    /// as does a config that changes how tall its bar is.
+    /// as does a config that changes how tall its bar is. A full screen app taking a display,
+    /// or giving it back, restyles its bar and may take it off screen.
     private func syncDisplays() {
         var seen: Set<CGDirectDisplayID> = []
         var changed = false
+        let fullscreen = SkyLight.fullscreenDisplays(among: NSScreen.screens.compactMap(\.displayID))
         for screen in NSScreen.screens {
             guard let info = strip(on: screen) else { continue }
             seen.insert(info.displayID)
             let menuBarShown = screen.menuBarInset > 1
+            let isFullscreen = fullscreen.contains(info.displayID)
+            // Whether a cover is fixed is settled when it is made, so a config that changes it
+            // gets a new one, which waits for its first frame like any other.
+            let fixed = loop.config.bar(for: info)?.placement == .fixed
+            if let cover = covers[info.displayID], cover.fixed != fixed {
+                loop.removeBar(info.displayID)
+                cover.close()
+                covers[info.displayID] = nil
+            }
             if let cover = covers[info.displayID] {
                 cover.fit(to: screen, strip: info)
                 if loop.bars.first(where: { $0.id == info.displayID })?.display != info { changed = true }
-                loop.updateBar(info.displayID, display: info, menuBarShown: menuBarShown)
+                loop.updateBar(info.displayID, display: info, menuBarShown: menuBarShown,
+                               fullscreen: isFullscreen)
             } else {
-                let cover = BarCover(info: info, screen: screen, debugTint: options.debugTint)
+                let cover = BarCover(info: info, screen: screen, debugTint: options.debugTint,
+                                     fixed: fixed)
                 cover.view.onEvent = { [weak self] event in self?.handle(event, on: info.displayID) }
                 cover.view.onPress = { [weak self] item in
                     self?.loop.pressed = item.map { ItemRef(bar: info.displayID, item: $0) }
                 }
                 cover.view.onPointer = { [weak self] in self?.pointerMoved() }
                 covers[info.displayID] = cover
-                loop.addBar(display: info, surface: cover, menuBarShown: menuBarShown)
+                loop.addBar(display: info, surface: cover, menuBarShown: menuBarShown,
+                            fullscreen: isFullscreen)
                 changed = true
             }
         }
@@ -309,8 +325,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
             RunLoop.main.add(refresh, forMode: .common)
             timers.append(refresh)
         }
-        // Nothing announces a menu bar auto-hiding or a full screen app taking it away, and
-        // nothing announces another app's window moving either.
+        // Nothing announces a menu bar auto-hiding, a full screen app on another display being
+        // clicked into, or another app's window moving.
         let house = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.syncDisplays()

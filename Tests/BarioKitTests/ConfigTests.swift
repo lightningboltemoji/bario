@@ -163,6 +163,18 @@ struct ConfigTests {
         #expect(try ConfigLoader.parse(#"bar { option "reveal" }"#).bars[0].option == .reveal)
     }
 
+    @Test("a bar rides its Space and stays off full screen apps, unless it says otherwise")
+    func spacesAndFullscreen() throws {
+        let plain = try ConfigLoader.parse("bar { }").bars[0]
+        #expect(plain.placement == .space)
+        #expect(plain.fullscreen == .hide)
+        let set = try ConfigLoader.parse(#"bar { position "fixed"; fullscreen "show" }"#).bars[0]
+        #expect(set.placement == .fixed)
+        #expect(set.fullscreen == .show)
+        #expect(message(#"bar { position "sticky" }"#).contains(#"position is one of "space", "fixed""#))
+        #expect(message(#"bar { fullscreen "dim" }"#).contains(#"fullscreen is one of "hide", "show""#))
+    }
+
     @Test("config errors say what and where")
     func errors() throws {
         #expect(message("").contains("no bar node"))

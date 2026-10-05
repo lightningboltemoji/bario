@@ -76,12 +76,19 @@ public enum ConfigLoader {
     /// declared, and sources sharing a key in the store with something else.
     private static func check(_ config: Config) throws {
         var modes: Set<String> = []
-        for mode in config.modes where !modes.insert(mode.name).inserted {
-            throw KDLError("there are two modes called \"\(mode.name)\"", at: mode.position)
+        for mode in config.modes {
+            if ModeConfig.builtIn.contains(mode.name) {
+                throw KDLError("\"\(mode.name)\" is bario's own mode, on while a full screen app has "
+                               + "the display, so no mode node declares it", at: mode.position)
+            }
+            if !modes.insert(mode.name).inserted {
+                throw KDLError("there are two modes called \"\(mode.name)\"", at: mode.position)
+            }
         }
         let items = config.bars.flatMap(\.items).flatMap(\.flattened)
         for item in items {
-            for name in [item.when, item.unless].compactMap({ $0 }) where !modes.contains(name) {
+            for name in [item.when, item.unless].compactMap({ $0 })
+            where !modes.contains(name) && !ModeConfig.builtIn.contains(name) {
                 let known = modes.isEmpty ? "there are none" : "the ones that exist are "
                     + modes.sorted().map { "\"\($0)\"" }.joined(separator: ", ")
                 throw KDLError("\(item.name) names a mode \"\(name)\" that no mode node declares; \(known)",
@@ -187,12 +194,17 @@ public enum ConfigLoader {
                 bar.option = try enumeration(child, "option", OptionRole.self)
             case "notch" where child.argument(0)?.value.stringValue.flatMap(NotchPolicy.init) != nil:
                 bar.notch = try enumeration(child, "notch", NotchPolicy.self)
+            case "position":
+                bar.placement = try enumeration(child, "position", BarPlacement.self)
+            case "fullscreen":
+                bar.fullscreen = try enumeration(child, "fullscreen", FullscreenPolicy.self)
             case "item", "group", "spacer", "notch":
                 counter += 1
                 bar.items.append(try parseItem(child, ordinal: counter))
             default:
                 throw KDLError("'\(child.name)' is not something a bar contains; expected "
-                               + "height, align, hole, option, notch, item, group or spacer",
+                               + "height, align, hole, option, notch, position, fullscreen, item, "
+                               + "group or spacer",
                                at: child.position)
             }
         }

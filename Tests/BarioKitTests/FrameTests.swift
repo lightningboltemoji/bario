@@ -219,6 +219,48 @@ struct FrameLoopTests {
         #expect(h.surface.presentations.count == presented, "nothing changed, so nothing was committed")
     }
 
+    @Test("a full screen app takes its display's bar off screen, and giving it back shows it")
+    func fullscreenHides() async throws {
+        let h = try Harness(#"item "a" module="echo-test""#, bars: 2)
+        await h.start()
+        for bar in h.loop.bars { h.loop.setBackdrop(FrameLoopTests.checker, for: bar.id) }
+        await h.settle()
+        let (left, right) = (h.surfaces[0], h.surfaces[1])
+        #expect(left.visible && right.visible)
+
+        // A notched display reports its menu bar either way, so that is not what hides it.
+        h.loop.updateBar(1, display: h.loop.bars[0].display, menuBarShown: true, fullscreen: true)
+        await h.settle()
+        #expect(!left.visible)
+        #expect(!h.loop.bars[0].isVisible, "a bar that is not there takes no pointer")
+        #expect(right.visible, "the other display has no full screen app")
+
+        h.loop.updateBar(1, display: h.loop.bars[0].display, menuBarShown: true, fullscreen: false)
+        await h.settle()
+        #expect(left.visible)
+    }
+
+    @Test("a bar that shows over a full screen app wears fullscreen there, and only there")
+    func fullscreenShows() async throws {
+        let h = try Harness(#"fullscreen "show"; item "a" module="echo-test"; item "b" module="echo-test" unless="fullscreen""#,
+                            css: "item { opacity: 1 } bar.fullscreen item { opacity: 0.4 }", bars: 2)
+        await h.start()
+        for bar in h.loop.bars { h.loop.setBackdrop(FrameLoopTests.checker, for: bar.id) }
+        await h.settle()
+
+        // Even with the menu bar gone, as it is on a display with no notch.
+        h.loop.updateBar(1, display: h.loop.bars[0].display, menuBarShown: false, fullscreen: true)
+        await h.settle()
+        let (left, right) = (h.surfaces[0], h.surfaces[1])
+        #expect(left.visible)
+        let dimmed = left.presentations.last?.scene.allItems
+        #expect(dimmed?.map(\.name) == ["a"])
+        #expect(dimmed?.map(\.style.opacity) == [0.4])
+        let other = right.presentations.last?.scene.allItems
+        #expect(other?.map(\.name) == ["a", "b"])
+        #expect(other?.map(\.style.opacity) == [1, 1])
+    }
+
     @Test("a pointer nowhere near a bar costs nothing; near one, only that bar repaints")
     func pointer() async throws {
         let h = try Harness(#"item "a" module="echo-test""#, bars: 2)
