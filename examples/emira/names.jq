@@ -9,7 +9,7 @@
 # same on every bar, so the row follows focus rather than the display it is drawn on.
 #
 # `--argjson max N` keeps the N columns nearest focus and puts … where the others were. Without it,
-# every column is named. An empty workspace is one cell with its address, and the class `empty`.
+# every column is named. An empty workspace is one cell saying so, with the class `empty`.
 
 def superscript: tostring | explode | map([8304, 185, 178, 179, 8308, 8309, 8310, 8311, 8312, 8313][. - 48]) | implode;
 
@@ -33,7 +33,7 @@ def more: {text: "…", class: "more"};
 | (if $limit > 0 and $count > $limit then $limit else $count end) as $shown
 | {
     content: (if $count == 0
-              then {text: $display.workspace, class: "empty"}
+              then {text: "empty", class: "empty"}
               else {row: {children: ([if $start > 0 then more else empty end]
                                      + [$columns[$start:$start + $shown][] | cell]
                                      + [if $start + $shown < $count then more else empty end])},

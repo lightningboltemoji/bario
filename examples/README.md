@@ -12,6 +12,7 @@ actually write; these are the same contracts with the sugar taken off.
 | `surface/` | a native process drawing into shared IOSurfaces with Metal, shown with no copy |
 | `emira/` | another program's stream as a source, a mode that takes part of the bar over, a roll, and a Rust module rendering from the source |
 | `ping/` | one source feeding several items: an app's Dock badge per item, its state as classes for the stylesheet |
+| `roll/` | a Rust renderer whose node turns its text over as on a drum, animated with `request_frame()` |
 
 ## counter.wat
 
@@ -182,9 +183,42 @@ through the guide. `workspace/build.sh` installs it, and
   }
 ```
 
+With `roll=#true` it draws the name as a `roll` node (below), which turns over as emira pans:
+the old name leaves by the top and the new one comes up from below for a workspace later in key
+order (`1`…`9`, `0`, `a`…`z`), and the other way for an earlier one. It turns only when emira
+pans, when the display now focused shows a workspace it was not showing; focus moving to a
+display already showing its workspace changes the name still.
+
+```kdl
+renderer "roll" path="~/.config/bario/renderers/roll.wasm"
+```
+
+```css
+/* Turn in the bubble's whole inside, clipped where the border begins. */
+#workspace { padding: 0pt 12pt; }
+#workspace roll { --roll-height: 21pt; }
+```
+
 The pieces are general. `source` puts any program's stream in the store, `mode` turns a
 condition into an arrangement, and `@starting-style` and `:leaving` animate whatever comes and
 goes. The modules and the filter are the only parts that know emira's schema.
+
+## roll
+
+```sh
+roll/build.sh           # installs ~/.config/bario/renderers/roll.wasm
+```
+
+A renderer for `{"roll": {"text": "2", "from": "1", "direction": "up", "since": <epoch ms>}}`: the
+old text slides out of the node's box one way while the new slides in from the other, clipped to
+the box, on a critically damped spring (emira's own `smooth`). The module that knows about the
+change says when it was, so the renderer keeps no state: it asks for frames while the spring is
+moving and draws the text still once it settles. `--roll-height` sizes the box, `--roll-stiffness`
+the spring, and `--roll-advance` a character's width in ems, since a renderer cannot measure text
+(0.6, every character of `ui-monospace`).
+
+A renderer is loaded once per path: `bario reload` keeps the instance it has, so a rebuilt
+`roll.wasm` is picked up when bario restarts.
 
 ## ping
 

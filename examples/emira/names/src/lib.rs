@@ -65,9 +65,10 @@ pub extern "C" fn render(ptr: i32, len: i32) -> i64 {
         return output(&Render::hidden());
     };
     let layout = state["layout"].as_str().unwrap_or("strip");
+    let tooltip = format!("workspace {}", state["workspace"].as_str().unwrap_or(""));
     if cells.is_empty() {
-        let workspace = state["workspace"].as_str().unwrap_or("");
-        return output(&Render::new(text_class(workspace, "empty")).class(layout).class("empty"));
+        // The word, not the workspace's name: the workspace module shows that beside the logo.
+        return output(&Render::new(text_class("empty", "empty")).class(layout).class("empty").tooltip(&tooltip));
     }
 
     let more = || text_class("…", "more");
@@ -90,7 +91,6 @@ pub extern "C" fn render(ptr: i32, len: i32) -> i64 {
     if state["after"].as_u64().unwrap_or(0) > 0 {
         children.push(more());
     }
-    let tooltip = format!("workspace {}", state["workspace"].as_str().unwrap_or(""));
     output(&Render::new(json!({ "row": { "children": children }, "class": "names" }))
         .class(layout)
         .tooltip(&tooltip))
