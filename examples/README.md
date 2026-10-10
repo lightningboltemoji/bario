@@ -173,9 +173,18 @@ With no Rust toolchain, `names.jq` makes the same row from a second `emira watch
 
 The stylesheet is the same for both, since both draw the same tree.
 
+`workspace/` reads the same source for the focused workspace's name alone, a bubble that stays
+through the guide. `workspace/build.sh` installs it, and
+
+```kdl
+  item "workspace" module="wasm" path="~/.config/bario/modules/emira-workspace.wasm" {
+    config source="emira"
+  }
+```
+
 The pieces are general. `source` puts any program's stream in the store, `mode` turns a
 condition into an arrangement, and `@starting-style` and `:leaving` animate whatever comes and
-goes. The module and the filter are the only parts that know emira's schema.
+goes. The modules and the filter are the only parts that know emira's schema.
 
 ## ping
 
