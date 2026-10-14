@@ -118,11 +118,18 @@ had to be built from off-screen windows too (covers waiting for their first fram
 otherwise photographed once shown), cached, and invalidated whenever covers came and went.
 
 Captures are taken on events (a display appearing or changing, a space change, the appearance,
-wake and unlock, WallpaperAgent's store file), then again a second later while each one finds
-something new (at most ten in a row), and every `--refresh` seconds (60) for dynamic and
-shuffled wallpapers. Window shadows are not tracked: measured, they reach the strip only from
-windows within ~25pt of it and change it by a few levels, and tracking them was the reason for
-the old once-a-second capture.
+wake, a second after unlock, WallpaperAgent's store file), then again a second later — after an
+event whatever the capture found, since a notification can come before its change, and from
+then on while each one finds something new (at most ten in a row) — and every `--refresh`
+seconds (60) for dynamic and shuffled wallpapers. Window shadows are not tracked: measured, they
+reach the strip only from windows within ~25pt of it and change it by a few levels, and tracking
+them was the reason for the old once-a-second capture.
+
+None is taken while the screen is locked (`CGSSessionScreenIsLocked`). WallpaperAgent shows the
+lock screen's wallpaper in a window of its own below normal level, so the filter takes it for the
+desktop: captures from the lock screen could settle on it, and the bar then showed it after
+unlocking until the next refresh. `screenIsUnlocked` comes about 0.3s before that window is
+released (WallpaperAgent logs `Releasing offscreen window`), hence the second's wait.
 
 ## Seeing it
 

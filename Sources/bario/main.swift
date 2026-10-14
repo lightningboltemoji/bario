@@ -1,5 +1,6 @@
 import AppKit
 import BarioKit
+import os
 
 programName = "bario"
 
@@ -52,6 +53,7 @@ if options.shot != nil || options.diagnose {
         exit(1)
     }
 } else {
+    systemLog = Logger(subsystem: "zip.tanner.bario", category: "bar")
     (theme, startupError) = Theme.loadOrDefault(configPath: options.configPath,
                                                 stylePath: options.stylePath)
     if let startupError { warn(startupError) }

@@ -1,9 +1,15 @@
 import AppKit
 import ImageIO
+import os
 import UniformTypeIdentifiers
 
 /// What `warn` prefixes its messages with. Each executable sets it once at startup.
 public nonisolated(unsafe) var programName = "bario"
+
+/// Where `note` and `warn` also write, when set. The bar sets it: opened as an app, its stdout
+/// and stderr are /dev/null, and this is what `log show --predicate 'subsystem ==
+/// "zip.tanner.bario"'` reads back afterwards.
+public nonisolated(unsafe) var systemLog: Logger?
 
 extension NSScreen {
     public var displayID: CGDirectDisplayID? {
@@ -147,10 +153,12 @@ public enum PNG {
 public func note(_ message: String) {
     print(message)
     fflush(stdout)
+    systemLog?.notice("\(message, privacy: .public)")
 }
 
 public func warn(_ message: String) {
     FileHandle.standardError.write(Data("\(programName): \(message)\n".utf8))
+    systemLog?.error("\(message, privacy: .public)")
 }
 
 /// One instance of a given name at a time. Two covers fight over the same strip of screen,

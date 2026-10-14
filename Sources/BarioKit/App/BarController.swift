@@ -22,6 +22,9 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var captureQueued = false
     /// Captures in a row that each found the desktop still changing.
     private var unsettled = 0
+    /// An event has asked for a capture since the last one, which is then looked at again
+    /// whatever it finds. See `captureBackdrops`.
+    private var lookAgain = false
     /// Reads Option while the pointer rests on a bar, for when no key event says it changed.
     private var modifierPoll: Timer?
     private var watchers: [FileWatcher] = []
@@ -126,6 +129,13 @@ public final class BarController: NSObject, NSApplicationDelegate {
         options.dark ?? (NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
     }
 
+    /// Asked of the session rather than kept from the lock and unlock notifications, so a
+    /// missed one cannot stop the captures for good.
+    private var screenIsLocked: Bool {
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+        return session?["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
     private func observeSystem() {
         let center = NotificationCenter.default
         center.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
@@ -173,10 +183,15 @@ public final class BarController: NSObject, NSApplicationDelegate {
                               object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.shadows.poke() }
         }
+        // Unlocking is announced before it is over: WallpaperAgent takes the lock screen's
+        // wallpaper window down about 0.3s after the notification, and a capture until then
+        // photographs it.
         DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.captureBackdrops() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                MainActor.assumeIsolated { self?.captureBackdrops() }
+            }
         }
         // Choosing a wallpaper rewrites WallpaperAgent's store. Not an API, so if the file moves
         // this goes quiet and the periodic refresh is what notices.
@@ -320,7 +335,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         // the time of day, a shuffled one.
         if options.refresh > 0 {
             let refresh = Timer(timeInterval: options.refresh, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.captureBackdrops() }
+                MainActor.assumeIsolated { self?.captureBackdrops(event: false) }
             }
             RunLoop.main.add(refresh, forMode: .common)
             timers.append(refresh)
@@ -341,14 +356,23 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// one follows it, so a display plugged in mid-capture is not skipped.
     ///
     /// The desktop tends to change over a moment rather than at once — a wallpaper fading in,
-    /// an aerial slowing to a stop — and the event that says so comes at the start. So a
-    /// capture that found something new is followed by another a second later, until one finds
-    /// the desktop holding still, or ten in a row have not.
-    private func captureBackdrops() {
+    /// an aerial slowing to a stop — and the event that says so comes at the start, or before
+    /// it: `screenIsUnlocked` comes about 0.3s before the lock screen's wallpaper goes. So a
+    /// capture for an event is followed by another a second later whatever it found, and a
+    /// capture that found something new by another, until one finds the desktop holding
+    /// still, or ten in a row have not.
+    ///
+    /// Nothing is photographed while the screen is locked. WallpaperAgent shows the lock
+    /// screen's wallpaper in a window of its own below normal level, which the capture filter
+    /// would take for the desktop, and the bars are hidden behind the lock screen anyway.
+    /// Unlocking captures again.
+    private func captureBackdrops(event: Bool = true) {
+        if event { lookAgain = true }
         guard !captureInFlight else {
             captureQueued = true
             return
         }
+        guard !screenIsLocked else { return }
         let pending = covers.values.compactMap { cover -> (BarCover, DisplayInfo, WallpaperSpec)? in
             guard let screen = NSScreen.screens.first(where: { $0.displayID == cover.displayID }),
                   let info = strip(on: screen) else { return nil }
@@ -357,6 +381,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
         guard !pending.isEmpty else { return }
 
         captureInFlight = true
+        let lookAgain = self.lookAgain
+        self.lookAgain = false
         let mode = options.source
         let allowed = captureAllowed
         Task { @MainActor in
@@ -377,11 +403,11 @@ public final class BarController: NSObject, NSApplicationDelegate {
             self.captureInFlight = false
             if self.captureQueued {
                 self.captureQueued = false
-                self.captureBackdrops()
-            } else if changed, self.unsettled < 10 {
+                self.captureBackdrops(event: false)
+            } else if changed || lookAgain, self.unsettled < 10 {
                 self.unsettled += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                    MainActor.assumeIsolated { self?.captureBackdrops() }
+                    MainActor.assumeIsolated { self?.captureBackdrops(event: false) }
                 }
             } else {
                 self.unsettled = 0
