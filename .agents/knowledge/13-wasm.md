@@ -6,13 +6,13 @@ surface is ours to keep small.
 
 ## Runtime
 
-WasmKit (swiftwasm/WasmKit), pinned at 0.2.2: pure Swift, a SwiftPM dependency, an
+WasmKit (swiftwasm/WasmKit), pinned at 0.4.2: pure Swift, a SwiftPM dependency, an
 interpreter. Zero build friction, and widget code is tiny. The `WasmEngine` protocol stands
 between bario and it, so swapping in wasmtime's C API later — for JIT, fuel metering and
 epoch interruption — is one file.
 
-Two pins worth knowing about: WasmKit 0.3 requires macOS 15 and bario targets 14, and 0.2.2
-predates swift-system 1.6's `Stat` rename, so `swift-system` is held at 1.5.0.
+The pin is exact because the 16MB memory cap goes through `Store.resourceLimiter`, which is SPI
+(`@_spi(Fuzzing)`) and can change in any release.
 
 ## The ABI, and two places it departs from §5
 

@@ -12,8 +12,9 @@
   its menu bar item is the only GUI, and the way to quit it.
 
   The icon is compiled from `Resources/bario.icon` by `make app`: `CFBundleIconName` names it inside
-  `Assets.car`, which macOS 26 reads, and `CFBundleIconFile` names the `.icns` macOS 14 and 15 fall
-  back to. Both are absent when the bundle was built without Xcode, and it runs the same without.
+  `Assets.car`, and `CFBundleIconFile` names the `.icns` actool writes beside it, for anything that
+  reads an icon file directly. Both are absent when the bundle was built without Xcode, and it runs
+  the same without.
 -->
 <plist version="1.0">
 <dict>
@@ -41,7 +42,7 @@
 	<key>CFBundleVersion</key>
 	<string>0</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>26.0</string>
 	<!-- An accessory app: no Dock icon and no app menu. The menu bar item is the whole GUI. -->
 	<key>LSUIElement</key>
 	<true/>

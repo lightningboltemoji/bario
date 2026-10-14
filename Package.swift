@@ -1,9 +1,9 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "bario",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
     products: [
         .executable(name: "bario", targets: ["bario"]),
         .library(name: "BarioKit", targets: ["BarioKit"]),
@@ -11,10 +11,8 @@ let package = Package(
     dependencies: [
         // The WASM runtime. Pure Swift, so a module is a SwiftPM dependency and not a build
         // system; see .agents/knowledge/13-wasm.md for why an interpreter is enough here.
-        .package(url: "https://github.com/swiftwasm/WasmKit.git", exact: "0.2.2"),
-        // WasmKit 0.2.2 predates swift-system 1.6's `Stat` rename and will not build against
-        // it; 1.5.0 is the last version its SystemExtras compiles with.
-        .package(url: "https://github.com/apple/swift-system", exact: "1.5.0"),
+        // Exact, because the memory cap goes through WasmKit SPI, which any release may change.
+        .package(url: "https://github.com/swiftwasm/WasmKit.git", exact: "0.4.2"),
     ],
     targets: [
         // Only exists because shm_open is variadic and therefore unavailable to Swift.

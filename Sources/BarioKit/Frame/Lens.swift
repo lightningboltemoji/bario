@@ -1,20 +1,22 @@
 import QuartzCore
 
 /// The present stage for the hole (DESIGN.md §8, §10). The pointer says where the hole is and
-/// how strongly it cuts. Two things ease over time, and how far each has got is sampled at the
-/// frame's timestamp like any other transition: the click reveal, and the hole closing while
-/// Option is held.
+/// how open it should be. Three things ease over time, and how far each has got is sampled at
+/// the frame's timestamp like any other transition: the hole opening, the click reveal, and the
+/// hole closing while Option is held.
 public struct Lens {
     /// Below this, a fade is as good as finished.
     static let settled = 0.003
 
+    private var open = Ease()
     private var reveal = Ease()
     private var closed = Ease()
 
     public init() {}
 
-    /// How strongly a hole at `pointer` cuts into a bar at `frame`: 1 over the bar, easing to
-    /// 0 at `reach` points away. A smoothstep, so the lens does not pop in.
+    /// How open a hole at `pointer` should be on a bar at `frame`: 1 over the bar, easing to 0
+    /// at `reach` points away along a smoothstep. With no reach it is 1 on the bar and 0 off it,
+    /// and the lens fades in time instead.
     public static func proximity(of pointer: CGPoint, to frame: CGRect, reach: Double) -> Double {
         let dx = max(frame.minX - pointer.x, 0, pointer.x - frame.maxX)
         let dy = max(frame.minY - pointer.y, 0, pointer.y - frame.maxY)
@@ -32,24 +34,28 @@ public struct Lens {
                                  latched: Bool, closed isClosed: Bool,
                                  at now: CFTimeInterval) -> (hole: Hole, reveal: Double) {
         var hole = Hole(radius: config.radius, feather: config.feather)
+        var near = 0.0
         if let pointer {
             hole.center = CGPoint(x: pointer.x - frame.minX, y: pointer.y - frame.minY)
-            hole.strength = Lens.proximity(of: pointer, to: frame, reach: config.proximity)
+            near = Lens.proximity(of: pointer, to: frame, reach: config.proximity)
         }
-        // A hole too far away to show has nothing to ease: Option pressed anywhere else must not
-        // start frames on every bar.
+        open.head(to: near, at: now)
+        hole.strength = open.value(at: now)
+        // A hole that is not showing has nothing to ease: Option pressed anywhere else must not
+        // start frames on every bar, and Option already held as the pointer arrives keeps the
+        // hole from opening at all.
         if hole.strength > Lens.settled {
             closed.head(to: isClosed ? 1 : 0, at: now)
         } else {
             closed.jump(to: isClosed ? 1 : 0)
         }
-        reveal.head(to: latched && hole.strength > Lens.settled ? 1 : 0, at: now)
+        reveal.head(to: latched && near > Lens.settled ? 1 : 0, at: now)
         hole.strength *= 1 - closed.value(at: now)
         return (hole, reveal.value(at: now))
     }
 
     public func isMoving(at now: CFTimeInterval) -> Bool {
-        reveal.isMoving(at: now) || closed.isMoving(at: now)
+        open.isMoving(at: now) || reveal.isMoving(at: now) || closed.isMoving(at: now)
     }
 }
 

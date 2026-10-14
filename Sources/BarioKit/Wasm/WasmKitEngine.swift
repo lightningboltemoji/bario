@@ -84,8 +84,9 @@ public final class WasmKitEngine: WasmEngine, @unchecked Sendable {
     }
 
     /// 16MB per instance by default (DESIGN.md §5). WasmKit exposes this only as SPI.
-    struct MemoryCap: ResourceLimiter {
+    final class MemoryCap: ResourceLimiter {
         let bytes: Int
+        init(bytes: Int) { self.bytes = bytes }
         func limitMemoryGrowth(to desired: Int) throws -> Bool { desired <= bytes }
         func limitTableGrowth(to desired: Int) throws -> Bool { desired <= 100_000 }
     }
@@ -95,13 +96,17 @@ public final class WasmKitEngine: WasmEngine, @unchecked Sendable {
         var instance: WasmKitInstance?
     }
 
+    /// `Caller` is only borrowed for the length of the host call, so the memory is resolved here
+    /// rather than kept as a way back to it.
     struct CallerMemory: WasmMemory {
-        let caller: Caller
-        let fallback: InstanceBox
+        private let memory: WasmKit.Memory?
 
-        private var memory: WasmKit.Memory? {
-            if case .memory(let memory)? = caller.instance?.exports["memory"] { return memory }
-            return fallback.instance?.memory
+        init(caller: borrowing Caller, fallback: InstanceBox) {
+            if case .memory(let memory)? = caller.instance?.exports["memory"] {
+                self.memory = memory
+            } else {
+                self.memory = fallback.instance?.memory
+            }
         }
 
         func read(ptr: Int32, len: Int32) throws -> [UInt8] {
@@ -167,19 +172,17 @@ public final class WasmKitInstance: WasmInstance, @unchecked Sendable {
     static func read(memory: WasmKit.Memory, ptr: Int32, len: Int32) throws -> [UInt8] {
         guard ptr >= 0, len >= 0 else { throw WasmError("a negative pointer or length") }
         guard len > 0 else { return [] }
-        let data = memory.data
-        let start = Int(ptr)
-        let end = start + Int(len)
-        guard end <= data.count else {
-            throw WasmError("read of \(len) bytes at \(ptr) is past the end of a \(data.count) byte memory")
+        let size = memory.byteCount
+        guard Int(ptr) + Int(len) <= size else {
+            throw WasmError("read of \(len) bytes at \(ptr) is past the end of a \(size) byte memory")
         }
-        return Array(data[start..<end])
+        return memory.withUnsafeBufferPointer(offset: UInt(ptr), count: Int(len)) { Array($0) }
     }
 
     static func write(memory: WasmKit.Memory, bytes: [UInt8], at ptr: Int32) throws {
         guard ptr >= 0 else { throw WasmError("a negative pointer") }
         guard !bytes.isEmpty else { return }
-        guard Int(ptr) + bytes.count <= memory.data.count else {
+        guard Int(ptr) + bytes.count <= memory.byteCount else {
             throw WasmError("write of \(bytes.count) bytes at \(ptr) is past the end of memory")
         }
         memory.withUnsafeMutableBufferPointer(offset: UInt(ptr), count: bytes.count) { buffer in

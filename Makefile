@@ -122,9 +122,9 @@ endif
 # so the frame frosts and the plate shows through the lenses as tinted glass. It is an Icon Composer
 # document, so it can be opened and adjusted there directly.
 #
-# macOS does not read that format itself: `actool` compiles it into an `Assets.car`, which macOS 26
-# reads through `CFBundleIconName`, and a legacy `bario.icns`, which is what macOS 14 and 15 read
-# through `CFBundleIconFile`. `LSMinimumSystemVersion` is 14.0, so both are kept.
+# macOS does not read that format itself: `actool` compiles it into an `Assets.car`, which macOS
+# reads through `CFBundleIconName`, and a `bario.icns` named by `CFBundleIconFile` for anything that
+# reads an icon file directly. actool asks for both keys even at a 26.0 deployment target.
 #
 # **`actool` lives in Xcode, not the Command Line Tools**, so a CLT-only machine cannot compile the
 # icon at all. That is not worth failing a build over — a bundle without an icon runs exactly as well,
@@ -144,7 +144,7 @@ else
 	@$(ACTOOL) $(ICON) --compile $(CONTENTS)/Resources \
 		--app-icon $(APP_NAME) --include-all-app-icons \
 		--platform macosx --target-device mac \
-		--minimum-deployment-target 14.0 --development-region en \
+		--minimum-deployment-target 26.0 --development-region en \
 		--output-partial-info-plist $(DIST)/icon-partial.plist \
 		--output-format human-readable-text --notices --warnings --errors
 endif
