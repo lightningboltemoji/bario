@@ -274,20 +274,22 @@ struct FrameLoopTests {
         h.loop.pointerMoved(to: CGPoint(x: 200, y: 400))
         #expect(h.scheduler.pending == nil, "far from every bar")
 
-        // Onto "a" on the left bar: the hole opens there, and nothing hovers.
+        // Onto "a" on the left bar: the hole eases open there, and nothing hovers.
         h.loop.pointerMoved(to: CGPoint(x: 5, y: 888))
         #expect(h.scheduler.pending == .turn)
         h.scheduler.run()
-        #expect(left.presentations.count == before.0 + 1)
+        #expect(h.scheduler.pending == .refresh, "the hole opens over time")
+        await h.drain()
+        #expect(left.presentations.count > before.0)
         #expect(right.presentations.count == before.1, "the other bar is nowhere near")
-        #expect(left.presentations.last?.hole.isVisible == true)
+        #expect(left.presentations.last?.hole.strength == 1)
         #expect(left.presentations.last?.scene.allItems[0].states.contains(.hover) == false,
                 "without Option the bar does not react to the pointer")
         #expect(!left.takesPointer)
 
-        // Leaving takes one more frame to close the hole, then nothing.
+        // Leaving eases the hole shut, then nothing.
         h.loop.pointerMoved(to: CGPoint(x: 200, y: 400))
-        h.scheduler.run()
+        await h.drain()
         #expect(left.presentations.last?.hole.isVisible == false)
         h.loop.pointerMoved(to: CGPoint(x: 210, y: 400))
         #expect(h.scheduler.pending == nil)
@@ -503,34 +505,46 @@ struct FrameLoopTests {
         #expect(h.surface.presentations.last?.scene.allItems.first { $0.name == "a" }?.states.contains(.hover) == true)
     }
 
-    @Test("the hole is where the pointer is, and fades with distance")
+    @Test("the hole is where the pointer is, eases open, and fades with distance")
     func lens() {
         let bar = CGRect(x: 0, y: 876, width: 400, height: 24)
         var lens = Lens()
         let config = HoleConfig()
-        let over = lens.present(pointer: CGPoint(x: 100, y: 888), frame: bar, config: config,
-                                latched: false, closed: false, at: 0)
-        #expect(over.hole.center == CGPoint(x: 100, y: 12))
-        #expect(over.hole.strength == 1)
-        let near = lens.present(pointer: CGPoint(x: 100, y: 836), frame: bar, config: config,
-                                latched: false, closed: false, at: 0)
-        #expect(near.hole.strength > 0 && near.hole.strength < 1)
-        let far = lens.present(pointer: CGPoint(x: 100, y: 500), frame: bar, config: config,
-                               latched: false, closed: false, at: 0)
-        #expect(!far.hole.isVisible)
-        #expect(!lens.isMoving(at: 0))
+        func present(y: Double, closed: Bool = false, at now: CFTimeInterval) -> Hole {
+            lens.present(pointer: CGPoint(x: 100, y: y), frame: bar, config: config,
+                         latched: false, closed: closed, at: now).hole
+        }
+
+        let arriving = present(y: 888, at: 0)
+        #expect(arriving.center == CGPoint(x: 100, y: 12))
+        #expect(arriving.strength == 0, "it opens from where it was")
+        #expect(lens.isMoving(at: 0))
+        let opening = present(y: 888, at: Ease.time)
+        #expect(opening.strength > 0 && opening.strength < 1)
+        #expect(present(y: 888, at: 1).strength == 1)
+        #expect(!lens.isMoving(at: 1))
+
+        // Each a second after the pointer got there, which is long enough to settle.
+        _ = present(y: 836, at: 2)
+        let near = present(y: 836, at: 3)
+        #expect(near.strength > 0 && near.strength < 1)
+        _ = present(y: 500, at: 4)
+        #expect(!present(y: 500, at: 5).isVisible)
+        #expect(!lens.isMoving(at: 5))
 
         // Closing eases; far away, it is simply closed.
-        let closing = lens.present(pointer: CGPoint(x: 100, y: 888), frame: bar, config: config,
-                                   latched: false, closed: true, at: 1)
-        #expect(closing.hole.strength == 1, "it starts from open")
-        #expect(lens.isMoving(at: 1))
-        let shut = lens.present(pointer: CGPoint(x: 100, y: 888), frame: bar, config: config,
-                                latched: false, closed: true, at: 2)
-        #expect(!shut.hole.isVisible)
-        _ = lens.present(pointer: CGPoint(x: 100, y: 500), frame: bar, config: config,
-                         latched: false, closed: false, at: 3)
-        #expect(!lens.isMoving(at: 3), "a hole too far away to show does not ease")
+        _ = present(y: 888, at: 6)
+        let closing = present(y: 888, closed: true, at: 7)
+        #expect(closing.strength == 1, "it starts from open")
+        #expect(lens.isMoving(at: 7))
+        #expect(!present(y: 888, closed: true, at: 8).isVisible)
+        _ = present(y: 500, at: 9)
+        #expect(!lens.isMoving(at: 9), "a hole too far away to show does not ease")
+
+        // Option already held as the pointer arrives keeps the hole from opening at all.
+        _ = present(y: 500, closed: true, at: 10)
+        #expect(!present(y: 888, closed: true, at: 11).isVisible)
+        #expect(!lens.isMoving(at: 11))
     }
 
     @Test("a photograph identical to the last is not a new one")

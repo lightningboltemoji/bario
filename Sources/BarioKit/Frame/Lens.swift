@@ -39,7 +39,14 @@ public struct Lens {
             hole.center = CGPoint(x: pointer.x - frame.minX, y: pointer.y - frame.minY)
             near = Lens.proximity(of: pointer, to: frame, reach: config.proximity)
         }
-        open.head(to: near, at: now)
+        // Behind a hole Option has shut there is nothing open to see, so it is simply where the
+        // pointer says. Otherwise leaving with Option held and letting go as you do would ease
+        // back in a hole that is meant to be gone.
+        if closed.value(at: now) >= 1 {
+            open.jump(to: near)
+        } else {
+            open.head(to: near, at: now)
+        }
         hole.strength = open.value(at: now)
         // A hole that is not showing has nothing to ease: Option pressed anywhere else must not
         // start frames on every bar, and Option already held as the pointer arrives keeps the
