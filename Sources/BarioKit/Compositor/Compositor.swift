@@ -242,7 +242,7 @@ public final class Compositor {
         record.layer.place(item.frame)
         record.layer.updateOpacity(item.style.opacity, animated: !item.style.animations.isEmpty)
         record.motion.apply(item.style, to: record.layer, animationTime: walk.inputs.animationTime)
-        let box = item.style.margin.inset(item.frame)
+        let box = NodeRasterizer.snapped(item.style.margin.inset(item.frame), scale: walk.inputs.scale)
         record.chrome.apply(item.style, in: box, shadows: true, borders: true,
                             context: walk.context, factory: &factory)
 
@@ -575,5 +575,16 @@ extension NodeRasterizer {
             return max(0, fraction) / scale
         }
         return CGSize(width: past(point.x), height: past(point.y))
+    }
+
+    /// `rect` with each edge on the nearest pixel. Bubbles that touch then meet on a pixel
+    /// boundary, rather than each covering part of the pixel between them and leaving a seam
+    /// of whatever is behind; a shared edge rounds the same way for both.
+    static func snapped(_ rect: CGRect, scale: CGFloat) -> CGRect {
+        guard scale > 0 else { return rect }
+        func snap(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
+        let minX = snap(rect.minX), minY = snap(rect.minY)
+        return CGRect(x: minX, y: minY, width: max(0, snap(rect.maxX) - minX),
+                      height: max(0, snap(rect.maxY) - minY))
     }
 }

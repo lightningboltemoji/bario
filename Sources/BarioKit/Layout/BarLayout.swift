@@ -114,8 +114,8 @@ public struct BarLayout: Sendable {
         }
 
         if !item.isSpacer {
-            measured.natural.width += style.padding.horizontal + style.borderWidth * 2
-            measured.natural.height += style.padding.vertical + style.borderWidth * 2
+            measured.natural.width += style.padding.horizontal + style.borderWidth.horizontal
+            measured.natural.height += style.padding.vertical + style.borderWidth.vertical
         }
         if let width = style.width { measured.natural.width = width }
         if let min = style.minWidth { measured.natural.width = max(measured.natural.width, min) }
@@ -292,8 +292,7 @@ public struct BarLayout: Sendable {
     }
 
     private func layoutContents(of item: inout SceneItem, measured: Measured) {
-        let border = item.style.borderWidth
-        let inner = item.style.padding.inset(item.frame.insetBy(dx: border, dy: border))
+        let inner = item.style.padding.inset(item.style.borderWidth.inset(item.frame))
 
         if measured.item.isGroup {
             item.children = place(measured.children, in: inner, gap: item.style.gap,

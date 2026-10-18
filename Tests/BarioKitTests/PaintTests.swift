@@ -216,6 +216,54 @@ struct PainterTests {
         #expect(pixel(image, 0.6, 0.6).a > 0.8)      // bottom-left is square
     }
 
+    @Test("touching items share the one border between them")
+    func sharedBorder() throws {
+        // a runs 0–30 with its right border at 26–30; b runs 30–60 with no left border, so
+        // its own red starts at 30, and its right border is at 56–60.
+        let image = try paint(#"bar { group "g" { item "a" module="text"; item "b" module="text" } }"#, css: """
+        bar { padding: 0; background: none }
+        group { gap: 0 }
+        item { width: 30pt; padding: 0; background: rgb(255, 0, 0); border: 4pt rgb(0, 0, 255);
+               border-radius: 0 }
+        group item { border-width: 4pt 4pt 4pt 0 }
+        group item:first-child { border-width: 4pt }
+        """, content: ["a": .text(""), "b": .text("")])
+        let blue = Offscreen.Pixel(r: 0, g: 0, b: 1, a: 1)
+        let red = Offscreen.Pixel(r: 1, g: 0, b: 0, a: 1)
+        #expect(pixel(image, 2, 12).isClose(to: blue))
+        #expect(pixel(image, 24, 12).isClose(to: red))
+        #expect(pixel(image, 28, 12).isClose(to: blue))
+        #expect(pixel(image, 32, 12).isClose(to: red))
+        #expect(pixel(image, 58, 12).isClose(to: blue))
+        #expect(pixel(image, 45, 2).isClose(to: blue))
+    }
+
+    @Test("a border stroked on its own stays inside a rounded corner")
+    func borderClipped() throws {
+        // The left side has no border, so the stroke runs 2pt out past it, and around the
+        // rounded corner too, where only the clip keeps it in.
+        let image = try paint(#"bar { item "a" module="text" }"#, css: """
+        bar { padding: 0; background: none }
+        item { padding: 4pt; background: rgb(255, 0, 0); border-radius: 10pt 0 0 0;
+               border: 2pt rgb(0, 0, 255); border-width: 2pt 2pt 2pt 0 }
+        """)
+        #expect(pixel(image, 1.5, 21.5).a < 0.2)
+        #expect(pixel(image, 0.6, 12).isClose(to: Offscreen.Pixel(r: 1, g: 0, b: 0, a: 1)))
+    }
+
+    @Test("bubbles that touch off the pixel grid leave no seam between them")
+    func noSeam() throws {
+        // The shared edge is at 30.25pt, half way through a pixel at 2x.
+        let image = try paint(#"bar { group "g" { item "a" module="text"; item "b" module="text" } }"#, css: """
+        bar { padding: 0; background: none }
+        group { gap: 0 }
+        item { padding: 0; background: rgb(255, 0, 0); corner-shape: squircle }
+        group item:first-child { width: 30.25pt; border-radius: 8pt 0 0 8pt }
+        group item:last-child { width: 30pt; border-radius: 0 8pt 8pt 0 }
+        """, content: ["a": .text(""), "b": .text("")])
+        #expect(pixel(image, 30.25, 12).a > 0.99)
+    }
+
     @Test("@media (prefers-color-scheme: dark) reaches the pixels")
     func darkMode() throws {
         let css = """

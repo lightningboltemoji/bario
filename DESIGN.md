@@ -506,7 +506,7 @@ Properties:
 
 | group | properties |
 |---|---|
-| box | `padding`, `margin`, `gap`, `border` (width, color), `border-radius` (per corner), `width`, `min-width`, `max-width`, `opacity` |
+| box | `padding`, `margin`, `gap`, `border` (width, color), `border-width` (per side, as `padding`), `border-radius` (per corner), `width`, `min-width`, `max-width`, `opacity` |
 | background | `background`: a colour, a gradient, `backdrop` (the captured desktop, i.e. an invisible bar) or `backdrop blur(20pt) saturate(1.2)` |
 | text | `font` (family, size, weight, e.g. `12pt "SF Pro Text" medium`, `system-ui`, `monospace`), `color`, `font-weight`, `letter-spacing`, `text-transform` |
 | icon | `icon-size`, `icon-color`, `icon-weight` (SF Symbol weight), `icon-rendering` (`monochrome`, `hierarchical`, `palette`, `multicolor`) |

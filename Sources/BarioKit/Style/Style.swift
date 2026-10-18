@@ -6,7 +6,8 @@ public struct Style: Sendable, Hashable {
     // box
     public var padding: Insets = .zero
     public var margin: Insets = .zero
-    public var borderWidth: Double = 0
+    /// Per side, as `padding` is: `border-width: 3pt 3pt 3pt 0` leaves the left side bare.
+    public var borderWidth: Insets = .zero
     public var borderColor: Color = .none
     public var borderRadius: Corners = .zero
     public var cornerShape: CornerShapes = .round
@@ -98,9 +99,9 @@ public struct Style: Sendable, Hashable {
             guard width != nil || color != nil else {
                 throw CSSError("border takes a width and a colour", at: position)
             }
-            if let width { borderWidth = width }
+            if let width { borderWidth = Insets(width) }
             if let color { borderColor = color }
-        case .borderWidth: borderWidth = try CSSValue.length(value, at: position)
+        case .borderWidth: borderWidth = try CSSValue.insets(value, at: position)
         case .borderColor: borderColor = try CSSValue.color(value, at: position)
         case .borderRadius: borderRadius = try CSSValue.corners(value, at: position)
         case .cornerShape: cornerShape = try CSSValue.cornerShapes(value, at: position)

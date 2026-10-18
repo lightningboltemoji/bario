@@ -372,6 +372,19 @@ struct CompositorTests {
         #expect(b.mask is CAShapeLayer)
     }
 
+    @Test("a squircle's border is its outline stroked at twice the width and clipped to it")
+    func squircleBorder() throws {
+        commit(try scene(#"item "a" module="text""#, css: """
+        #a { background: red; border: 2pt blue; border-radius: 8pt; corner-shape: squircle }
+        """, content: ["a": .text("wide enough")]))
+        let record = try #require(compositor.item(.item("a")))
+        let border = try #require(record.chrome.border)
+        #expect(border.lineWidth == 4)
+        #expect(border.path == RoundedRect.path(in: border.bounds, corners: Corners(8),
+                                                shapes: CornerShapes(2)))
+        #expect((border.mask as? CAShapeLayer)?.path == border.path)
+    }
+
     // MARK: The bar's height
 
     @Test("a photograph stops at the bottom of the menu bar; a colour fills the whole bar")

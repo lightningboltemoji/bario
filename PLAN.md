@@ -94,11 +94,15 @@ images, with no smoothing, and are drawn once for any tint.
   an outer shadow. `shadowRadius` is half the CSS blur, fitted against CoreGraphics;
 - **fill**: a background colour, a `CAGradientLayer`, or the backdrop through `contentsRect`,
   with `masksToBounds`;
-- **border**: the fill layer's own border when the corners allow, otherwise a stroked shape.
+- **border**: the fill layer's own border when the corners and the sides allow, otherwise a
+  stroked shape.
 
 One radius, on all corners or on some, is `cornerRadius` with `maskedCorners`; y runs up, so
 CSS's top-left is `layerMinXMaxYCorner`. Any other radii are a `CAShapeLayer` mask from
-`RoundedRect.path` and a stroked `CAShapeLayer` for the border.
+`RoundedRect.path`. A border on those, or one whose sides differ, is a `CAShapeLayer` stroking
+the outline at twice the widest side, clipped to the outline as the fill is, so the half inside
+is the outline's true offset. A narrower side's stretch of the path moves out by the
+difference, so a side of 0 is stroked wholly outside, where the clip takes it.
 
 **D8. A renderer's `draw` gets `x: 0, y: 0`.** Ops are node-local already (§9.1), `ring` ignores
 both, and a drawing that depended on where its bubble sits would have to be drawn again on every

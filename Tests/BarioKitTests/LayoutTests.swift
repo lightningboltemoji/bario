@@ -117,6 +117,16 @@ struct SceneLayoutTests {
         #expect(scene.rows[0].items[0].frame.w == 6 + 18 + 2)
     }
 
+    @Test("a side with no border takes no room")
+    func borderSides() throws {
+        let scene = try scene(#"bar { item "a" module="text" }"#, css: """
+        bar { padding: 0 } item { padding: 0; border: 2pt #000; border-width: 2pt 2pt 2pt 0 }
+        """)
+        let item = scene.rows[0].items[0]
+        #expect(item.frame.w == 6 + 2)
+        #expect(item.content?.frame.x == item.frame.x)
+    }
+
     @Test("a spacer pushes the items either side of it apart")
     func spacer() throws {
         let scene = try scene("""

@@ -75,6 +75,7 @@ final class Chrome {
     private(set) var fill: CALayer?
     private var fillMask: CAShapeLayer?
     private(set) var border: CAShapeLayer?
+    private var borderMask: CAShapeLayer?
     /// The desktop's own window shadows, when this chrome is showing the desktop.
     private var plane: ShadowPlane?
 
@@ -100,6 +101,7 @@ final class Chrome {
             shadow = nil
             fill = nil
             border = nil
+            borderMask = nil
             plane = nil
             return
         }
@@ -108,35 +110,63 @@ final class Chrome {
         applyShadow(shadows ? style.shadow : nil, rect: rect, corners: style.borderRadius,
                     shapes: style.cornerShape, colors: colors, factory: &factory)
 
-        var strokeWidth = 0.0
-        var strokeColor: CGColor?
-        if borders, style.borderWidth > 0, style.borderColor != .none {
+        let widths = style.borderWidth
+        var borderColor: CGColor?
+        if borders, max(widths.top, widths.right, widths.bottom, widths.left) > 0,
+           style.borderColor != .none {
             let rgba = colors.resolve(style.borderColor)
-            if rgba.a > 0.001 {
-                strokeWidth = style.borderWidth
-                strokeColor = rgba.cgColor
-            }
+            if rgba.a > 0.001 { borderColor = rgba.cgColor }
         }
+        // The fill's own border is one width all round on one radius. Sides that differ, or
+        // corners that are not circular arcs, take a stroke of their own.
+        let uniform = widths.top == widths.right && widths.right == widths.bottom
+            && widths.bottom == widths.left
         let strokedByFill: Bool
-        if case .path = outline { strokedByFill = false } else { strokedByFill = true }
+        if case .path = outline { strokedByFill = false } else { strokedByFill = uniform }
 
         applyFill(style.background, rect: rect, outline: outline, colors: colors,
-                  border: strokedByFill ? (strokeWidth, strokeColor) : (0, nil),
+                  border: strokedByFill && borderColor != nil ? (widths.top, borderColor) : (0, nil),
                   context: context, factory: &factory)
 
-        if !strokedByFill, let strokeColor, case .path(let corners, let shapes) = outline {
+        if !strokedByFill, let borderColor {
+            // Twice the width, clipped to the outline as the fill is: the half inside is the
+            // outline's true offset, so a squircle's border is as thick at its corners as along
+            // its sides, and its outer edge is exactly the fill's.
             let layer = border ?? factory.make(CAShapeLayer.self)
             layer.place(rect)
-            let path = RoundedRect.path(in: rect.insetBy(dx: strokeWidth / 2, dy: strokeWidth / 2),
-                                        corners: corners, shapes: shapes)
+            assign(layer, \.masksToBounds, true)
+            outline.apply(to: layer, in: rect, mask: &borderMask, factory: &factory)
+            let path = Chrome.borderPath(in: rect, widths: widths, corners: style.borderRadius,
+                                         shapes: style.cornerShape)
             if layer.path != path { layer.path = path }
             if layer.fillColor != nil { layer.fillColor = nil }
-            if layer.strokeColor != strokeColor { layer.strokeColor = strokeColor }
-            assign(layer, \.lineWidth, strokeWidth)
+            if layer.strokeColor != borderColor { layer.strokeColor = borderColor }
+            assign(layer, \.lineWidth, 2 * max(widths.top, widths.right, widths.bottom, widths.left))
             border = layer
         } else {
             border = nil
+            borderMask = nil
         }
+    }
+
+    /// What a border is stroked along, at twice its widest side: the outline, with each
+    /// narrower side moved out by the difference, so only its own width of the stroke falls
+    /// inside. A side of 0 has none, and neighbours that touch can share the border between
+    /// them; where the sides either side of a rounded corner differ, it thins from one to the
+    /// other around the curve.
+    static func borderPath(in rect: CGRect, widths: Insets, corners: Corners, shapes: CornerShapes) -> CGPath {
+        // Clamped to the outline's own rectangle, so the unmoved corners are the outline's.
+        let limit = max(0, min(rect.width, rect.height) / 2)
+        func clamp(_ radius: Double) -> Double { min(max(0, radius), limit) }
+        let widest = max(widths.top, widths.right, widths.bottom, widths.left)
+        let out = Insets(top: widths.top - widest, right: widths.right - widest,
+                         bottom: widths.bottom - widest, left: widths.left - widest)
+        return RoundedRect.path(in: out.inset(rect),
+                                corners: Corners(topLeft: clamp(corners.topLeft),
+                                                 topRight: clamp(corners.topRight),
+                                                 bottomRight: clamp(corners.bottomRight),
+                                                 bottomLeft: clamp(corners.bottomLeft)),
+                                shapes: shapes)
     }
 
     private func applyShadow(_ spec: Shadow?, rect: CGRect, corners: Corners, shapes: CornerShapes,

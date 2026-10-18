@@ -228,7 +228,7 @@ struct StyleTests {
 
         #expect(resolved.padding == Insets(top: 2, right: 9, bottom: 2, left: 9))
         #expect(resolved.margin == Insets(1))
-        #expect(resolved.borderWidth == 1)
+        #expect(resolved.borderWidth == Insets(1))
         #expect(resolved.borderRadius == Corners(topLeft: 8, topRight: 0, bottomRight: 0, bottomLeft: 8))
         #expect(resolved.minWidth == 20)
         #expect(resolved.maxWidth == 80)
@@ -263,6 +263,16 @@ struct StyleTests {
         #expect(gradient.angle == 90)
         #expect(gradient.stops.count == 2)
         #expect(gradient.stops[1].location == 0.8)
+    }
+
+    @Test("border-width takes one to four sides, as padding does, and border sets them all")
+    func borderSides() throws {
+        let item = [StyleNode(type: "item")]
+        #expect(try style("item { border: 3pt #fff; border-width: 3pt 3pt 3pt 0 }", item).borderWidth
+                == Insets(top: 3, right: 3, bottom: 3, left: 0))
+        #expect(try style("item { border-width: 1pt 2pt }", item).borderWidth
+                == Insets(top: 1, right: 2, bottom: 1, left: 2))
+        #expect(try style("item { border-width: 0 4pt; border: 2pt #fff }", item).borderWidth == Insets(2))
     }
 
     // MARK: Errors
