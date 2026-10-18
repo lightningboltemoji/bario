@@ -98,11 +98,12 @@ public final class BarController: NSObject, NSApplicationDelegate {
         hupSource = hup
 
         // Ctrl-C and `kill` end watches' processes on the way out, as Quit does. Off the main
-        // queue, so a bar that has stopped answering still dies when told to.
+        // queue, so a bar that has stopped answering still dies when told to. `@Sendable`, or the
+        // handler is inferred to be the main actor's and traps on its first line off the main queue.
         for number in [SIGINT, SIGTERM] {
             signal(number, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
-            source.setEventHandler {
+            source.setEventHandler { @Sendable in
                 ExecModule.terminateHeld()
                 signal(number, SIG_DFL)
                 raise(number)
