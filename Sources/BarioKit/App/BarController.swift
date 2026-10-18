@@ -29,6 +29,10 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var modifierPoll: Timer?
     private var watchers: [FileWatcher] = []
     private var wallpaperWatcher: FileWatcher?
+    /// Photographs each display's wallpaper for its palette, or reads the file.
+    private let paletteCapture = PaletteCapture()
+    /// What each display's palette was last measured from: an image identical to it is not new.
+    private var paletteImages: [CGDirectDisplayID: CGImage] = [:]
     /// Follows the windows whose shadows fall into the bars.
     private let shadows = ShadowWatcher()
     private var server: SocketServer?
@@ -145,10 +149,14 @@ public final class BarController: NSObject, NSApplicationDelegate {
                 self?.syncDisplays()
             }
         }
-        // The accent colour is resolved into every colour that names it.
+        // The accent colour is resolved into every colour that names it, and a made-up slot of
+        // a wallpaper with no seed takes its hue.
         center.addObserver(forName: NSColor.systemColorsDidChangeNotification,
                            object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.loop.invalidate(.style) }
+            MainActor.assumeIsolated {
+                self?.loop.invalidate(.style)
+                self?.loop.accentChanged(to: RGBA(NSColor.controlAccentColor))
+            }
         }
         // The appearance also changes the wallpaper, if it is a dynamic one, and the shading
         // under the menu bar.
@@ -253,6 +261,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
             loop.removeBar(id)
             cover.close()
             covers[id] = nil
+            paletteImages[id] = nil
             changed = true
         }
         // A new display, or one with a new size or scale, needs a photograph that fits it.
@@ -366,6 +375,9 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// screen's wallpaper in a window of its own below normal level, which the capture filter
     /// would take for the desktop, and the bars are hidden behind the lock screen anyway.
     /// Unlocking captures again.
+    ///
+    /// Each display's palette is measured in the same round, after its strip: for an event,
+    /// and whenever the strip came back new (PLAN.md W6).
     private func captureBackdrops(event: Bool = true) {
         if event { lookAgain = true }
         guard !captureInFlight else {
@@ -390,15 +402,21 @@ public final class BarController: NSObject, NSApplicationDelegate {
             for (cover, info, spec) in pending {
                 let strip = await StripSource.strip(info: info, spec: spec, mode: mode, captureAllowed: allowed)
                 guard self.covers[cover.displayID] === cover else { continue }
-                guard let strip else {
+                var stripNew = false
+                if let strip {
+                    if cover.lastSource != strip.source {
+                        cover.lastSource = strip.source
+                        note("  \(cover.name): \(strip.source)")
+                    }
+                    stripNew = self.loop.setBackdrop(strip.image, for: cover.displayID)
+                    if stripNew { changed = true }
+                } else {
                     warn("no backdrop image for \(cover.name); leaving the real menu bar alone")
-                    continue
                 }
-                if cover.lastSource != strip.source {
-                    cover.lastSource = strip.source
-                    note("  \(cover.name): \(strip.source)")
+                if lookAgain || stripNew {
+                    await self.measurePalette(of: cover.displayID, info: info, spec: spec, mode: mode,
+                                              captureAllowed: allowed)
                 }
-                if self.loop.setBackdrop(strip.image, for: cover.displayID) { changed = true }
             }
             self.captureInFlight = false
             if self.captureQueued {
@@ -413,6 +431,26 @@ public final class BarController: NSObject, NSApplicationDelegate {
                 self.unsettled = 0
             }
         }
+    }
+
+    /// One display's wallpaper, measured into a palette off the main actor, against the last
+    /// one (PLAN.md W5, W11). A full screen Space has no wallpaper window, so its display keeps
+    /// the palette it had, as it keeps its last photograph.
+    private func measurePalette(of id: CGDirectDisplayID, info: DisplayInfo, spec: WallpaperSpec,
+                                mode: SourceMode, captureAllowed: Bool) async {
+        guard let bar = loop.bars.first(where: { $0.id == id }), !bar.fullscreen else { return }
+        guard let image = await paletteCapture.image(info: info, spec: spec, mode: mode,
+                                                     captureAllowed: captureAllowed) else {
+            loop.foundNoPalette(for: id)
+            return
+        }
+        guard covers[id] != nil else { return }
+        if let last = paletteImages[id], BackdropImage.same(last, image) { return }
+        paletteImages[id] = image
+        let (previous, accent, box) = (bar.palette, RGBA(NSColor.controlAccentColor), Box(value: image))
+        let palette = await Task.detached { Palette.extract(box.value, previous: previous, accent: accent) }.value
+        guard covers[id] != nil else { return }
+        loop.setPalette(palette, for: id)
     }
 
     // MARK: - Events
@@ -477,8 +515,10 @@ public final class BarController: NSObject, NSApplicationDelegate {
         service.onReload = { [weak self] in self?.reload() }
         service.onStyle = { [weak self] css in
             guard let self else { return }
-            // Parse before applying: a bad delta should be an error reply, not a broken bar.
-            let delta = try Stylesheet.parse(css, source: "<socket>")
+            // Parse before applying: a bad delta should be an error reply, not a broken bar. It
+            // may name the schemes of what it is layered over.
+            let under = self.loop.stylesheet.appending(self.loop.liveStyle)
+            let delta = try Stylesheet.parse(css, source: "<socket>", knownSchemes: Set(under.schemes.keys))
             self.loop.liveStyle = self.loop.liveStyle.appending(delta)
         }
         service.onFrame = { [weak self] name, index in try self?.loop.surfaces.frame(name, index: index) }

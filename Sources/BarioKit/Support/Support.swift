@@ -69,6 +69,14 @@ public struct RGBA: Sendable, Hashable {
 
     public var cgColor: CGColor { CGColor(srgbRed: r, green: g, blue: b, alpha: a) }
     public var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: a) }
+
+    /// `#rrggbb`, or `#rrggbbaa` when it is not opaque: how a computed colour is written back
+    /// out, for a renderer reading custom properties or a person reading a palette.
+    public var hex: String {
+        func byte(_ channel: CGFloat) -> Int { Int((min(1, max(0, channel)) * 255).rounded()) }
+        let rgb = String(format: "#%02x%02x%02x", byte(r), byte(g), byte(b))
+        return byte(a) == 255 ? rgb : rgb + String(format: "%02x", byte(a))
+    }
 }
 
 /// Everything about one display that the strip renderers need, snapshotted on the main

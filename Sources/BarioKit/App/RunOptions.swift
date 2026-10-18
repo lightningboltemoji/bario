@@ -154,7 +154,8 @@ public struct Theme: Sendable {
             ?? ConfigLoader.locate("style.css")
         if let styleURL {
             stylesheet = stylesheet.appending(
-                try Stylesheet.parse(String(contentsOf: styleURL, encoding: .utf8), source: styleURL.path))
+                try Stylesheet.parse(String(contentsOf: styleURL, encoding: .utf8), source: styleURL.path,
+                                     knownSchemes: Set(stylesheet.schemes.keys)))
         }
         return Theme(config: config, stylesheet: stylesheet, configURL: configURL, styleURL: styleURL)
     }

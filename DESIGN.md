@@ -162,6 +162,10 @@ A write that changes no value changes nothing: it invalidates no render and noti
 subscriber, so a stream that repeats itself costs nothing. Under an item's key, `content` is a
 content tree and a write replaces it whole; two trees merged key by key are neither.
 
+bario writes one key of its own: `wallpaper`, each display's wallpaper measured into colours
+(section 7), for any module or script that wants them. An item or source of that name is a
+config error.
+
 **Tier 3, WASM modules** (section 5): user code, sandboxed, in any language with a wasm32
 target. For when a script is too slow, too chatty, or needs to react to events and clicks.
 
@@ -207,7 +211,10 @@ a one-shot `set` from a shell script opens, writes, closes.
 The `bario` CLI is a one-to-one wrapper: `bario set battery '{"pct": 43}'`, `bario content
 weather < tree.json`, `bario emit refresh`, `bario get wifi`, `bario watch 'click:*'`,
 `bario reload`. That is the whole scripting story, and it is the same story a WASM module
-sees from inside (next section), so learning one teaches the other.
+sees from inside (next section), so learning one teaches the other. One verb is not a socket
+op: `bario palette` prints each display's palette from the store, and given image files
+measures them itself, with no bar running, which is how a palette that surprises gets looked
+at.
 
 Trust: the socket is only reachable by the user. That is the same trust level as the config
 file, which can already run commands, so no further auth for v1.
@@ -513,10 +520,21 @@ Properties:
 | meter/graph | `fill`, `track`, `stroke-width`, `line-cap` |
 | effects | `shadow` (offset, blur, colour), `transform` (translate, rotate, scale, turns in depth, perspective), `transition` (property, duration, easing), `animation` (`@keyframes` over `transform` and `opacity`) |
 
-Values: `pt` lengths; colours as hex, `rgba()`, `hsl()`, `system(labelColor)` for any
-`NSColor` system colour, `accent` for the user's accent colour; variables via `--name` on
+Values: `pt` lengths; colours as hex, `rgb()`, `hsl()`, `oklab()`, `oklch()`,
+`system(labelColor)` for any `NSColor` system colour, `accent` for the user's accent colour;
+CSS Color 5's relative colours (`oklch(from accent l c calc(h + 180))`), `color-mix()` and
+`contrast-color()`, and bario's own `on(<colour>[, <ratio>])`; variables via `--name` on
 `:root` and `var(--name)`; `@media (prefers-color-scheme: dark)` follows the system
 appearance and re-cascades when it changes.
+
+A colour function is computed where it is written once its inputs are known, so one of
+literals, or of a variable that holds one, is an ordinary colour and transitions as one. Around
+an input only the painter knows, `accent`, `currentColor` or `system()`, it stays as written and
+is computed at commit, as `accent` itself is. They work in Oklab, a perceptual space, and come
+back as sRGB: whatever lands outside sRGB loses chroma, at the same lightness and hue, until it
+fits. `on()` is a readable partner for any colour: its hue and half its chroma, starting crisp,
+near white or near black on whichever side contrasts more, and moving further only if that falls
+short of the ratio, 4.5 unless it says. 4.5:1 is always within reach.
 
 `transition` is the point of the whole exercise. The probe feels good because everything
 eases; bubbles should get the same for free. Colours, opacity, padding, radius, shadow,
@@ -630,6 +648,76 @@ one waiting off screen for its first frame (section 10), and a filter that inclu
 desktop has nothing of bario's to miss. It also keeps out an app window moved up under the
 menu bar, which ScreenCaptureKit composites though the screen does not show it. A new capture invalidates commit for its bar; one identical to the last is not
 new, and invalidates nothing.
+
+### Colours from the wallpaper
+
+A bar that is invisible over the wallpaper looks best in the wallpaper's own colours, and those
+change whenever the wallpaper does. So the stylesheet can name them, and bario measures them
+per display:
+
+```css
+:root { --glow: oklch(from wallpaper(vibrant) l c calc(h + 50)); }
+#wifi    { background: wallpaper(vibrant); color: on(wallpaper(vibrant)); }
+#battery { background: color-mix(in oklch, wallpaper(muted-dark) 70%, transparent); }
+#clock   { border: 1pt var(--glow); }
+```
+
+`wallpaper(<slot>)` is a colour really in the picture: `vibrant`, `muted` and their `-dark` and
+`-light` variants, chosen by lightness, saturation and how much of the picture each covers, and
+`dominant`, the largest. `wallpaper(seed)` is its main hue, weighted towards colour that covers
+ground, so a broad green wash outweighs a small coral patch; `seed 2` to `seed 4` are the next
+ones down. The names borrow Android Palette's and Material You's ideas; the maths is ours, and
+matching their colours is not a goal.
+
+Every slot always has a colour. One that nothing in the picture fits is made up from its
+family or from the seed, and `wallpaper(<slot>, <fallback>)` takes the fallback instead, so "the
+wallpaper's own vibrant, or my colour" is one expression. A picture with almost no colour has no
+seed, and `wallpaper(seed)` is the accent. Fallbacks are a first-class path: many photographs
+are nearly grey.
+
+Slots promise nothing about contrast with each other. A family's variants are kept far enough
+apart in lightness to tell two fills apart, not to read text on; when two slots come out alike,
+that is true of the picture, and inventing colours it does not have would be worse. Readability
+comes from what generates a colour for another: `on()`, `contrast-color()`, and a scheme's `on-`
+roles. So the rule is to anchor on one colour and derive its partner, never to pair two slots as
+text and background.
+
+A scheme is a whole theme generated from one seed colour, for a stylesheet that would rather say
+"primary" than pick colours:
+
+```css
+@scheme { seed: wallpaper(seed); harmony: tonal; chroma: 1; contrast: 4.5; }   /* the defaults */
+@scheme --pop { seed: accent; harmony: 50deg 180deg; }
+item   { background: scheme(primary-container); color: scheme(on-primary-container); }
+#clock { background: scheme(--pop primary); color: scheme(--pop on-primary); }
+```
+
+It has four hues: primary at the seed's, secondary and tertiary where the harmony puts them
+(`tonal`, `analogous`, `complementary`, `split`, `triadic`, `monochrome`, or two angles), and a
+neutral one with almost no chroma. Its roles are those hues at fixed lightnesses, which differ
+between light and dark: `primary`, `primary-container` and the same for secondary and tertiary,
+`surface`, `surface-container`, and `outline`, which is just visible against the surface. Each
+has an `on-` partner that starts crisp, near white or near black, and moves further only if it
+falls short of `contrast`; that is the same promise `on()` makes. The seed can be any colour the
+bar knows, but not `currentColor`, since a scheme belongs to a bar rather than a node. An
+unnamed scheme always exists, growing from the wallpaper's seed; `scheme(--name role)` names
+another, and a name no `@scheme` defines is an error on its line. A later sheet's `@scheme`
+replaces an earlier one of the same name, so a `bario style` delta can try a new seed or
+harmony.
+
+The cascade substitutes `wallpaper()` and `scheme()` the way it substitutes `var()`, into
+concrete colours, so they work wherever a colour does: custom properties, gradients, shadows,
+inside a colour function. A display list reaches them through a custom property. A new palette is therefore a
+restyle of that display's bar, and a new wallpaper eases in through whatever `transition` the
+stylesheet already has. A canvas that uses one redraws because its custom properties changed.
+
+The palette is measured from a small photograph of the wallpaper window alone, not the strip:
+the strip includes desktop widgets, and a calendar widget is a palette's worth of grey. Where
+that window cannot be photographed, the wallpaper file stands in, which is wrong for an aerial
+but still a palette. It is taken in the same round as the backdrop, when an event says the
+desktop may have changed or the strip came back different, and a photograph identical to the
+last costs nothing. A full screen Space has no wallpaper, so its display keeps the colours it
+had. Each display has its own; the palettes are also written into the store under `wallpaper`.
 
 ## 8. The hole, and holding Option
 
@@ -988,6 +1076,7 @@ is dirty, and for which bar if it concerns only one, and asks for a frame.
 | the pointer moving near a bar, a click that latches the reveal | present |
 | a renderer calling `request_frame()`, a shared surface's `frame` | commit, for that node |
 | a new backdrop capture, the first-frame deadline | commit, for that bar |
+| a new palette for a display's wallpaper | style, for that bar |
 
 Nothing but the frame builds a scene, starts a transition or touches a layer. That is the
 guarantee the rest of the design leans on: a new kind of input is one more row in this table,
@@ -1086,7 +1175,9 @@ placeholders drawn over the real menu bar.
   what it showed until its new render arrives.
 - A bar, whether it exists from startup or appears with a new display, is ordered in with a
   short cross-fade after its first frame in which every item has rendered once (or failed,
-  or run out of budget) and a backdrop exists.
+  or run out of budget) and a backdrop exists. If anything is coloured from the wallpaper, it
+  also waits for the wallpaper to have been measured, or found unmeasurable, so it does not
+  come in wearing fallbacks and then ease to the wallpaper's colours.
 - After one second it is ordered in regardless, showing what it has. A capture that has not
   come back is stood in for by a rendering of the wallpaper file, unless `--source capture`
   asked for captures only.

@@ -24,20 +24,27 @@ public enum Shot {
             throw OptionError("no bar in the config matches a display called '\(display.name)'")
         }
 
-        let scene = try await scene(bar: bar, display: display, theme: theme,
-                                    dark: options.dark ?? false, modes: options.modes)
-
+        // The palette comes from the same picture as the backdrop, as the bar's comes from the
+        // same desktop as its photograph: the whole `--backdrop` image, or the checkerboard.
         let backdrop = BackdropImage()
+        let palette: Palette?
+        let accent = RGBA(NSColor.controlAccentColor)
         if let path = options.shotBackdrop {
-            guard let image = NSImage(contentsOfFile: (path as NSString).expandingTildeInPath),
+            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            guard let image = NSImage(contentsOf: url),
                   let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                 throw OptionError("could not read the backdrop image at \(path)")
             }
             backdrop.set(cgImage)
+            palette = PaletteCapture.thumbnail(of: url).map { Palette.extract($0, accent: accent) }
         } else {
             backdrop.set(checkerboard(width: Int(width * options.shotScale),
                                       height: Int(display.stripHeight * options.shotScale)))
+            palette = backdrop.image.map { Palette.extract($0, accent: accent) }
         }
+
+        let scene = try await scene(bar: bar, display: display, theme: theme,
+                                    dark: options.dark ?? false, modes: options.modes, palette: palette)
 
         // `--window <gap>`: one full-width focused window that far below the bar, which is the
         // arrangement the shadow exists for. Bar coordinates, so the window is below zero.
@@ -59,7 +66,7 @@ public enum Shot {
     @MainActor
     public static func scene(bar: BarConfig, display: DisplayInfo, theme: Theme,
                              dark: Bool, metrics: any Metrics = CoreTextMetrics(),
-                             modes: Set<String> = []) async throws -> Scene {
+                             modes: Set<String> = [], palette: Palette? = nil) async throws -> Scene {
         ModuleRegistry.registerBuiltIns()
         let host = ModuleHost()
         await host.load(bar.items, sources: theme.config.sources)
@@ -67,7 +74,9 @@ public enum Shot {
         let states = host.states
         await host.shutdown()
 
-        let cascade = Cascade(stylesheet: theme.stylesheet, dark: dark)
+        let cascade = Cascade(stylesheet: theme.stylesheet,
+                              environment: StyleEnvironment(dark: dark, accent: RGBA(NSColor.controlAccentColor),
+                                                            palette: palette))
         let builder = SceneBuilder(cascade: cascade, metrics: metrics)
         return builder.build(bar: bar, display: display, items: bar.items, states: states, modes: modes)
     }

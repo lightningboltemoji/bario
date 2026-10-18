@@ -13,6 +13,7 @@ actually write; these are the same contracts with the sugar taken off.
 | `emira/` | another program's stream as a source, a mode that takes part of the bar over, a roll, and a Rust module rendering from the source |
 | `ping/` | one source feeding several items: an app's Dock badge per item, its state as classes for the stylesheet |
 | `roll/` | a Rust renderer whose node turns its text over as on a drum, animated with `request_frame()` |
+| `themes/` | two stylesheets coloured from each display's wallpaper: one on its slots, one on a generated scheme |
 
 ## counter.wat
 
@@ -280,3 +281,33 @@ icon naming an app draws the app's icon, as Finder does, so it follows the syste
 Where emira's module renders one row from the whole source, this one renders one app, and each
 item keeps only its own app's part of the source under its own key, so a badge on Slack does not
 re-render Messages.
+
+## themes
+
+Two stylesheets that colour the bar from each display's wallpaper, measured by bario on every
+change of wallpaper and eased in through their own transitions. Copy either to
+`~/.config/bario/style.css`; each cascades over the built-in look, so it only says what it
+changes.
+
+`slots.css` uses colours really in the picture. Bubbles are a wash of its darker muted colour
+with ink from `on()`, which keeps that colour's hue and reads at 4.5:1 or better, and the clock
+takes the vibrant colour, or the accent when the picture has none:
+
+```css
+:root { --lead: wallpaper(vibrant, accent); }
+#clock { background: var(--lead); color: on(var(--lead)); }
+```
+
+`schemes.css` generates a theme from the picture's main hue instead, light or dark as the system
+is, and pairs every fill with the role made to be read on it:
+
+```css
+@scheme --pop { seed: wallpaper(seed); harmony: complementary; chroma: 1.2; }
+item     { background: scheme(primary-container); color: scheme(on-primary-container); }
+#battery { background: scheme(--pop tertiary-container); color: scheme(--pop on-tertiary-container); }
+```
+
+`bario palette` prints what a running bar measured on each display, and `bario palette
+<image…>` what it would measure in any picture, with no bar running. `--shot` takes its palette
+from its `--backdrop`, so `bario --style examples/themes/slots.css --shot out.png --backdrop
+~/Pictures/some.jpg` shows a theme over a wallpaper without setting it.

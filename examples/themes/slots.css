@@ -1,0 +1,36 @@
+/* A theme in the wallpaper's own colours, measured on each display. Copy it to
+   ~/.config/bario/style.css; it cascades over bario's built-in look like any stylesheet.
+
+   Slots promise nothing about contrast with each other, so nothing here pairs two of them as
+   text and background. Each bubble anchors on one colour and derives its ink from it, with
+   on(), which keeps the colour's hue and reads at 4.5:1 or better. A new wallpaper eases in
+   through the transitions below. */
+
+:root {
+  /* The wallpaper's own vibrant colour, or the accent when the wallpaper has none. */
+  --lead: wallpaper(vibrant, accent);
+  /* Bubbles are a wash of its darker muted colour, over the photograph of the desktop. */
+  --wash: color-mix(in oklch, wallpaper(muted-dark) 72%, transparent);
+  --wash-hover: color-mix(in oklch, wallpaper(muted-dark) 88%, transparent);
+  --ink: on(wallpaper(muted-dark));
+  --edge: color-mix(in oklch, wallpaper(muted-light) 30%, transparent);
+}
+
+item {
+  background: var(--wash);
+  border: 1pt var(--edge);
+  color: var(--ink);
+  transition: background 600ms ease-in-out, border-color 600ms ease-in-out,
+              color 600ms ease-in-out, opacity 120ms;
+}
+item:hover { background: var(--wash-hover); }
+
+/* One bubble in the lead colour, with ink of its own hue. */
+#clock { background: var(--lead); color: on(var(--lead)); border-color: transparent; }
+
+/* Graphs and meters in a lighter vibrant colour, which stands off the dark wash. */
+.graph graph, meter { fill: wallpaper(vibrant-light, accent); }
+meter { track: color-mix(in oklch, var(--ink) 25%, transparent); }
+
+/* A low battery is a warning first and part of the wallpaper second. */
+#battery.low { background: color-mix(in oklch, rgb(255, 70, 70) 80%, wallpaper(muted-dark)); color: white; }

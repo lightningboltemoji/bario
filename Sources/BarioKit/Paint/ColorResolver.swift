@@ -39,6 +39,11 @@ public struct ColorResolver: Sendable {
             let x = resolve(a), y = resolve(b)
             return RGBA(r: lerp(x.r, y.r, t), g: lerp(x.g, y.g, t),
                         b: lerp(x.b, y.b, t), a: lerp(x.a, y.a, t))
+        // Colour functions the parser could not compute, because an input is known only now.
+        case .relative(let relative): return relative.evaluate(resolve(relative.origin))
+        case .mixed(let mix): return mix.evaluate(resolve(mix.first), resolve(mix.second))
+        case .contrast(let input): return WCAG.contrastColor(resolve(input))
+        case .on(let input, let ratio): return OKLCH.on(resolve(input), ratio: ratio)
         }
     }
 

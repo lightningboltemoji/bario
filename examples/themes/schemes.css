@@ -1,0 +1,33 @@
+/* A theme generated from the wallpaper's main hue, measured on each display, light or dark as
+   the system is. Copy it to ~/.config/bario/style.css; it cascades over bario's built-in look
+   like any stylesheet.
+
+   Every pair of roles here is a fill and the on- role made for it, which reads at the scheme's
+   contrast or better. A new wallpaper, or the appearance changing, eases in through the
+   transitions below. */
+
+/* The defaults, written out; leave this rule out and nothing changes. */
+@scheme { seed: wallpaper(seed); harmony: tonal; chroma: 1; contrast: 4.5; }
+
+/* The same seed, turned round for one bubble that should stand apart. */
+@scheme --pop { seed: wallpaper(seed); harmony: complementary; chroma: 1.2; }
+
+item {
+  background: color-mix(in oklch, scheme(primary-container) 85%, transparent);
+  color: scheme(on-primary-container);
+  border: 1pt color-mix(in oklch, scheme(outline) 45%, transparent);
+  transition: background 600ms ease-in-out, border-color 600ms ease-in-out,
+              color 600ms ease-in-out, opacity 120ms;
+}
+item:hover { background: scheme(primary-container); }
+
+#clock { background: scheme(primary); color: scheme(on-primary); border-color: transparent; }
+
+#battery {
+  background: color-mix(in oklch, scheme(--pop tertiary-container) 85%, transparent);
+  color: scheme(--pop on-tertiary-container);
+}
+#battery.low { background: color-mix(in oklch, rgb(255, 70, 70) 80%, scheme(primary-container)); color: white; }
+
+.graph graph, meter { fill: scheme(primary); }
+meter { track: color-mix(in oklch, scheme(on-primary-container) 20%, transparent); }

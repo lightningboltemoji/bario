@@ -19,8 +19,38 @@ public indirect enum Color: Sendable, Hashable {
     case accent
     case current
     case none
+    /// `oklch(from accent l c calc(h + 180))` and its kin, whose origin only commit knows.
+    /// With a known origin the parser computes it and it is `.rgba` (PLAN.md W3).
+    case relative(RelativeColor)
+    /// `color-mix()` with an input only commit knows.
+    case mixed(ColorMix)
+    /// `contrast-color()`: white or black, whichever contrasts more with it.
+    case contrast(Color)
+    /// `on(<colour>, <ratio>)`: a readable partner for it, of its own hue (PLAN.md W16).
+    case on(Color, ratio: Double)
 
     public static let clear = Color.rgba(RGBA(r: 0, g: 0, b: 0, a: 0))
+
+    /// Whether `currentColor` is in it anywhere.
+    var mentionsCurrent: Bool {
+        switch self {
+        case .current: return true
+        case .mix(let a, let b, _): return a.mentionsCurrent || b.mentionsCurrent
+        case .relative(let relative): return relative.origin.mentionsCurrent
+        case .mixed(let mix): return mix.first.mentionsCurrent || mix.second.mentionsCurrent
+        case .contrast(let input), .on(let input, _): return input.mentionsCurrent
+        case .rgba, .system, .accent, .none: return false
+        }
+    }
+
+    /// What it is, when nothing in it waits for commit.
+    var constant: RGBA? {
+        switch self {
+        case .rgba(let rgba): return rgba
+        case .none: return RGBA(r: 0, g: 0, b: 0, a: 0)
+        default: return nil
+        }
+    }
 }
 
 // MARK: - Text
@@ -484,6 +514,8 @@ enum CSSValue {
 
     static func color(_ component: CSSComponent, at position: CSSPosition) throws -> Color {
         switch component {
+        case .color(let rgba):
+            return .rgba(rgba)
         case .hash(let hex):
             return .rgba(try hexColor(hex, at: position))
         case .ident(let name):
@@ -493,7 +525,7 @@ enum CSSValue {
             case "currentColor", "currentcolor": return .current
             default:
                 guard let rgba = namedColors[name.lowercased()] else {
-                    throw CSSError("'\(name)' is not a colour; use a hex value, rgba(), hsl(), "
+                    throw CSSError("'\(name)' is not a colour; use a hex value, rgba(), hsl(), oklch(), "
                                    + "system(labelColor) or accent", at: position)
                 }
                 return .rgba(rgba)
@@ -522,44 +554,6 @@ enum CSSValue {
         case 8: return RGBA(r: channel(0), g: channel(1), b: channel(2), a: channel(3))
         default:
             throw CSSError("'#\(hex)' is not a colour; write #rgb, #rgba, #rrggbb or #rrggbbaa", at: position)
-        }
-    }
-
-    private static func colorFunction(_ name: String, _ args: [[CSSComponent]],
-                                      at position: CSSPosition) throws -> Color {
-        func scalar(_ index: Int, max: Double) throws -> CGFloat {
-            guard index < args.count, args[index].count == 1,
-                  case .number(let value, let unit) = args[index][0] else {
-                throw CSSError("\(name)() is missing an argument", at: position)
-            }
-            return CGFloat(unit == "%" ? value / 100 : value / max)
-        }
-        switch name {
-        case "rgb", "rgba":
-            guard args.count == 3 || args.count == 4 else {
-                throw CSSError("rgba() takes 3 or 4 arguments", at: position)
-            }
-            let alpha = args.count == 4 ? try scalar(3, max: 1) : 1
-            return .rgba(RGBA(r: try scalar(0, max: 255), g: try scalar(1, max: 255),
-                              b: try scalar(2, max: 255), a: alpha))
-        case "hsl", "hsla":
-            guard args.count == 3 || args.count == 4 else {
-                throw CSSError("hsl() takes 3 or 4 arguments", at: position)
-            }
-            let hue = try scalar(0, max: 1) / 360 * 360        // degrees, kept as written
-            let saturation = try scalar(1, max: 100)
-            let lightness = try scalar(2, max: 100)
-            let alpha = args.count == 4 ? try scalar(3, max: 1) : 1
-            return .rgba(hsl(hue: Double(hue), saturation: Double(saturation),
-                             lightness: Double(lightness), alpha: alpha))
-        case "system":
-            guard args.count == 1, let colorName = args[0].first?.identValue, args[0].count == 1 else {
-                throw CSSError("system() takes an NSColor name, e.g. system(labelColor)", at: position)
-            }
-            return .system(colorName)
-        default:
-            throw CSSError("'\(name)()' is not a colour function; the ones that exist are "
-                           + "rgb(), rgba(), hsl(), hsla() and system()", at: position)
         }
     }
 

@@ -45,15 +45,27 @@ public indirect enum CSSComponent: Sendable, Hashable {
     case string(String)
     case hash(String)
     /// `rgba(0, 0, 0, 0.3)`, `var(--fg, red)`, `blur(20pt)`. Arguments are split on commas.
+    /// A bare `( … )`, which `calc()` groups with, is a function with no name.
     case function(String, [[CSSComponent]])
     case comma
     case slash
+    /// A `+`, `-` or `*` on its own, as `calc(h + 50)` writes them: `+` and `-` need whitespace
+    /// after them, or they start a number.
+    case delim(Character)
+    /// A colour already computed, which no stylesheet can write: what `wallpaper()` and
+    /// `scheme()` become when the cascade substitutes them (PLAN.md W2).
+    case color(RGBA)
 
     public var identValue: String? { if case .ident(let s) = self { return s } else { return nil } }
     public var numberValue: Double? { if case .number(let n, _) = self { return n } else { return nil } }
     public var unit: String? { if case .number(_, let u) = self { return u } else { return nil } }
 
     public var isComma: Bool { self == .comma }
+
+    /// The functions the cascade replaces before any property parser sees a value.
+    public static let substituted: Set<String> = ["var", "wallpaper", "scheme"]
+    /// The ones that read the wallpaper's colours, which a bar's first frame waits for.
+    public static let fromWallpaper: Set<String> = ["wallpaper", "scheme"]
 
     /// How it would be written, for error messages.
     public var text: String {
@@ -68,6 +80,8 @@ public indirect enum CSSComponent: Sendable, Hashable {
             return name + "(" + args.map { $0.map(\.text).joined(separator: " ") }.joined(separator: ", ") + ")"
         case .comma: return ","
         case .slash: return "/"
+        case .delim(let c): return String(c)
+        case .color(let rgba): return rgba.hex
         }
     }
 }
@@ -91,10 +105,15 @@ extension Array where Element == CSSComponent {
         return out
     }
 
-    public var containsVar: Bool {
+    /// Whether the cascade has something to substitute here before a property parser can read
+    /// it: a `var()`, or a `wallpaper()` or `scheme()`, which become colours (PLAN.md W2).
+    public var needsSubstitution: Bool { mentions(CSSComponent.substituted) }
+
+    /// Whether a function of one of these names appears anywhere, however deep.
+    public func mentions(_ functions: Set<String>) -> Bool {
         contains { component in
             if case .function(let name, let args) = component {
-                return name == "var" || args.contains(where: \.containsVar)
+                return functions.contains(name) || args.contains { $0.mentions(functions) }
             }
             return false
         }
@@ -149,15 +168,24 @@ public struct Stylesheet: Sendable, Hashable {
     public var rules: [StyleRule]
     /// By name. A later definition of a name replaces an earlier one, as in CSS.
     public var keyframes: [String: KeyframesRule]
+    /// `@scheme` rules by name, "" for the unnamed one. A later one replaces an earlier one, as
+    /// `@keyframes` do.
+    public var schemes: [String: SchemeRule]
 
-    public init(rules: [StyleRule] = [], keyframes: [String: KeyframesRule] = [:]) {
+    public init(rules: [StyleRule] = [], keyframes: [String: KeyframesRule] = [:],
+                schemes: [String: SchemeRule] = [:]) {
         self.rules = rules
         self.keyframes = keyframes
+        self.schemes = schemes
     }
 
-    public static func parse(_ text: String, source: String? = nil) throws -> Stylesheet {
+    /// `knownSchemes` are the names of schemes defined in the sheets this one will be layered
+    /// over, which `scheme(--name …)` may name as well as its own.
+    public static func parse(_ text: String, source: String? = nil,
+                             knownSchemes: Set<String> = []) throws -> Stylesheet {
         do {
             var parser = CSSParser(text: text)
+            parser.knownSchemes = knownSchemes
             return try parser.stylesheet()
         } catch let error as CSSError {
             throw source.map { error.naming($0) } ?? error
@@ -178,13 +206,20 @@ public struct Stylesheet: Sendable, Hashable {
         }
     }
 
+    /// Whether anything here is coloured from the wallpaper, so a bar's first frame has a
+    /// palette to wait for (PLAN.md W7).
+    public var usesWallpaper: Bool {
+        rules.contains { $0.declarations.contains { $0.value.mentions(CSSComponent.fromWallpaper) } }
+    }
+
     public func appending(_ other: Stylesheet) -> Stylesheet {
         let offset = (rules.map(\.order).max() ?? -1) + 1
         return Stylesheet(rules: rules + other.rules.map { rule in
             var rule = rule
             rule.order += offset
             return rule
-        }, keyframes: keyframes.merging(other.keyframes) { _, later in later })
+        }, keyframes: keyframes.merging(other.keyframes) { _, later in later },
+           schemes: schemes.merging(other.schemes) { _, later in later })
     }
 }
 
@@ -196,6 +231,8 @@ struct CSSParser {
     var line = 1
     var column = 1
     var order = 0
+    /// Schemes the sheet may name besides its own: those of the sheets it is layered over.
+    var knownSchemes: Set<String> = []
 
     init(text: String) {
         var text = text
@@ -242,7 +279,10 @@ struct CSSParser {
         var sheet = Stylesheet()
         while true {
             try skipTrivia()
-            guard let c = peek() else { return sheet }
+            guard let c = peek() else {
+                try checkSchemeNames(in: sheet)
+                return sheet
+            }
             if c == "@" {
                 let start = position
                 advance()                                       // @
@@ -254,9 +294,12 @@ struct CSSParser {
                     sheet.keyframes[rule.name] = rule
                 case "starting-style":
                     sheet.rules.append(contentsOf: try startingStyle(at: start))
+                case "scheme":
+                    let rule = try scheme(at: start)
+                    sheet.schemes[rule.name ?? ""] = rule
                 case let name:
-                    throw CSSError("bario's stylesheet has three at-rules, @media, @keyframes and "
-                                   + "@starting-style; found @\(name)", at: start)
+                    throw CSSError("bario's stylesheet has four at-rules, @media, @keyframes, "
+                                   + "@starting-style and @scheme; found @\(name)", at: start)
                 }
             } else {
                 sheet.rules.append(try rule(media: nil))
@@ -308,6 +351,105 @@ struct CSSParser {
         }
         guard !rule.stops.isEmpty else { throw CSSError("@keyframes \(name) has no keyframes", at: start) }
         return rule
+    }
+
+    /// `@scheme --pop { seed: accent; harmony: 50deg 180deg; }`: a theme generated from one seed
+    /// colour, which `scheme(--pop primary)` names (PLAN.md W12). Its descriptors are checked
+    /// here, so a mistake in one is an error on its line.
+    mutating func scheme(at start: CSSPosition) throws -> SchemeRule {
+        try skipTrivia()
+        var rule = SchemeRule.defaults
+        rule.position = start
+        if peek() == "-" {
+            let name = readIdentifier()
+            guard name.hasPrefix("--"), name.count > 2 else {
+                throw CSSError("an @scheme's name is a custom name, as in @scheme --pop", at: start)
+            }
+            rule.name = name
+            try skipTrivia()
+        }
+        guard peek() == "{" else {
+            throw CSSError("expected { after @scheme\(rule.name.map { " " + $0 } ?? "")", at: position)
+        }
+        advance()
+        for declaration in try declarationBlock(validate: false) {
+            let value = declaration.value
+            let at = declaration.position
+            switch declaration.property {
+            case "seed":
+                rule.seed = try CSSParser.schemeSeed(value, at: at)
+            case "harmony":
+                if value.count == 1, let name = value[0].identValue, let harmony = Harmony.names[name] {
+                    rule.harmony = harmony
+                } else if value.count == 2 {
+                    rule.harmony = .angles(try CSSValue.angle([value[0]], at: at), try CSSValue.angle([value[1]], at: at))
+                } else {
+                    throw CSSError("'\(value.text)' is not a harmony; use tonal, analogous, complementary, "
+                                   + "split, triadic or monochrome, or two angles for the secondary and tertiary "
+                                   + "hues, as in 50deg 180deg", at: at)
+                }
+            case "chroma":
+                if value == [.ident("seed")] {
+                    rule.chroma = .seed
+                } else {
+                    let scale = try CSSValue.number(value, at: at)
+                    guard scale >= 0 else { throw CSSError("an @scheme's chroma is 0 or more", at: at) }
+                    rule.chroma = .scale(scale)
+                }
+            case "contrast":
+                let ratio = try CSSValue.number(value, at: at)
+                guard (1...21).contains(ratio), value[0].unit == nil else {
+                    throw CSSError("an @scheme's contrast is a ratio from 1 to 21, as in contrast: 7", at: at)
+                }
+                rule.contrast = ratio
+            case let other:
+                throw CSSError("'\(other)' is not something @scheme takes; it takes "
+                               + SchemeRule.descriptors.dropLast().joined(separator: ", ") + " and contrast", at: at)
+            }
+        }
+        return rule
+    }
+
+    /// A scheme belongs to a bar, so its seed may be any colour a bar knows, the wallpaper's
+    /// included, but nothing a node decides: not `currentColor`, nor a custom property.
+    static func schemeSeed(_ value: [CSSComponent], at position: CSSPosition) throws -> [CSSComponent] {
+        guard !value.mentions(["var", "scheme"]) else {
+            throw CSSError("a scheme belongs to the bar, so its seed cannot read a custom property or another "
+                           + "scheme; write the colour itself", at: position)
+        }
+        try checkSubstitutions(value, at: position)
+        // Parsed with each wallpaper() standing in as black, for its grammar and for currentColor.
+        func standIn(_ components: [CSSComponent]) -> [CSSComponent] {
+            components.map { component in
+                guard case .function(let name, let args) = component else { return component }
+                return name == "wallpaper" ? .color(RGBA(r: 0, g: 0, b: 0)) : .function(name, args.map(standIn))
+            }
+        }
+        if try CSSValue.color(standIn(value), at: position).mentionsCurrent {
+            throw CSSError("a scheme belongs to the bar, not to a node, so its seed cannot be currentColor",
+                           at: position)
+        }
+        return value
+    }
+
+    /// Every `scheme(--name …)` names a scheme this sheet defines, or one it is layered over.
+    func checkSchemeNames(in sheet: Stylesheet) throws {
+        func check(_ value: [CSSComponent], at position: CSSPosition) throws {
+            for component in value {
+                guard case .function(let name, let args) = component else { continue }
+                if name == "scheme", let reference = try? SchemeReference(args, at: position),
+                   let scheme = reference.name, sheet.schemes[scheme] == nil, !knownSchemes.contains(scheme) {
+                    let known = sheet.schemes.keys.filter { !$0.isEmpty }.sorted()
+                    throw CSSError("no @scheme is called \(scheme)"
+                                   + (known.isEmpty ? "" : "; this stylesheet has " + known.joined(separator: ", ")),
+                                   at: position)
+                }
+                for arg in args { try check(arg, at: position) }
+            }
+        }
+        for rule in sheet.rules {
+            for declaration in rule.declarations { try check(declaration.value, at: declaration.position) }
+        }
     }
 
     /// `@starting-style { #names { opacity: 0 } }`: the styles an item that has just appeared
@@ -409,14 +551,15 @@ struct CSSParser {
         return (text, start)
     }
 
-    mutating func declarationBlock() throws -> [Declaration] {
+    /// `validate: false` for an at-rule whose block holds descriptors rather than properties.
+    mutating func declarationBlock(validate: Bool = true) throws -> [Declaration] {
         var declarations: [Declaration] = []
         while true {
             try skipTrivia()
             guard let c = peek() else { throw CSSError("unterminated { } block", at: position) }
             if c == "}" { advance(); return declarations }
             if c == ";" { advance(); continue }
-            declarations.append(try declaration())
+            declarations.append(try declaration(validate: validate))
         }
     }
 
@@ -430,7 +573,7 @@ struct CSSParser {
         }
     }
 
-    mutating func declaration() throws -> Declaration {
+    mutating func declaration(validate: Bool = true) throws -> Declaration {
         let start = position
         let name = readIdentifier()
         guard !name.isEmpty else {
@@ -467,9 +610,25 @@ struct CSSParser {
             throw CSSError("'\(name)' has no value", at: start)
         }
         let declaration = Declaration(property: name, value: value, important: important, position: start)
-        // Validate now, while the position is at hand, unless var() defers it.
-        if !value.containsVar { _ = try StyleProperty.validate(declaration) }
+        guard validate else { return declaration }
+        // Validate now, while the position is at hand, unless substitution defers it. What
+        // wallpaper() and scheme() ask for is checked either way.
+        if value.needsSubstitution {
+            try CSSParser.checkSubstitutions(value, at: start)
+        } else {
+            _ = try StyleProperty.validate(declaration)
+        }
         return declaration
+    }
+
+    /// A slot or role that does not exist is an error where it is written (PLAN.md W2).
+    static func checkSubstitutions(_ value: [CSSComponent], at position: CSSPosition) throws {
+        for component in value {
+            guard case .function(let name, let args) = component else { continue }
+            if name == "wallpaper" { _ = try WallpaperReference(args, at: position) }
+            if name == "scheme" { _ = try SchemeReference(args, at: position) }
+            for arg in args { try checkSubstitutions(arg, at: position) }
+        }
     }
 
     // MARK: Components
@@ -480,6 +639,10 @@ struct CSSParser {
         switch c {
         case ",": advance(); return .comma
         case "/": advance(); return .slash
+        case "*": advance(); return .delim("*")
+        case "(":
+            advance()
+            return .function("", try arguments(of: "", at: start))
         case "\"", "'":
             return .string(try readString())
         case "#":
@@ -490,8 +653,12 @@ struct CSSParser {
             }
             return .hash(body)
         case let c where c.isNumber || c == "." || c == "-" || c == "+":
-            if c == "-", let next = peek(1), !(next.isNumber || next == ".") {
-                return try identOrFunction()
+            if c == "-" || c == "+" {
+                let next = peek(1)
+                let numeric = next.map { $0.isNumber || $0 == "." } ?? false
+                let identifier = c == "-" && next.map { $0.isLetter || $0 == "-" || $0 == "_" } ?? false
+                if identifier { return try identOrFunction() }
+                if !numeric { advance(); return .delim(c) }
             }
             return try number()
         default:
@@ -532,6 +699,12 @@ struct CSSParser {
         }
         guard peek() == "(" else { return .ident(name) }
         advance()
+        return .function(name, try arguments(of: name, at: start))
+    }
+
+    /// What is between a function's parentheses, the opening one already read, split on
+    /// commas.
+    mutating func arguments(of name: String, at start: CSSPosition) throws -> [[CSSComponent]] {
         var args: [[CSSComponent]] = []
         var current: [CSSComponent] = []
         while true {
@@ -540,7 +713,7 @@ struct CSSParser {
             if c == ")" {
                 advance()
                 args.append(current)
-                return .function(name, args)
+                return args
             }
             if c == "," {
                 advance()

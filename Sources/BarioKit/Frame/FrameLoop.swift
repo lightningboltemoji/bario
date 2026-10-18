@@ -113,6 +113,8 @@ public final class FrameLoop {
     public var trace: ((String) -> Void)?
 
     private var dirty = Dirty()
+    /// The last write of the palettes to the store, which the next one waits for.
+    private var publishing: Task<Void, Never>?
     private var framePending = false
     private var inFrame = false
     private var pointerWasNear = false
@@ -230,9 +232,11 @@ public final class FrameLoop {
     }
 
     public func removeBar(_ id: CGDirectDisplayID) {
+        let measured = bars.contains { $0.id == id && $0.palette != nil }
         bars.removeAll { $0.id == id }
         if hovered?.bar == id { hovered = nil }
         if pressed?.bar == id { pressed = nil }
+        if measured { publishPalettes() }
     }
 
     /// A display resized, its menu bar hid or showed, or a full screen app took it or gave it
@@ -272,6 +276,66 @@ public final class FrameLoop {
         bar.shadows = field
         invalidate(.commit, bar: id)
         return true
+    }
+
+    // MARK: - The wallpaper
+
+    /// A new measurement of one display's wallpaper (PLAN.md W1, W6). One identical to the
+    /// last is not new, and returns false. A new one restyles that bar and no other, and goes
+    /// into the store under `wallpaper` (W14).
+    @discardableResult
+    public func setPalette(_ palette: Palette, for id: CGDirectDisplayID) -> Bool {
+        guard let bar = bars.first(where: { $0.id == id }) else { return false }
+        bar.paletteLooked = true
+        guard bar.palette != palette else { return false }
+        bar.palette = palette
+        invalidate(.style, bar: id)
+        publishPalettes()
+        return true
+    }
+
+    /// A look for one display's palette found nothing to measure. The last palette stays, and a
+    /// first frame stops waiting for one (W7).
+    public func foundNoPalette(for id: CGDirectDisplayID) {
+        guard let bar = bars.first(where: { $0.id == id }), !bar.paletteLooked else { return }
+        bar.paletteLooked = true
+        invalidate(.commit, bar: id)
+    }
+
+    /// The accent changed. Made-up vibrant slots of a wallpaper with no seed took their hue
+    /// from it, so those palettes choose again; the rest come out the same and change nothing.
+    public func accentChanged(to accent: RGBA) {
+        for bar in bars {
+            if let palette = bar.palette { setPalette(palette.with(accent: accent), for: bar.id) }
+        }
+    }
+
+    /// Every measured display's palette, and the primary display's again on its own.
+    private func publishPalettes() {
+        let measured = bars.filter { $0.palette != nil }.sorted { $0.display.frame.minX < $1.display.frame.minX }
+        // The primary display is the one at the origin of the global coordinates.
+        let primary = (bars.first { $0.display.frame.origin == .zero } ?? bars.first)?.id
+        let entries = measured.map { bar in
+            (id: bar.id, json: bar.palette!.json(display: bar.display.name, id: bar.id, primary: bar.id == primary))
+        }
+        var value: [String: JSONValue] = ["displays": .array(entries.map(\.json))]
+        if let entry = entries.first(where: { $0.id == primary }) { value["primary"] = entry.json }
+        let (store, previous) = (host.store, publishing)
+        publishing = Task { [value] in
+            await previous?.value
+            await store.replace(.object(value), at: Palette.storeKey)
+        }
+    }
+
+    /// Whether anything is coloured from the wallpaper: the stylesheet, a socket delta or an
+    /// item's own `style`. Only then has a first frame a palette to wait for.
+    private var wantsPalette: Bool {
+        stylesheet.usesWallpaper || liveStyle.usesWallpaper
+            || config.bars.flatMap(\.items).flatMap(\.flattened).contains { item in
+                guard let style = item.style, let declarations = try? Stylesheet.parseDeclarations(style)
+                else { return false }
+                return declarations.contains { $0.value.mentions(CSSComponent.fromWallpaper) }
+            }
     }
 
     // MARK: - The pointer
@@ -402,7 +466,9 @@ public final class FrameLoop {
         guard !bars.isEmpty else { return [] }
 
         if !dirty.style.isEmpty { resolver = ColorResolver.system(dark: dark) }
-        let styler = Styler(cascade: Cascade(stylesheet: stylesheet.appending(liveStyle), dark: dark))
+        let sheet = stylesheet.appending(liveStyle)
+        var styler = Styler(cascade: Cascade(stylesheet: sheet,
+                                             environment: StyleEnvironment(dark: dark, accent: resolver.accent)))
         let layout = BarLayout(metrics: metrics, renderers: renderers, rasters: rasters,
                                resolver: resolver)
         var states = host.states
@@ -416,6 +482,11 @@ public final class FrameLoop {
                 continue
             }
             if bar.styled == nil || dirty.style.contains(bar.id) {
+                // Each bar is coloured from its own display's wallpaper, and its schemes grow from
+                // it. One not measured yet has the palette of nothing, made once here rather than
+                // for every wallpaper() it styles.
+                styler.cascade.environment.palette = bar.palette ?? Palette.nothing(accent: resolver.accent)
+                styler.cascade.environment.schemes = bar.schemes(for: sheet, in: styler.cascade.environment)
                 let interaction = Styler.Interaction(
                     hovered: hovered?.bar == bar.id ? hovered?.item : nil,
                     active: pressed?.bar == bar.id ? pressed?.item : nil)
@@ -482,8 +553,10 @@ public final class FrameLoop {
         }
 
         // The first frame worth showing: every item has rendered once, however that went,
-        // and there is a photograph to show them on. Or the deadline, with what there is.
-        if !bar.isReady, bar.deadlinePassed || (bar.backdrop.image != nil && hasRendered(bar)) {
+        // and there is a photograph to show them on, and a palette to colour them with if
+        // anything asks for one (PLAN.md W7). Or the deadline, with what there is.
+        if !bar.isReady, bar.deadlinePassed
+            || (bar.backdrop.image != nil && hasRendered(bar) && (bar.paletteLooked || !wantsPalette)) {
             bar.isReady = true
         }
         setVisible(bar, bar.isReady && bar.placeOnScreen && !hidden)

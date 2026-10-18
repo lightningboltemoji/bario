@@ -16,10 +16,11 @@ this file; the plan lives in [00-roadmap.md](00-roadmap.md); the intent lives in
 | area | holds |
 |---|---|
 | `Support/` | logging, `NSScreen` menu-bar and notch geometry, `Insets`, PNG dump, single-instance lock |
-| `Capture/` | the ScreenCaptureKit backdrop strip, the wallpaper-file fallback, and the window shadows that cannot be photographed and are cast instead — see [19-window-shadows.md](19-window-shadows.md) |
+| `Capture/` | the ScreenCaptureKit backdrop strip, the wallpaper-file fallback, the window shadows that cannot be photographed and are cast instead — see [19-window-shadows.md](19-window-shadows.md) — and the wallpaper window the palette is measured from |
+| `Palette/` | each display's wallpaper measured into colours: the Oklab histogram and k-means, slots, seeds — see [22-wallpaper-colours.md](22-wallpaper-colours.md) |
 | `Model/` | `JSONValue` (state), `Node`/`RenderResult` (content) |
 | `Config/` | a KDL 2.0 reader, and the typed `Config` it builds |
-| `Style/` | the CSS subset: parser, selectors, typed properties, cascade, the style stage (`Styler`), the default look |
+| `Style/` | the CSS subset: parser, selectors, typed properties, cascade, the style stage (`Styler`), the default look; Oklab and the CSS Color 4 and 5 functions |
 | `Runtime/` | the `StateStore` actor, the `Module` protocol, format strings, content templates, the `EventBus`, `ModuleHost` |
 | `Modules/` | the built-in modules: `text` `clock` `data` `front-app` `battery` `wifi` `volume` `net` `cpu` `mem` `exec` (`wasm` lives in `Wasm/`) |
 | `Layout/` | `Metrics`, the flex solver, the `Scene`, the layout stage (`BarLayout`), and `SceneBuilder` (style + layout in one call) |
@@ -85,7 +86,10 @@ does not react to the pointer at all ([15-interaction.md](15-interaction.md)).
 - Parsers are ours (KDL, CSS) because the error messages are the product: everything carries
   a line and column from the tokenizer to the typed model.
 - Colours and fonts stay symbolic through the cascade and resolve at paint time, so the
-  cascade is pure and `currentColor` can mean what it says inside a renderer.
+  cascade is pure and `currentColor` can mean what it says inside a renderer. What the cascade
+  can know becomes a real colour there instead: a colour function of known inputs folds, and
+  the wallpaper's colours (`wallpaper()`, `scheme()`) come from the bar's `StyleEnvironment`, so
+  a new wallpaper is a restyle that eases ([22-wallpaper-colours.md](22-wallpaper-colours.md)).
 - An option bario does not recognise on an item is not an error — it belongs to the module.
 - `emit` and `subscribe` are one path whether they come from a socket client or a WASM
   module: both go through `EventBus`, and both reach the socket and the subscribed modules.
@@ -126,6 +130,8 @@ Makefile handles both; see its comments.
 - `bario --run --trace-frames` prints what every frame did; an idle bar prints nothing.
 - `make app` builds `bario.app`, which is what Screen Recording and Location permissions
   attach to; `make install` puts it in `/Applications`, `make uninstall` removes it.
+- `bario palette` prints each display's wallpaper palette from a running bar; `bario palette
+  <image…>` measures files with no bar running. It is how the palette's numbers get tuned.
 - `bario --version` prints the git tag `make app` stamped into the bundle, or `dev` when there
   is no bundle around the binary. Nothing in the tree carries a version number, so a release is
   `git tag v0.2.0 && make app` and nothing else.

@@ -31,7 +31,7 @@ public enum StripError: Error, CustomStringConvertible {
 }
 
 /// CGImage isn't Sendable, and we only ever hand it straight back to the main actor.
-private struct Box<T>: @unchecked Sendable { let value: T }
+struct Box<T>: @unchecked Sendable { let value: T }
 
 private final class OnceBox: @unchecked Sendable {
     private let lock = NSLock()
@@ -50,7 +50,7 @@ private final class OnceBox: @unchecked Sendable {
 /// wedged inside ScreenCaptureKit would hang the timeout too. ScreenCaptureKit really does
 /// wedge — if replayd drops the client (`SCStreamManager serverDidDisconnect`) the async call
 /// neither returns nor throws. We abandon that task instead of waiting for it.
-private func withDeadline<T>(_ seconds: Double, _ work: @escaping @Sendable () async -> Box<T>) async -> Box<T>? {
+func withDeadline<T>(_ seconds: Double, _ work: @escaping @Sendable () async -> Box<T>) async -> Box<T>? {
     let once = OnceBox()
     return await withCheckedContinuation { (cont: CheckedContinuation<Box<T>?, Never>) in
         let task = Task.detached {

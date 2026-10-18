@@ -75,14 +75,24 @@ resolution out of the cascade keeps the cascade pure, `Sendable` and testable of
 actor. `@media (prefers-color-scheme: dark)` still re-cascades on an appearance change,
 because it selects *rules*, not colour values.
 
+The colour functions of CSS Color 4 and 5 (`oklch()`, `oklch(from …)`, `color-mix()`,
+`contrast-color()`) and bario's `on()` compute to `rgba` wherever their inputs are known, and
+stay symbolic, as `relative`, `mixed`, `contrast` and `on`, around an input only the painter
+knows. See [22-wallpaper-colours.md](22-wallpaper-colours.md).
+
 ## At-rules
 
-Two. `@media (prefers-color-scheme: dark | light)` wraps rules and does not nest.
+`@media (prefers-color-scheme: dark | light)` wraps rules and does not nest.
 `@keyframes name { from { … } 40% { … } to, 100% { … } }` declares `transform` and `opacity` and
 nothing else, since the compositor runs an animation with no frames from bario; any other
 property is an error naming the two. Keyframes are kept as declarations, by name, and
 `Stylesheet.appending` lets the later sheet's definition of a name win, so a socket `style`
 delta can redefine one.
+
+`@starting-style` is in [21-sources-modes-arrivals.md](21-sources-modes-arrivals.md), and
+`@scheme`, a theme generated from one seed colour, in
+[22-wallpaper-colours.md](22-wallpaper-colours.md). Like `@keyframes`, a later `@scheme` of the
+same name wins.
 
 ## Transform and animation
 

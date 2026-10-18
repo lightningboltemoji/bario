@@ -145,8 +145,12 @@ public struct CanvasPainter {
         return resolver.cgColor(parsed)
     }
 
+    /// `wallpaper()` and `scheme()` belong to the stylesheet, and reach a display list through a
+    /// custom property: a canvas's raster key holds its custom properties, not the palette, so
+    /// a drawing that named one directly would never be redrawn for a new wallpaper.
     public static func parseColor(_ text: String, custom: [String: [CSSComponent]]) -> Color? {
-        guard let components = (try? Stylesheet.parseDeclarations("color: \(text)"))?.first?.value
+        guard let components = (try? Stylesheet.parseDeclarations("color: \(text)"))?.first?.value,
+              !components.mentions(CSSComponent.fromWallpaper)
         else { return nil }
         let resolved = (try? Cascade(stylesheet: Stylesheet())
             .resolve(components, in: custom, at: .start)) ?? components

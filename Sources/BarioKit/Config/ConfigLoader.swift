@@ -95,6 +95,10 @@ public enum ConfigLoader {
                                at: item.position)
             }
         }
+        for item in items + config.sources where item.name == Palette.storeKey {
+            throw KDLError("\"\(Palette.storeKey)\" is the key bario keeps each display's wallpaper palette "
+                           + "under in the store, so nothing else can be called that", at: item.position)
+        }
         var keys = Set(items.map(\.name))
         for source in config.sources where !keys.insert(source.name).inserted {
             throw KDLError("source \"\(source.name)\" writes under a key an item or another source already has",

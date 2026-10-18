@@ -30,6 +30,15 @@ public final class Bar {
     /// The window shadows falling into the bar, which the photograph can never hold: they are
     /// cast onto it instead. A field that moved invalidates commit.
     public internal(set) var shadows = ShadowField.empty
+    /// This display's wallpaper, as last measured (PLAN.md W1). A new one restyles the bar. It
+    /// outlives a reload of the stylesheet or the config, and the next measurement is made
+    /// against it (W11).
+    public internal(set) var palette: Palette?
+    /// Whether a palette has been looked for, found or not: what a first frame coloured from
+    /// the wallpaper waits for (W7).
+    var paletteLooked = false
+    /// The schemes made for this bar's last styling, by what they were made from (W12).
+    private(set) var schemeCache: [Scheme.Key: Scheme] = [:]
 
     public internal(set) var display: DisplayInfo
     /// Whether the system's menu bar is showing on this display. An auto-hidden menu bar takes
@@ -100,6 +109,25 @@ public final class Bar {
 
     func contains(_ item: String) -> Bool {
         (config?.items ?? []).contains { $0.flattened.contains { $0.name == item } }
+    }
+
+    /// The stylesheet's schemes, the unnamed one always among them, for this bar as the
+    /// environment has it: from the cache where one was made from the same seed, harmony,
+    /// chroma, contrast and appearance, and made otherwise. The cache keeps what this styling
+    /// used and nothing older.
+    func schemes(for stylesheet: Stylesheet, in environment: StyleEnvironment) -> [String: Scheme] {
+        var rules = stylesheet.schemes
+        if rules[""] == nil { rules[""] = SchemeRule.defaults }
+        var used: [Scheme.Key: Scheme] = [:]
+        var schemes: [String: Scheme] = [:]
+        for (name, rule) in rules {
+            let key = rule.key(in: environment)
+            let scheme = used[key] ?? schemeCache[key] ?? Scheme(key)
+            used[key] = scheme
+            schemes[name] = scheme
+        }
+        schemeCache = used
+        return schemes
     }
 
     /// Forget every stage's output, for a bar that no longer has a config to show.

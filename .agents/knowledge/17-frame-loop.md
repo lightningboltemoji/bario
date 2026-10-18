@@ -26,7 +26,7 @@ layout knows what did not fit, so it asks `Styler.restyle(_:adding:)` for those 
 
 | file | holds |
 |---|---|
-| `FrameLoop.swift` | `Stage`, `invalidate`, the inputs (config, stylesheet, live style, dark, banner, pointer, pressed, reveal latch), and `frame()` |
+| `FrameLoop.swift` | `Stage`, `invalidate`, the inputs (config, stylesheet, live style, dark, banner, pointer, pressed, reveal latch, each display's palette), and `frame()` |
 | `Bar.swift` | one bar's pipeline state, `BarSurface`, `ItemRef` |
 | `FrameScheduler.swift` | the protocol, and `RunLoopScheduler`: a run-loop observer for the end of a turn, an `NSScreen` display link for refreshes |
 | `Animator.swift` | target scene + per-property and per-frame tweens; sampled, never stepped |

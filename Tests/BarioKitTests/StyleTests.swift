@@ -291,7 +291,7 @@ struct StyleTests {
         #expect(message("item:sleepy { color: red }").contains("unknown pseudo-class"))
         #expect(message("item > text { color: red }").contains("only combinator"))
         #expect(message("item[x=1] { color: red }").contains("attribute selectors"))
-        #expect(message("@import \"x\";").contains("three at-rules, @media, @keyframes and @starting-style"))
+        #expect(message("@import \"x\";").contains("four at-rules, @media, @keyframes, @starting-style and @scheme"))
         #expect(message("@media (width: 3) { item { color: red } }").contains("only media feature"))
         #expect(message("item { color red }").contains("expected :"))
         #expect(message("item { color: }").contains("no value"))

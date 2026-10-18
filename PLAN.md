@@ -1,451 +1,404 @@
-# Plan: the compositor
+# Plan: colours from the wallpaper
 
-How DESIGN.md §12.7 gets built: the layer tree of §10 replaces the painter, and renderers move
-onto it (§9). DESIGN.md is the what and the why; this is the how, written in September 2026
-before any of it exists. When a step starts, its knowledge note
-(`.agents/knowledge/18-compositor.md`) is written from the matching part of this file.
+How the stylesheet gets colours that go with the wallpaper. DESIGN.md §7 will say what and why
+once it is built; this is the how, written in October 2026 after a prototype and before any of it
+is in bario. When a step starts, its knowledge note (`.agents/knowledge/22-wallpaper-colours.md`)
+is written from the matching part of this file.
+
+Three tools, each useful alone and better together:
+
+- **measure**: `wallpaper(vibrant)` and its siblings, colours really in each display's wallpaper;
+- **generate**: `@scheme` and `scheme(primary)`, a theme generated from one seed colour;
+- **adjust**: CSS Color 4 and 5, `oklch(from <colour> l c calc(h + 50))`, `color-mix()` and
+  `contrast-color()`, plus bario's `on()`, a readable partner for any colour at all.
+
+```css
+@scheme { seed: wallpaper(seed); harmony: tonal; chroma: 1; contrast: 4.5; }   /* the defaults */
+@scheme --pop { seed: accent; harmony: 50deg 180deg; }
+
+:root {
+  --glow: oklch(from wallpaper(vibrant) l c calc(h + 50));
+  --wash: color-mix(in oklch, wallpaper(muted-dark) 70%, transparent);
+}
+item     { background: scheme(primary-container); color: scheme(on-primary-container);
+           transition: background 600ms ease-in-out, color 600ms ease-in-out; }
+#clock   { background: scheme(--pop primary); color: scheme(--pop on-primary); }
+#battery { background: var(--wash); color: contrast-color(wallpaper(muted-dark)); }
+#wifi    { background: wallpaper(vibrant); color: on(wallpaper(vibrant)); }
+```
+
+Every colour there is resolved per bar from that display's wallpaper, and a new wallpaper eases
+in through whatever `transition` the stylesheet already has.
+
+**All of it is ours.** Oklab is Björn Ottosson's and in the public domain ("feel free to use it
+any way you please"). The slots borrow Android Palette's idea and names; the seed and the scheme
+roles borrow Material You's idea and names. Neither's code, maths or numbers are used, and
+matching their colours is a non-goal. bario keeps its one dependency.
 
 ## Where we start
 
-A frame ends in `FrameLoop.present(_:repaint:at:)`, which builds a `Presentation` and, if
-anything changed, hands it to `BarSurface.paint(_:backdrop:resolver:)`. `BarCover` passes it to
-`BarView.show`, which sets `needsDisplay`, and AppKit calls `BarView.draw(_:)`: `Painter` draws
-the whole bar into the view's backing store, the bar's background, every item's chrome and
-content, and the hole as a `destinationOut` pass inside one transparency layer. `Offscreen.render`
-runs the same `Painter` into a bitmap for `--shot` and the pixel tests.
-
-Renderers are called from layout. `BarLayout.measureNode` measures, `BarLayout.placeNode` calls
-`draw` and keeps the display list or raster on the `SceneNode`, and `request_frame` sets a flag
-on `RendererHost` that the loop reads after laying a bar out, invalidating layout for that bar.
+- **Colours are symbolic until commit.** `Color` (`Style/Properties.swift`) is `rgba`, `mix` (two
+  colours mid-transition), `system(name)`, `accent`, `current` or `none`. `CSSValue.color` parses
+  hex, a few named colours, `rgb[a]()`, `hsl[a]()` and `system()`, and `ColorResolver` turns them
+  into `RGBA` at commit. `RGBA` is sRGB. Display lists parse their colours with the same parser,
+  against the node's custom properties (`CanvasPainter.parseColor`).
+- **The cascade** (`Style/Cascade.swift`) is one `Cascade(stylesheet:dark:)` per frame, shared by
+  every bar. It substitutes `var()` on component lists before any property parser sees them,
+  custom properties first. A declaration with `var()` in it is not validated at parse time.
+- **Transitions** start when a property's value differs between the old style and the new
+  (`Animator.StyleMotion.retarget`). A colour that changes in the style eases; one that changes
+  only at commit, as `accent` does, snaps.
+- **The tokenizer** knows `,` and `/` as delimiters and nothing else. A lone `+` is a malformed
+  number and `*` an unexpected character.
+- **At-rules** are `@media`, `@keyframes` and `@starting-style`, one switch in
+  `CSSParser.stylesheet()`. `Stylesheet.appending` lets a later sheet's `@keyframes` win.
+- **The capture** photographs the strip only (`Capture/Strip.swift`), through a filter of every
+  window below normal level. It runs on events, each second while the desktop keeps changing, and
+  on the refresh timer, and never while the screen is locked (`BarController.captureBackdrops`).
+  `WallpaperSpec` and `fromWallpaperFile` stand in without permission.
+- **A bar is ordered in** once a backdrop exists and every item has rendered, or at the deadline
+  (`FrameLoop`, `bar.isReady`).
+- **The state store** has no key that bario writes for itself.
 
 ## The shape of it
 
 ```
-FrameLoop.frame()
-  render → style → layout → present                      unchanged
-  commit   bar.compositor.commit(presentation, …)        replaces surface.paint
-             └─ changes a CALayer tree hung from bar.surface.hostLayer
+wallpaper window ──▶ PaletteCapture ──▶ Palette.extract ──▶ FrameLoop.setPalette
+ (320px, ~25ms)       or the file        clusters, slots,      style dirty for that bar;
+                                         seeds (~3ms)          `wallpaper` in the store
+                                                                 │
+          Cascade(stylesheet, environment: dark, accent, palette, schemes)
+            wallpaper() and scheme() substituted like var(), into colours
+            oklch(from …), color-mix(), contrast-color() folded when their inputs are known
+                                                                 │
+          Style ──▶ Animator, which eases the change ──▶ commit
 ```
 
 | type | file | what it is |
 |---|---|---|
-| `Compositor` | `Compositor/Compositor.swift` | one bar's layer tree and its `commit`; owned by `Bar` |
-| `LayerID`, `LayerRecord` | `Compositor/LayerRecord.swift` | a layer's identity, and the layers and last-applied values kept for it |
-| `Chrome` | `Compositor/Chrome.swift` | a `Style` as shadow, fill and border layers |
-| `RasterKey`, `RasterStyle` | `Compositor/RasterKey.swift` | everything a raster depends on |
-| `NodeRasterizer` | `Compositor/NodeRasterizer.swift` | draws content into an image; the content half of today's `Painter` |
-| `Motion` | `Compositor/Motion.swift` | a layer's `transform`, and the animations it was given (step 3b) |
-| `HoleMask` | `Compositor/HoleMask.swift` | the lens image cache, the bands and the strength layer |
-| `CommitReport` | `Compositor/Compositor.swift` | what a commit did: layers made and removed, rasters and draws, time, whether a node wants a frame |
-| `Offscreen` | `Paint/Offscreen.swift` | rewritten on `CARenderer` |
-| `Hole` | `Frame/Presentation.swift` | today's `Painter.Hole`, moved: it is a present-stage value |
-| `Stage.commit` | `Frame/FrameLoop.swift` | replaces `Stage.paint` |
-| `BarSurface` | `Frame/Bar.swift` | loses `paint`; gains `hostLayer` and `presented(_:)` |
+| `Oklab`, `OKLCH` | `Style/Oklab.swift` | conversions, gamut mapping by chroma, WCAG contrast |
+| `Color.relative`, `.mixed`, `.contrast`, `.on` | `Style/Properties.swift` | colour functions with an input only commit knows |
+| `CSSComponent.color`, `.delim` | `Style/CSS.swift` | a colour already computed; a `+`, `-` or `*` |
+| `StyleEnvironment` | `Style/Cascade.swift` | what a cascade knows of its bar: `dark`, the accent, the palette, its schemes |
+| `Palette`, `Cluster`, `Slot`, `Seed` | `Palette/Palette.swift` | one display's measurement; `Palette.extract(_:previous:)` |
+| `Quantizer` | `Palette/Quantize.swift` | the histogram and the k-means |
+| `Scheme`, `SchemeRule`, `Harmony` | `Palette/Scheme.swift` | a generated theme, and the at-rule that asks for one |
+| `PaletteCapture` | `Capture/PaletteCapture.swift` | the wallpaper window, small, or the file |
+| `bario palette` | `App/CLI.swift` | prints a palette, live or from image files |
 
 ## Decisions made while planning
 
-Numbered so the steps and tests can point at them.
+Numbered W, so they cannot be mistaken for the D1–D15 that comments in the code still cite. Those
+come from the compositor plan this file held before, which is in its git history.
 
-**D1. `Bar` owns the compositor; a surface only hosts a layer.** Commit is a stage of the frame:
-it calls renderers, reports frame requests, and is what the frame-loop tests need to observe.
-So `FrameLoop.addBar` makes `Bar.compositor` with the surface's `hostLayer`, and after each
-commit tells the surface `presented(_:)`, which `BarView` keeps for hit testing and
-`RecordingSurface` records.
+**W1. A palette is a style input, per bar.** A display's new palette invalidates style for its
+bar, as an appearance change does for every bar, and the cascade turns `wallpaper()` and
+`scheme()` into concrete colours. So a new wallpaper eases through the stylesheet's own
+`transition`. Raster keys see real colours, so a canvas using one redraws when it changes with
+nothing added to `RasterStyle`. A renderer's custom properties carry real colours too. The other
+way, symbolic cases resolved at commit as `accent` is, would snap every change and need the
+palette in the raster key. Restyling one bar once per wallpaper change costs nothing that matters.
+`Cascade` gains a `StyleEnvironment`, set per bar from `Bar.palette` before that bar is styled.
 
-**D2. Layers work in bar coordinates.** A container layer's `bounds` is its scene rectangle,
-origin included, and its `position` is that rectangle's centre. Sublayers then take scene frames
-as they are, with no conversion down the tree, and a `transform` turns about the centre. Shadow
-paths and shape masks are built in the same space.
+**W2. `wallpaper()` and `scheme()` substitute, like `var()`.** `Cascade.resolve` replaces each
+with a `.color(RGBA)` component before any property parser runs. They then work wherever a colour
+does: custom properties, gradients, shadows and display lists alike. Their presence defers a
+declaration's validation, as `var()` does, but their own arguments are checked at parse time. A
+slot or role that does not exist is an error with a line number. So is a `--name` that no
+`@scheme` defines, checked once the whole sheet has been read.
 
-**D3. The loop says whether the scene changed.** `commit` takes `sceneChanged`: whether the bar
-was laid out or commit-dirty this frame, or moving at the last one, which is the
-`repaint || bar.moving` the loop computes today. When it is false, commit sets the hole mask and
-the reveal and nothing else, and computes no raster keys. The frame derives it; nothing reports
+**W3. Colour functions fold when they can.** After W2, `oklch(from wallpaper(vibrant) …)` has only
+known inputs, so the cascade makes it `.rgba` and it transitions like any colour. A function of
+literals folds at parse time. One with an input only commit knows (`currentColor`, `accent`,
+`system()`) stays symbolic as `Color.relative`, `.mixed` or `.contrast`, and `ColorResolver`
+evaluates it at commit, as it evaluates `accent` today. A scheme's seed is the exception. It has
+to be known to make the scheme, so the environment resolves it, accent and `system()` included.
+The style already restyles on an accent or appearance change, so nothing goes stale.
+
+**W4. P3 in, sRGB out.** `RGBA` stays sRGB, as every other colour in bario is. Measurement reads
+the capture, which is Display P3, through extended linear sRGB, so colours outside sRGB are seen
+as they are. Anything that comes out of OKLCH beyond sRGB is brought in by lowering chroma at the
+same lightness and hue, bisected. Wide-gamut output would be a change to `RGBA`, not to this.
+
+**W5. The palette photographs the wallpaper window, small.** Measured on macOS 27.2, these are the
+windows below normal level, bottom up:
+
+| layer | owner, title | what |
+|---|---|---|
+| desktop − 3 | Window Server, "Display 3 Backstop" | behind everything |
+| desktop − 1 | `com.apple.WindowManager`, "Wallpaper" | the wallpaper |
+| desktop icon | Finder, untitled; WindowManager, "Event Shield Window" | icons; a click catcher |
+| desktop icon + 1 | Window Server, "underbelly" | the shading under the menu bar, 122pt tall |
+| desktop icon + 2 | Notification Center, one per widget | desktop widgets |
+
+The strip's filter takes all of them, and a palette must not: a calendar widget is a palette's
+worth of grey. So `PaletteCapture` filters to the one window by owner and title (the title is
+readable because capture needs Screen Recording anyway), at 320 pixels wide. A capture took 23–30ms
+at any size from 160 to 640 pixels wide, and 95ms cold. When that window is not found, or capture
+is not allowed, the wallpaper file stands in. ImageIO thumbnails it to the same size off the main
+actor, once per URL, which took 2–160ms. With neither, there is no palette (W10).
+
+**W6. When.** In the same round as the strip, display by display, after it. That is on every
+event, and in the settle loop and on the refresh timer whenever that display's strip came back
+new. A palette image identical to the last is not new (`BackdropImage.same`) and costs no
+extraction. Nothing while locked, as for the strip. A full screen Space has no wallpaper window,
+so the last palette stays, as the last photograph does.
+
+**W7. The first frame waits for a palette.** A bar ordered in before its palette would come in
+wearing fallbacks and then ease to the wallpaper's colours. So `isReady` also needs a palette, or
+an attempt that found none, under the same one-second deadline.
+
+**W8. Extraction.** The 320 pixel image goes to Oklab, and into a histogram on a 32³ grid over
+L ∈ [0, 1] and a, b ∈ [−0.4, 0.4] that keeps each bin's mean, not its centre. Weighted k-means
+runs on the bins with k = 16. It is seeded deterministically: the heaviest bin first, then the
+bin with the largest √weight × distance² to the centres so far, so a small vivid patch can claim a
+centre. It stops when no centre moves by 10⁻⁵. Extraction took about 3ms in all, 0.1ms of it
+k-means, and the same image always gives the same palette.
+
+**W9. Slots.** Each slot asks for a lightness and a relative chroma, and takes the eligible
+cluster that scores best. Relative chroma is chroma as a fraction of the most sRGB holds at that
+lightness and hue, which is what saturation is to HSL, measured perceptually. A cluster scores
+0.40 for lightness, 0.35 for chroma and 0.25 for √(population ÷ the largest). Clusters under 0.2%
+of the image are ignored, a cluster fills one slot, and slots choose in the table's order, each
+base before its variants.
+
+`dominant` is the largest cluster, measured apart from the slots, so it is often the same colour
+as one of them. That happened in 16 of the prototype's 27 images; an orange wallpaper's biggest
+colour is its vibrant one. It is a true fact about the image, so it is kept, and the store says
+which slot it shares a cluster with (W14).
+
+| slot | L (range) | relative chroma (range) | least C |
+|---|---|---|---|
+| `vibrant` | 0.64 (0.45–0.82) | 1.0 (≥ 0.45) | 0.05 |
+| `vibrant-dark` | 0.38 (0.15–0.52) | 1.0 (≥ 0.40) | 0.04 |
+| `vibrant-light` | 0.84 (0.72–0.96) | 1.0 (≥ 0.35) | 0.04 |
+| `muted` | 0.60 (0.40–0.78) | 0.22 (0.06–0.45) | 0.012 |
+| `muted-dark` | 0.32 (0.10–0.48) | 0.22 (0.06–0.45) | 0.012 |
+| `muted-light` | 0.86 (0.72–0.97) | 0.22 (0.06–0.45) | 0.012 |
+
+**A family is distinct, though not readable.** A `-dark` slot is at least 0.15 darker in L than
+its base, and a `-light` slot at least 0.15 lighter. A variant's candidates have to keep that gap
+from the base chosen before them. The gap comes to about 1.6–1.9:1: enough to tell two fills
+apart, not enough for text (W16). The table's lightness ranges overlap, so without the gap
+`vibrant` and `vibrant-dark` came as close as 1.17:1, and `muted` and `muted-light` 1.07:1. With
+it, of the 51 variants the corpus found in its images, 35 kept their colour, 6 took another
+cluster and 10 were made up.
+
+A slot that nothing fits is made up, so every slot always has a colour. A vibrant base takes the
+seed's hue, or the accent's without a seed, at its own lightness and 85% of the chroma sRGB holds
+there. A muted base takes the cluster nearest its lightness and moves it there. A variant is made
+from its base: the base's hue and relative chroma, at the variant's own lightness or further, so
+that the gap holds. `wallpaper(<slot>, <fallback>)` uses the fallback instead whenever the slot
+was made up or there is no palette, so "the wallpaper's own vibrant, or my colour" is one
+expression. These are starting numbers, tuned on the prototype's corpus, and free to move.
+
+**W10. Seeds.** A histogram of hue in 5° bins, each grid bin weighted by its population ×
+clamp((C − 0.015) ÷ 0.085, 0, 1.5), is smoothed by a Gaussian of σ 10° around the circle. Its
+peaks are the seeds: up to four, at least 30° apart and at least 5% of the highest, ranked by mass.
+Each seed's colour is the mean of the grid within 15° of its hue, weighted by C². A broad wash of
+colour outweighs a small vivid patch. Sonoma's seed is its green although its coral is more
+saturated, and that is what makes the seed a better source for a scheme than `vibrant`. At σ 15°
+neighbouring hues merged (Neo Citrus lost its teal); 10° keeps them. With under 0.4% of the image
+carrying colour there is no seed, and `wallpaper(seed)` is the accent, or its fallback.
+`wallpaper(seed 2)` names the next one down. Where there is no second, it is its fallback or else
+the first.
+
+**W11. Hysteresis.** Discrete choices flip between near-ties. Perturbing the corpus (160 or 640
+pixels instead of 320, a 4% crop, k = 24) moved 7–13% of slots to a different cluster, while seed
+1's hue moved at most 5°. Merging near-identical clusters first did not help. A still wallpaper
+never flips, since its photographs are identical (W6), but one that changes does: cross-fading
+Sonoma's light and dark frames in 24 steps flipped a slot back and forth. So extraction takes the
+last palette. A slot keeps a cluster within ΔE 0.06 of its last colour if that cluster scores
+within 5% of the best. That removed the back and forth. What still moves follows the image, and
+eases (W1). The last palette lives on the `Bar`, so a stylesheet or config reload does not reset
 it.
 
-**D4. Identity.** An item is `.item(name)`, and names are unique in a config. A node is
-`.node(item, key)`, where the key is its `id` if it has one and otherwise its index path within
-the item's content. A record whose role changes (a node that was text is now a meter) is
-replaced rather than reconfigured. Sublayer order is set from tree order whenever the scene
-changed.
+**W12. Schemes.** `@scheme [--name] { seed; harmony; chroma; contrast }`, with defaults
+`wallpaper(seed)`, `tonal`, `1` and `4.5`. The unnamed scheme is what `scheme(<role>)` uses;
+`scheme(--name <role>)` names another. `seed` is any colour but `currentColor`, since a scheme
+belongs to a bar, not a node. A scheme is four hues with chromas: primary at the seed's hue,
+secondary and tertiary where the harmony puts them, and neutral at the seed's hue with almost no
+chroma.
 
-**D5. Rasters overhang their frames.** Glyphs, strokes and symbols draw past a node's frame, and
-today only the item clips them. A raster is drawn into the node's frame outset by 2pt for icons,
-by a quarter of the font size and at least 2pt for text (italics reach further as type grows),
-by half the stroke width plus 1pt for graphs, and not at all for canvases and rasters, which
-are clipped to their frames already. The raster's layer is outset to match.
-
-**D6. Coverage masks.** Text and monochrome symbols are drawn on clear into a premultiplied
-RGBA bitmap, which masks a layer whose `backgroundColor` is the resolved colour. An alpha-only
-bitmap is an optimisation to measure later, not the starting point: CoreText into alpha-only
-contexts is less travelled.
-
-*Settled while building:* coverage is not independent of colour. With font smoothing on, the
-macOS default, CoreText draws white text about 15% heavier than black on a transparent context,
-which is how the system draws light text on dark. So text coverage is drawn in black or white,
-whichever side of mid-luminance the text's colour falls, and that side is in its key: a tint
-that stays on its side draws nothing, and one that crosses draws the text once. Symbols are
-images, with no smoothing, and are drawn once for any tint.
-
-**D7. Chrome is up to three layers,** made only when the style needs them:
-
-- **shadow**: `shadowPath` and the shadow properties, no contents, masked to everything outside
-  the shape, so a translucent bubble does not show its own shadow through itself, as CSS draws
-  an outer shadow. `shadowRadius` is half the CSS blur, fitted against CoreGraphics;
-- **fill**: a background colour, a `CAGradientLayer`, or the backdrop through `contentsRect`,
-  with `masksToBounds`;
-- **border**: the fill layer's own border when the corners and the sides allow, otherwise a
-  stroked shape.
-
-One radius, on all corners or on some, is `cornerRadius` with `maskedCorners`; y runs up, so
-CSS's top-left is `layerMinXMaxYCorner`. Any other radii are a `CAShapeLayer` mask from
-`RoundedRect.path`. A border on those, or one whose sides differ, is a `CAShapeLayer` stroking
-the outline at twice the widest side, clipped to the outline as the fill is, so the half inside
-is the outline's true offset. A narrower side's stretch of the path moves out by the
-difference, so a side of 0 is stroked wholly outside, where the clip takes it.
-
-**D8. A renderer's `draw` gets `x: 0, y: 0`.** Ops are node-local already (§9.1), `ring` ignores
-both, and a drawing that depended on where its bubble sits would have to be drawn again on every
-frame of a layout transition. This is an ABI clarification, said in `16-custom-renderers.md` and
-the PDK comments.
-
-**D9. Volatile raster sources.** `ptr` and `shm` pixels change under an unchanged descriptor.
-They are read again when the bar is laid out or the node was drawn this commit, the same moments
-they are read today, so the image read is part of their key, by identity: the key holds the
-image, so its address cannot come round again for a different one. (Planned as the bar's scene
-generation; identity says the same thing without a counter.)
-
-**D10. `backdrop blur()` and `saturate()` do not animate.** Every distinct value is a Core Image
-pass and a cached image, so an eased blur fills the cache a frame at a time. `Background.blend`
-snaps them at the midpoint, as it already does for backgrounds of different kinds.
-
-**D11. Hit testing ignores `transform`.** It is visual, like `animation`, and a node's rect is
-the scene's (§9). Revisit if someone uses `transform` to move a bubble for real.
-
-**D12. An `animation` is added once.** It is replaced only when its definition changes, so no
-commit restarts a spinner. While it runs it wins over a `transition` of the same property, as in
-CSS.
-
-**D13. Offscreen renders in sRGB, at a scale and a time it is given.** `CARenderer` gets
-`kCARendererColorSpace` sRGB, so the pixel tests keep comparing literal colours; the scale is the
-root's `sublayerTransform`; `beginFrame(atTime:)` uses the time passed in, and animations added
-offscreen begin at it, so a shot shows every `animation` at its start. The texture is cleared
-before each render.
-
-**D14. The old painter is the oracle until step 2 is done.** It moves to `Paint/Legacy/`
-untouched, and a parity test renders fixture themes both ways and compares. Both are deleted in
-the change that finishes step 2.
-
-**D15. Rasters sit on the pixel grid.** A raster drawn at a fractional position is resampled by
-the compositor and its glyphs blur, which parity at scale 1 showed at once. So a raster's image
-starts on a device pixel, with the node drawn inside it at its exact position. Content that is
-moving keeps the pixels it has, off the grid while it moves, so a layout transition draws
-nothing; a scene at rest draws a raster again if it came to rest somewhere else on the grid.
-`Presentation.isMoving` says which.
-
-**D16. Two of the painter's habits are not kept.** It drew `raster` pixels upside down, with a
-flip meant for a y-down context; row 0 of a raster is its top. And its linear gradients ran as
-long as the rectangle's longer side in every direction, so a vertical gradient on a wide bubble
-showed only its middle; the gradient line is CSS's, as long as the rectangle is in its direction.
-Neither was in a parity fixture.
-
-## Step 1: layers for the bar, one raster per item
-
-The goal: a pointer move draws nothing. Content stays coarse.
-
-```
-host layer (the surface's)
-└─ root           bounds = scene.bounds; opacity = 1 − reveal; mask = the hole, nil when not visible
-   ├─ bar chrome  the bar's background (D7); hidden while there is no backdrop, as today
-   └─ item        bounds = item.frame (D2); opacity, as a group
-      ├─ chrome   (D7), in margin.inset(frame)
-      ├─ content  masksToBounds, rounded like the fill
-      │  └─ raster   the item's whole content subtree as one image, at the display's scale
-      └─ item     a group's children
-```
-
-Work, in order:
-
-1. `Frame/Presentation.swift`: `Painter.Hole` becomes `Hole`. Mechanical; the tests follow.
-2. `Paint/Legacy/`: `Painter.swift` and today's `Offscreen.swift`, moved unchanged (D14).
-3. `Compositor/HoleMask.swift`: the lens image per radius, feather and scale, cached;
-   `update(_ hole:, in bounds:)` places the lens, four bands and the strength in one pass, as the
-   spike did.
-4. `Compositor/Chrome.swift`: a `Style`, the resolver and the backdrop become the layers of D7.
-   A property is set only when it differs from the record's last value, so a commit in which one
-   thing moved sends one thing.
-5. `Compositor/NodeRasterizer.swift`: today's `Painter.paint(_ node:…)` and its helpers (text,
-   icon, meter, graph, canvas, raster, node backgrounds, `contrasted`), extracted to draw a
-   subtree into a context whose origin is a given rectangle, with the drawing appearance set.
-6. `Compositor/RasterKey.swift`, per item for now: the subtree's kinds and payloads, node frames
-   relative to the content's origin, each node's `RasterStyle`, the display's scale and the
-   appearance; the backdrop's generation if any node has a backdrop background; pixels read at
-   layout by identity (D9).
-7. `Compositor/Compositor.swift`: `commit(_ presentation:, inputs:, sceneChanged:) -> CommitReport`.
-   One `CATransaction` with actions disabled: reconcile records by `LayerID` (D4); for each item,
-   apply chrome, place the content, compare its key and draw it if the key changed; set the hole
-   and the reveal.
-8. `Frame/Bar.swift`: `BarSurface` is `frame`, `hostLayer`, `presented(_:)`, `setVisible` and
-   `setTakesPointer`. `Bar` gains `compositor` and the last `CommitReport`.
-9. `Frame/FrameLoop.swift`: `Stage.paint` becomes `.commit` and `Dirty.paint` becomes
-   `Dirty.commit`. `present` commits, then tells the surface. A new backdrop and the first-frame
-   deadline invalidate `.commit`. The trace line carries the `CommitReport`.
-10. `App/BarView.swift`: layer-hosting (`layer = CALayer()` before `wantsLayer = true`), no
-    `draw(_:)`, and a root delegate that returns `NSNull` for every action. `show` becomes
-    `presented`. `--debug-tint` becomes a tinted sublayer.
-11. `App/BarCover.swift`: `hostLayer` is the view's layer, resized in `fit(to:)`.
-12. `Paint/Offscreen.swift`: new, on `CARenderer` (D13):
-    `render(_ scene:, backdrop:, resolver:, hole:, reveal:, scale:, at:) -> CGImage?`, so each pixel
-    test changes one line. `pixel(_:atPoint:size:)` stays.
-13. `App/Shot.swift`: uses the new `Offscreen`.
-
-`RasterStyle` is DESIGN §10's "raster rows" as a `Hashable` value: font, letter spacing, text
-transform; icon size, weight, rendering and resolved colour; the resolved colour, fill and
-track; stroke width and line cap; custom properties, for `var()` in ops; and the node's own
-background. Not opacity, not transitions, not the box.
-
-Tests:
-
-- **`CompositorTests`**, new, on detached layer trees:
-  - reconciliation keeps an item's layers across a re-render and across a transition, adds and
-    removes by identity, and reorders;
-  - a pointer move rasterizes nothing, and a hole-only commit changes only the mask;
-  - changing text, font, scale or appearance draws the item again; an opacity transition does not;
-  - the hole mask at both ends of the bar;
-  - `8pt 0 0 8pt` uses `maskedCorners`, `8pt 4pt` a shape mask.
-- **Pixel tests** (`PaintTests`, `CanvasPaintTests`, `RendererTests.painted`,
-  `RasterTests.inAScene`) move to the new `Offscreen` with their assertions unchanged. New ones:
-  - a two-tone backdrop, which pins `contentsRect`'s orientation;
-  - a gradient, which pins its direction;
-  - the hole's feather and half strength;
-  - content clipped to a rounded bubble.
-- **`ParityTests`** (D14): the design document's example theme, the built-in theme, and one
-  fixture each for every background kind, shadows, and per-corner radii, rendered both ways on
-  the checkerboard. Per-pixel difference under a tolerance; on failure, both renders and their
-  difference are written as PNGs.
-- **`FrameTests`**: `paints` becomes `presentations` and `.paint` becomes `.commit`. New: a
-  pointer move commits the bar and its `CommitReport` shows no rasters.
-
-Done when the tests pass, `bario --run --trace-frames` shows no rasters while the pointer moves,
-and the live profile from DESIGN §10, repeated on a release build while whipping the pointer
-over the bar, has no `Painter` or `CUINamedVectorGlyph` frames and no main-thread wait in
-`CABackingStoreGetFrontTexture`.
-
-## Step 2: a layer per node
-
-The goal: a colour transition, a clock tick or a hover draws only what changed, and usually
-nothing.
-
-```
-content
-└─ node          bounds = node.frame (D2); opacity; the node's own background (D7, no shadow
-   │             or border, as today)
-   ├─ raster     a leaf's image, outset (D5); for text and monochrome symbols, a colour layer
-   │             masked by a coverage raster (D6)
-   ├─ track, fill   a meter: two layers, and the value is the fill's width
-   └─ node       a row's or column's children
-```
-
-Work:
-
-1. `RasterKey` per node. A coverage leaf's key has no colour in it; a full-colour leaf's
-   (non-monochrome symbols, graphs, canvases, renderer drawings, rasters) keeps its resolved
-   colours.
-2. `NodeRasterizer` draws one leaf. Node backgrounds leave it for chrome layers.
-3. Meters as layers: the track rounded by half its shorter side with `masksToBounds`, and the
-   fill inside it at `max(height, width × value)` wide, as `Painter.paintMeter` draws it.
-4. `contrast` becomes the tint of every coverage leaf in its item.
-5. With parity holding, delete `Paint/Legacy/`, `ParityTests`, and whatever of `Painter.swift`
-   step 1 did not move.
-
-Tests:
-
-- a colour transition on text and an `icon-color` change on a monochrome symbol rasterize
-  nothing, and a `contrast: auto` flip draws only the text whose ink changed side (D6); a node
-  that changes role gets a new layer; a clock tick draws one node; a meter's value change
-  draws nothing; a hierarchical symbol's colour change draws that symbol;
-- pixels: text takes its tint; meters at 0, 0.5 and 1; a hierarchical symbol keeps its colours;
-- the step 1 pixel tests, unchanged.
-
-Done when the tests pass and parity holds, checked in the change that deletes the oracle.
-
-## Step 3a: renderers draw at commit
-
-The goal: an animated renderer costs its own `draw` and one raster a frame, and nothing else on
-the bar.
-
-Work:
-
-1. `Layout/BarLayout.swift`: `placeNode` stops calling `draw`; `measureNode` still measures.
-   `canvas` and `raster` nodes keep their display list and image on the `SceneNode`; custom nodes
-   get theirs at commit.
-2. `Wasm/RendererHost.swift`: `draw` returns the drawing and whether that call asked for a frame.
-   The shared `frameRequested` flag and `takeFrameRequest` go. `frame` is sent as `x: 0, y: 0`
-   (D8).
-3. `Compositor`: a custom node's draw key is its payload, `RasterStyle`, size and scale. Commit
-   calls `draw` when the key changed or the node asked for a frame at the last commit, and the
-   drawing joins the node's raster key. `CommitReport.wantsFrame` is set if any node asked.
-4. `FrameLoop`: `styleAndLayout` stops reading frame requests. A commit that wants a frame marks
-   its bar `.commit`-dirty, not `.layout`, and the frame asks for a refresh.
-5. Budgets are as they were: timed per call, three strikes.
-
-Tests:
-
-- `FrameTests.requestFrame`: the blink renderer gets exactly the frames it asks for, and after
-  the first none of them lays the bar out;
-- `RendererTests`: registration, the value reaching the ops, and theming read the drawing from
-  the compositor's record rather than `SceneNode.displayList`;
-- a renderer redrawing on one item leaves its neighbour's raster count at 0.
-
-Done when the tests pass, and `16-custom-renderers.md`, the Rust and C PDK comments and
-`examples/README.md` say `draw` happens at commit with a node-local frame.
-
-## Step 3b: `transform` and `animation`
-
-The goal: a spinner costs nothing per frame.
-
-Work:
-
-1. `Style/Properties.swift`: `Transform` (translation, rotation in degrees, scale), parsed from
-   `translate()`, `rotate()` and `scale()` in any order. `StyleProperty.transform` and
-   `.animation`. `transform` joins `animatable`, with `blend`, `differs` and `take` cases.
-2. `Style/CSS.swift`: `@keyframes name { from {…} 40% {…} to {…} }`, whose declarations may only
-   be `transform` and `opacity`; anything else is an error that says so. `Stylesheet.keyframes`
-   by name, and in `appending` the later sheet wins. The unknown at-rule error names both
-   at-rules.
-3. `animation: name duration [easing] [delay] [count | infinite] [alternate]`, comma-separated.
-   `Styler` resolves the names against the stylesheet into `Style.animations`, keyframes
-   embedded, so the compositor never needs the stylesheet. An unknown name is a diagnostic.
-4. `Compositor`: `transform` is the layer's `CATransform3D`, about its centre (D2). An
-   `Animation` is a `CAKeyframeAnimation` per component key path (`transform.rotation.z`,
-   `transform.scale.x`, `transform.translation.y`, `opacity`), because interpolating whole
-   matrices turns a 360° spin into no spin at all. `repeatCount`, `autoreverses`, a
-   `CAMediaTimingFunction` from the easing; keyed `bario.<name>.<path>` and added only when that
-   key is missing or its definition changed (D12).
-5. `Animator`: nothing. An `animation` never makes a bar `moving`, so it starts no frames.
-
-Tests:
-
-- `StyleTests`: `@keyframes` and `animation` parse; other properties in keyframes and unknown
-  names are errors; `transform` parses and blends;
-- `CompositorTests`: a layer carries its animation after a commit, the same animation object
-  after ten more, and a new one when the duration changes; the frame loop stays idle with a
-  spinner on the bar;
-- pixels: rendered offscreen a quarter of the way into `rotate(360deg)`, the drawing has turned a
-  quarter (D13).
-
-Done when the tests pass and DESIGN §7's property table and `03-style-engine.md` match the
-grammar as built.
-
-## Step 3c: shared surfaces
-
-Gated on a spike, because two things DESIGN §9 relies on are not known yet.
-
-The spike:
-
-1. **Can a double-clickable bario vend a Mach service?** A LaunchAgent in the bundle with a
-   `MachServices` entry, registered through `SMAppService`, needs bario itself to be the job
-   launchd starts. Find out whether that can keep "open the app, quit the app" working.
-2. **What can a layer show without private API?** Whether `contents` takes an `IOSurface`, and
-   whether new pixels in the same surface reach the screen when it is set again, or it takes a
-   pair of surfaces swapped each frame, with `frame` naming the one just drawn.
-
-If the first has no answer that keeps bario an ordinary app, 3c is deferred, DESIGN §9 and §13
-say so, and `shm` stays the path for external processes.
-
-If it passes:
-
-1. `IPC/Protocol.swift`: the `frame` verb with a `surface` field, and `bario frame <name>`.
-2. An XPC listener that takes a name and its surfaces from a native process: one owner per name,
-   and the surfaces are dropped when the connection goes.
-3. `Paint/Raster.swift`: a `{"surface": "name"}` source resolving to the surface `frame` named
-   last; the compositor sets it as the layer's contents, and its key is which surface is current.
-4. An example in `examples/`: a small Swift program that draws with Metal and sends `frame`.
-
-Tests: the verb round-trips; a source naming an unknown surface draws nothing and warns once;
-surfaces handed over in-process change a layer's contents on `frame`, with no raster.
-
-Done when the example runs against a live bar, and the README no longer calls a live raster the
-expensive path.
-
-### The spike, run in September 2026
-
-1. **No.** `NSXPCListener` and `xpc_connection_create_mach_service` listen only on a name launchd
-   gave the process. The supported way to get one is a LaunchAgent in the bundle with
-   `MachServices`, registered through `SMAppService`, with bario as the job (so opening the app
-   is no longer what runs it, and quitting it is undone by the next client that connects) or a
-   helper as the job, brokering surfaces to an ordinary bario. Either is listed in Login Items
-   and changes how bario installs. `bootstrap_register` does still work: a plain process
-   registered a name, an unrelated process looked it up, and it went when the first exited. It
-   has been deprecated since macOS 10.5, and XPC cannot listen on it, so it would mean
-   hand-written Mach messages and dead-name notifications, which is what was built (below).
-2. **A pair.** `CALayer.h` documents `contents` as taking an `IOSurfaceRef`. Measured on screen,
-   with a `ScreenCaptureKit` stream (which delivers a frame only when the window server
-   recomposites): new pixels in the surface a layer shows produce no frame, and neither does
-   setting that surface as `contents` again; setting the other surface of a pair produces one
-   every time. A screenshot is not evidence here, because it re-reads the surface on request.
-
-The gate's question was whether there is an answer that keeps bario an ordinary app, and there
-is one: `bootstrap_register`, deprecated but present. 3c was at first deferred on the grounds
-that a deprecated call is no foundation for a protocol; on reflection, the protocol does not
-rest on it. What producers depend on is a Mach message and the socket verb, and only the
-publishing of the port uses the old call, so that is what is isolated.
-
-### As built
-
-- `CBarioShim/surfaces.c`: `bario_surfaces_listen` publishes a receive right with
-  `bootstrap_register`; the hand-off is one complex message carrying two IOSurface ports (copy
-  send), a port naming the producer (make send) and a reply port (make send-once), answered
-  with accepted, taken or invalid. bario requests a dead-name notification on the producer's
-  port, and its death drops every surface it handed over. `bario_surfaces_hand_off` is the
-  producer's side.
-- `IPC/Surfaces.swift`: `SurfaceListener` takes messages off the port on its own queue, looks
-  the surfaces up there, and tells the registry on the main actor; `SurfaceProducer` makes the
-  pair, hands it over, and sends `frame` over the socket. The service name is
-  `zip.tanner.bario.surfaces`, or `BARIO_SURFACES`.
-- `Paint/SharedSurfaces.swift`: the registry. One producer per name while it runs, a pair per
-  name, `frame(name, index:)` naming the one just drawn (or swapping), and a warning once per
-  name a source asks for that nothing handed over.
-- `IPC/Protocol.swift` and `App/CLI.swift`: `frame` with `surface` and an optional `index`, and
-  `bario frame <surface> [index]`.
-- `Compositor`: a `raster` whose source is `{"surface": name}` is a `pixels` leaf whose contents
-  are the current surface; `frame` invalidates commit, and nothing is laid out or drawn.
-- `examples/surface`: a Swift program drawing a moving wave with Metal into the pair, run with
-  `swift run surface-example`.
-
-Tests: the verb and its errors; an unknown source shows nothing and warns once; `frame`
-changes a layer's contents with no raster; a frame commits without layout; a surface is the
-right way up offscreen; and the real Mach hand-off in-process, with a name taken, handed over
-again by its owner, and freed when the owner's port dies. The example ran against a live bar:
-about 170 frames of commit with no layout and no raster, the wave moving on screen, and the
-node empty once it exited.
-
-## Risks
-
-| risk | how it would show | what we do |
+| harmony | secondary | tertiary |
 |---|---|---|
-| `contentsRect` or gradient direction is flipped relative to the painter | step 1 pixel tests | fix it once in `Chrome`; the two-tone and gradient tests pin it |
-| a layer's `shadowRadius` is not CoreGraphics' blur | parity | fit the factor against the oracle and write it down beside the code |
-| text clipped at descenders or italics | parity | D5; the fixtures include descenders and bold italic |
-| `CARenderer` and the window server disagree | offscreen passes, screen looks wrong | step 1 is not done until each fixture theme has been looked at on a live bar |
-| many small layers cost WindowServer more than one bitmap did | WindowServer CPU while whipping the pointer | compare in Activity Monitor before and after; a bar is dozens of layers, not hundreds |
-| an implicit animation somewhere in a hosted tree | things slide that should snap | actions disabled in every commit and in the root delegate; a test that a commit leaves no animations but `bario.*` ones |
-| layer contents are sRGB and the display is P3 | colours shift on screen | Core Animation matches tagged images; tests are sRGB (D13); compare one swatch on screen |
+| `tonal` (default) | the seed's hue, quiet | +60° |
+| `analogous` | −30° | +30° |
+| `complementary` | the seed's hue, quiet | +180° |
+| `split` | +150° | +210° |
+| `triadic` | +120° | +240° |
+| `monochrome` | no chroma anywhere | |
+| `<angle> <angle>` | as written | as written |
+
+Primary's chroma is 0.13 × `chroma`. Secondary takes 0.8 of that on a hue of its own, or 0.35 on
+the seed's; tertiary takes 0.75, and neutral 0.012. `chroma: seed` follows the seed's own chroma
+instead, clamped to 0.03–0.2, which suits a muted wallpaper better. Roles are those hues at fixed
+lightnesses:
+
+| role | light L | dark L |
+|---|---|---|
+| `primary`, `secondary`, `tertiary` | 0.52 | 0.80 |
+| `on-primary`, `on-secondary`, `on-tertiary` | 0.99 | 0.24 |
+| `primary-container`, … | 0.90 | 0.36 |
+| `on-primary-container`, … | 0.28 | 0.94 |
+| `surface` | 0.975 | 0.20 |
+| `surface-container` | 0.93 | 0.27 |
+| `on-surface` | 0.24 | 0.93 |
+| `outline` | 3:1 against `surface` | 3:1 against `surface` |
+
+An `on-` role starts at its lightness. It moves further only when it falls short of `contrast`
+against its partner, to the extreme if need be; this is the same solver as `on()` (W16). In the prototype the pairs came out at 5–15:1. The
+obvious rule, moving only as far as the ratio needs, left every pair at exactly 4.5:1, which read
+washed out beside it. Light or dark is the cascade's `dark`. Schemes are cached per bar by seed,
+harmony, chroma, contrast and appearance.
+
+**W13. CSS Color's own syntax for adjusting.** `oklch(from <colour> <L> <C> <H> [/ <alpha>])` and
+`oklab(from …)`, with the channel keywords (`l c h alpha`, `l a b alpha`), numbers, percentages
+and `calc()` of `+ - * /` over them. `rgb(from …)` and `hsl(from …)` come with them, since the
+machinery is the same. Then `color-mix(in <space>, <colour> [<p>%], <colour> [<p>%])` in `oklab`,
+`oklch` (the shorter hue arc), `srgb` and `srgb-linear`, and `contrast-color(<colour>)`, which is
+white or black, whichever has the higher WCAG ratio against it. The tokenizer gains `.delim` for a
+`+`, `-` or `*` with whitespace around it, which is what `calc()` asks of a stylesheet anyway.
+
+**W14. The store has measurements; the stylesheet has opinions.** bario owns the top-level key
+`wallpaper`, and an item of that name is a config error.
+
+```json
+{ "displays": [ { "name": "Studio Display XDR", "id": 3, "primary": true,
+                  "clusters": [ { "hex": "#e3e3e3", "oklch": [0.91, 0.0, 0], "population": 0.31 } ],
+                  "slots": { "dominant": { "hex": "#e3e3e3", "oklch": [0.91, 0.0, 0], "found": true,
+                                           "same-as": "muted-light" },
+                             "vibrant": { "hex": "#448bee", "oklch": [0.64, 0.16, 256], "found": false } },
+                  "seeds": [] } ],
+  "primary": { "…": "the primary display's entry again" } }
+```
+
+Schemes are not in it, since only the stylesheet knows its seeds and harmonies. A module that
+wants scheme colours gets them through `var()` in its display list, which the host resolves (W2).
+
+**W15. `bario palette`** prints clusters, slots and seeds as truecolour swatches with their numbers.
+With no argument it shows each display's live palette from the store; with image paths, each
+file's. It is how the numbers in W8–W12 get tuned, and how a surprising palette gets reported.
+
+**W16. Contrast is promised by what generates colours, never by what measures them.** Slots and
+seeds promise nothing about contrast with each other; W9's gap only keeps a family distinct.
+When two slots come out alike, that is true of the image. Desert-3 is beige everywhere, and
+forcing its slots apart would mean inventing colours it does not have. Readability comes from
+three places instead:
+
+- a scheme's `on-` roles (W12);
+- `contrast-color(<colour>)`: black or white (W13);
+- `on(<colour>[, <ratio>])`, which is bario's own and not CSS's. It is W12's on-colour rule for
+  any colour. It keeps the colour's hue and half its chroma, on whichever side black or white
+  contrasts more. It starts crisp, at L 0.97 or 0.25, and moves further only when short of
+  `<ratio>` (default 4.5), to the extreme if need be.
+
+4.5:1 is always reachable. Nothing above about 4.58:1 is, against a colour of middle luminance,
+and there `on()` gets as close as it can. In the prototype, `on()` reached at least 4.5:1 on
+every slot of every image, with a median of 9.4:1. Like `contrast-color()`, it stays symbolic
+while its input does (W3).
+
+The rule for a stylesheet: anchor on one colour and derive its partner. Never pair two slots as
+text and background. Slots are for fills, borders, accents and seeds.
+
+## What the prototype showed
+
+A prototype of W4, W8–W12 and W16, about 550 lines of Swift, ran on 30 images: the 18 in
+`~/Pictures/wallpaper`, seven of macOS's own, three solid colours, and live captures of the
+desktop.
+
+- **Grey wallpapers have no seed.** The misty mountain on the desktop while this was written is
+  all but grey (C ≤ 0.01), and so is a white sands photograph. Both fall back to the accent, and
+  their muted slots stay the image's own greys. Fallbacks are a first-class path, not an edge
+  case.
+- **Vibrant and seed answer different questions, as planned.** In the Manhattan twilight,
+  `vibrant` is the warm city lights and the seed is the blue sky. In Sonoma, `vibrant` is the
+  blue-violet and the seed is the green.
+- **Made-up vibrant slots can be loud.** On a pale image whose seed is a faint teal, a vibrant
+  slot made up at 85% of sRGB's chroma is much brighter than anything in the picture. It is
+  flagged as made up in the store and replaceable with a fallback, but its chroma may want to
+  follow the seed's. To tune in step 2.
+- **Costs.** Capture 23–30ms, extraction about 3ms, schemes microseconds, per display, per
+  wallpaper change.
+
+## Step 1: colour maths and CSS Color 4 and 5
+
+Oklab and OKLCH, gamut mapping, WCAG contrast; `oklab()`, `oklch()`, relative colours with
+`calc()`, `color-mix()`, `contrast-color()`; `on()` and the contrast solver behind it, which step
+4's `on-` roles reuse; `.delim`; the symbolic cases and their evaluation in `ColorResolver`;
+folding (W3). Useful before anything else lands:
+`border-color: oklch(from accent l c calc(h + 180))`, or `color: on(accent)`.
+
+Tests: known conversions, with sRGB red at about `oklch(0.628 0.258 29.2)`; round trips; gamut
+mapping keeps L and h; contrast of black on white is 21; `calc()` precedence and units; every
+error points at its line; what folds and what stays symbolic; a transition between two folded
+colours eases; `on()` reaches 4.5:1 against every colour on a grid over OKLCH, and gets as close
+as it can to ratios that are out of reach.
+
+## Step 2: extraction
+
+`Palette/` and `bario palette <image>`. Tests on images the tests draw, not wallpapers in the repo:
+
+- a solid colour is one cluster, the seed is its hue, and the slots are made up;
+- 70% of one colour and 30% of another makes the 70 dominant;
+- a grey ramp has no seed, and its vibrant slot is made up from the accent;
+- a vivid 3% patch on a dull field is `vibrant` but not the seed;
+- every family keeps its gap, whether its variants were found or made up;
+- an image whose biggest colour is its most vivid has `dominant` and `vibrant` the same, and says
+  so;
+- the same image twice gives an identical palette;
+- a near-tie flips without `previous` and holds with it.
+
+## Step 3: capture, the environment and the store
+
+`PaletteCapture`; `Bar.palette`; `FrameLoop.setPalette`, which invalidates style for that bar;
+`StyleEnvironment`; `wallpaper()` substituted; the first-frame rule (W7); the store key (W14);
+`bario palette` live. `--shot` takes its palette from the same source as its backdrop, the capture
+or the wallpaper file. After this
+step, `item { background: wallpaper(vibrant) }` follows a change of wallpaper, easing.
+
+Tests, headless against the frame loop: a new palette restyles its bar and no other; an identical
+one restyles nothing; the first frame waits for a palette, or for the deadline; a canvas using
+`var(--x)`, with `--x: wallpaper(vibrant)`, redraws when the palette changes and not otherwise.
+
+## Step 4: schemes
+
+`@scheme` and its descriptors, with errors; `scheme()` substituted; `Palette/Scheme.swift`; the
+cache. A `bario style` delta can redefine a scheme, the later sheet winning as for `@keyframes`.
+
+Tests: every `on-` role meets its contrast in every harmony and both appearances, across seeds
+that include near-grey, very light and very dark ones; `monochrome` has no chroma; named schemes
+resolve to their own seed; a missing name is a parse error.
 
 ## Docs, as we go
 
-- **Step 1 starts:** `.agents/knowledge/18-compositor.md` from this file.
-- **Step 2 ends:** the painting parts of `06-painter-and-hole.md` and `17-frame-loop.md` are
-  marked superseded; `IMPLEMENTATION.md` gains `Compositor/` and loses the painting-order
-  paragraph.
-- **Step 3a:** `16-custom-renderers.md`, the PDK comments, `examples/README.md`.
-- **Step 3b:** DESIGN §7 and `03-style-engine.md`, if the grammar settled differently.
-- **Step 3c:** README, DESIGN §9 and §13.
-- **When 3b is done:** DESIGN's status line says phase 7 is built, with 3c noted if it was
-  deferred.
+DESIGN.md §7: the new colour values, and a subsection on colours from the wallpaper beside the
+backdrop's. §10's invalidation table gains "a new palette: style, for that bar". §3 or §4 says
+that bario writes `wallpaper` in the store. The knowledge note is
+`22-wallpaper-colours.md`. Examples go in `examples/themes/`: one stylesheet built on schemes, one
+on slots.
+
+## Risks
+
+- **The wallpaper window's owner and title are not API.** If a later macOS renames it, the file
+  stands in, which is wrong for aerials and dynamic desktops but still a palette. The capture
+  warns once when it falls back for that reason, so the change gets noticed.
+- **Spaces have wallpapers of their own,** so switching Space can restyle a bar. That is the
+  feature, but colours easing while the desktop slides may want a shorter transition. Watch it
+  before deciding anything.
+- **Tuning is taste.** The numbers come from one corpus and one evening. `bario palette` exists so
+  they keep moving after this lands.
 
 ## Not in this plan
 
-Rasterizing off the main actor, `CAShapeLayer` for graphs and display-list paths, handing layout
-transitions to Core Animation, and shaders. Each fits on top of this, and none is needed for its
-goals.
+- Matching Material You or Android Palette, colour for colour.
+- Wide-gamut colours out (W4).
+- Scheme parameters per item, such as a `--scheme-harmony` that `scheme()` reads. A named
+  `@scheme` covers that for now.
+- Sampling part of the wallpaper, such as only what is under the bar. `backdrop` already shows
+  that, and `contrast: auto` measures it.
+- A scheme that is light or dark by the backdrop under the bar rather than the system appearance,
+  as the menu bar's own ink is. Worth trying once schemes exist.
+- Raising `contrast` when macOS's "Increase contrast" is on. Easy once W12 exists.
+- Writing the palette into other programs' configs, such as terminal themes. The store is there
+  for whoever wants to.
