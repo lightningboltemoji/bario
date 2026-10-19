@@ -1,22 +1,23 @@
 <p align="center">
-  <img src="bario.svg" width="300" height="200" alt="Description">
+  <img src="bario.svg" width="150" height="100" alt="Description">
 </p>
 
 <h1>Bario</h1>
   
 a customizable menu bar overlay for macOS
 
-> [!IMPORTANT]
-> Still under heavy development - not in a state I'd recommend daily driving :)
-
 ## Features
 
 - Covers the default menu bar with a customizable system bar
 - Add widgets like clock, battery, volume - and anything else you can think of!
 - WASM-based plugin system allows custom data providers and item renderers
-- Disappears as your mouse gets close, to keep the default menu bar immediately usable at all times
+- CSS-dialect styling system
 
-<img width="369" height="35" alt="Screenshot 2026-09-17 at 9 07 37 PM" src="https://github.com/user-attachments/assets/f70a07cf-1cc9-4bf6-b2d6-a5b277f6f3bb" />
+By default, Bario disappears as your mouse gets close, to keep the default menu bar immediately usable
+
+<img width="378" height="39" alt="Screenshot 2026-10-18 at 9 54 56 PM" src="https://github.com/user-attachments/assets/7678deb7-9e75-4f20-b98d-5a22ac26ce8b" />
+<br />
+<img width="378" height="39" alt="Screenshot 2026-10-18 at 9 55 06 PM" src="https://github.com/user-attachments/assets/4b8b1023-09c2-4080-a4b7-ff52b5ca242c" />
 
 ## Install
 
@@ -27,7 +28,3 @@ brew install --cask lightningboltemoji/tap/bario
 ```
 
 or manually from the [releases page](https://github.com/lightningboltemoji/bario/releases).
-
-## AI use
-
-Bario's code was written almost entirely by Claude with architectural guidance.
