@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="bario.svg" width="150" height="100" alt="Description">
-</p>
-
-<h1>Bario</h1>
+# Bario&nbsp;&nbsp;&nbsp;<img width="80" alt="App icon" src="bario.svg"/>
   
 a customizable menu bar overlay for macOS
 
