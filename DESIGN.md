@@ -445,6 +445,15 @@ is no guide: measured in October 2026, a full screen app leaves a display's visi
 desktop had it, on a notched display and a Studio Display alike, and says the same to the app
 itself. A fixed bar holds still through the slide and goes as the full screen app lands, as
 its stylesheet says (section 7); one riding its Space has already slid off with the desktop.
+An app zooming into full screen, from its green button or a shortcut, is drawn over every
+window, the bar included, for the third of a second it takes, and its Space is current only
+some way after the zoom ends. A bar that waited for the Space would come back from under the
+zoom, over the app, and only then go. So bario also listens for the window server's event
+for a zoom starting, about 40ms in, half a second before the Space is current, and takes the
+display for the app's from then: the bar goes under the zoom. The event is SkyLight's, not an
+API, measured on macOS 27.2 as number 828, the Space, and 0 (1 as the app lands). A swipe to a
+full screen app already there sends none and needs none: the fixed bar is in sight all the
+way. If the Space is not current a second and a half on, the display is let go.
 A full screen Space has no desktop, so its photograph is black, which a bar shown over the app
 wears in the black strip beside a notch. A bar that is not shown there takes no photograph of
 it, and keeps the one it had: otherwise it goes dark mid-fade on its way out, and comes back
@@ -1353,7 +1362,9 @@ Each phase ends with something you can run and look at.
   plain `NSWindow` (not a panel) with `.canJoinAllSpaces` at normal level is left off them, so
   its `isOnActiveSpace` turns false the moment one arrives. Panels join them whatever they say.
   Whether a full screen app leaves the menu bar room has no public API either: `if-room` reads
-  System Settings' key and the menu bar's window, and without them it hides.
+  System Settings' key and the menu bar's window, and without them it hides. Nor does an app
+  starting to zoom into full screen: bario hears SkyLight's event for it, by number, and
+  without it the bar goes as the app lands, from under the zoom.
 - **Now Playing and Spaces** have no public API. Media is `MediaRemote` (private); Spaces come
   from yabai or AeroSpace over `exec`. Neither is a built-in module for that reason.
 - **Screen Recording permission** must attach to a stable bundle identifier, hence the `.app`

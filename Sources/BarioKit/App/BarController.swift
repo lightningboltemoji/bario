@@ -35,6 +35,9 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var paletteImages: [CGDirectDisplayID: CGImage] = [:]
     /// Follows the windows whose shadows fall into the bars.
     private let shadows = ShadowWatcher()
+    /// Displays a full screen app has started zooming into, and when, until its Space is
+    /// current. See `zoomStarted`.
+    private var zooming: [CGDirectDisplayID: CFTimeInterval] = [:]
     private var server: SocketServer?
     private var service: BarioService?
     private var surfaceListener: SurfaceListener?
@@ -186,6 +189,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        SkyLight.whenFullscreenZoomStarts { [weak self] space in self?.zoomStarted(into: space) }
         // macOS draws the key window a much larger shadow than the rest, so an app coming
         // forward changes the strip more than a window moving does.
         workspace.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
@@ -225,7 +229,12 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private func syncDisplays() {
         var seen: Set<CGDirectDisplayID> = []
         var changed = false
-        let fullscreen = SkyLight.fullscreenDisplays(among: NSScreen.screens.compactMap(\.displayID))
+        var fullscreen = SkyLight.fullscreenDisplays(among: NSScreen.screens.compactMap(\.displayID))
+        // A display a full screen app is zooming into is the app's already. Its Space being
+        // current ends the wait, and an app that has not landed in a second and a half is let go.
+        let now = CACurrentMediaTime()
+        zooming = zooming.filter { !fullscreen.contains($0.key) && now - $0.value < 1.5 }
+        fullscreen.formUnion(zooming.keys)
         loop.menuBarStaysInFullscreen = MenuBar.staysInFullscreen
         for screen in NSScreen.screens {
             guard let info = strip(on: screen) else { continue }
@@ -271,6 +280,20 @@ public final class BarController: NSObject, NSApplicationDelegate {
         if options.windowShadows {
             shadows.displays = loop.bars.map(\.display)
         }
+    }
+
+    /// A full screen app has started zooming into `space`. Its Space becomes current only as it
+    /// lands, half a second on, and the zoom is drawn over every window meanwhile, the bar
+    /// included. A bar that waited for the Space would come back from under the zoom and only
+    /// then go; this way it goes under the zoom, and a bar that stays has its `fullscreen` look
+    /// by the time the app is there. DESIGN.md §6.
+    private func zoomStarted(into space: UInt64) {
+        let displays = SkyLight.displays(withFullscreenSpace: space,
+                                         among: NSScreen.screens.compactMap(\.displayID))
+        guard !displays.isEmpty else { return }
+        let now = CACurrentMediaTime()
+        for id in displays { zooming[id] = now }
+        syncDisplays()
     }
 
     // MARK: - The pointer
