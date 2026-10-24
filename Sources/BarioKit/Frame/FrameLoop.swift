@@ -100,6 +100,13 @@ public final class FrameLoop {
         didSet { if hidden != oldValue { invalidate(.present) } }
     }
 
+    /// Whether macOS keeps the menu bar over full screen apps, so they leave its strip clear on
+    /// every display and not only beside a notch: what `fullscreen "if-room"` decides from.
+    /// DESIGN.md §6.
+    public var menuBarStaysInFullscreen = false {
+        didSet { if menuBarStaysInFullscreen != oldValue { invalidate(.present) } }
+    }
+
     // MARK: - State
 
     public private(set) var bars: [Bar] = []
@@ -358,14 +365,14 @@ public final class FrameLoop {
     }
 
     private func isNear(_ point: CGPoint, bar: Bar) -> Bool {
-        guard bar.isVisible, let hole = bar.config?.hole else { return false }
+        guard bar.isShowing, let hole = bar.config?.hole else { return false }
         return Lens.proximity(of: point, to: bar.surface.frame, reach: hole.proximity) > Lens.settled
     }
 
     /// The item on screen at a point, which is what the pointer is over: hit testing reads
     /// what is presented, not what is heading there.
     public func item(at point: CGPoint) -> (bar: Bar, item: SceneItem)? {
-        for bar in bars where bar.isVisible && bar.surface.frame.containsPointer(point) {
+        for bar in bars where bar.isShowing && bar.surface.frame.containsPointer(point) {
             let frame = bar.surface.frame
             let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
             guard let item = bar.presentation?.scene.item(at: local) else { continue }
@@ -390,7 +397,7 @@ public final class FrameLoop {
     /// Option go after the click without the bar taking back the menu bar from under the menu.
     private func updatePointerTarget() {
         for bar in bars {
-            let interactive = isShut(bar) && bar.isVisible && revealed != bar.id
+            let interactive = isShut(bar) && bar.isShowing && revealed != bar.id
                 && pointer.map { bar.surface.frame.containsPointer($0) } == true
             guard interactive != bar.isInteractive else { continue }
             bar.isInteractive = interactive
@@ -521,10 +528,30 @@ public final class FrameLoop {
     /// Returns what the commit did, if the bar was committed.
     @discardableResult
     private func present(_ bar: Bar, sceneChanged: Bool, at now: CFTimeInterval) -> CommitReport? {
-        guard let config = bar.config, let scene = bar.animator.presented(at: now) else {
+        guard let config = bar.config, bar.animator.target != nil else {
             setVisible(bar, false)
             return nil
         }
+
+        // The first frame worth showing: every item has rendered once, however that went,
+        // and there is a photograph to show them on, and a palette to colour them with if
+        // anything asks for one (PLAN.md W7). Or the deadline, with what there is.
+        if !bar.isReady, bar.deadlinePassed
+            || (bar.backdrop.image != nil && hasRendered(bar) && (bar.paletteLooked || !wantsPalette)) {
+            bar.isReady = true
+        }
+        // Coming on screen eases from the bar's `@starting-style`, and going off it to its
+        // `:leaving` style, so either starts before the scene is sampled: the window comes up
+        // on the first frame of the one, and goes down after the last frame of the other.
+        let wanted = bar.isReady && bar.placeOnScreen(menuBarStays: menuBarStaysInFullscreen) && !hidden
+        var turned = false
+        if wanted, !bar.isVisible || bar.animator.isLeaving {
+            turned = bar.animator.arrive(at: now)
+        } else if !wanted, bar.isVisible, !bar.animator.isLeaving {
+            turned = bar.animator.leave(at: now)
+        }
+        guard let scene = bar.animator.presented(at: now) else { return nil }
+
         let (hole, reveal) = bar.lens.present(pointer: pointer, frame: bar.surface.frame,
                                               config: config.hole, latched: revealed == bar.id,
                                               closed: isShut(bar), at: now)
@@ -532,8 +559,9 @@ public final class FrameLoop {
                                         isMoving: bar.animator.isMoving(at: now))
 
         // The scene only differs from the one committed last if it was laid out again, was
-        // commit-dirty, or was still moving then (PLAN.md D3); the hole is compared directly.
-        let sceneChanged = sceneChanged || bar.moving
+        // commit-dirty, was still moving then, or has just started coming or going (PLAN.md
+        // D3); the hole is compared directly.
+        let sceneChanged = sceneChanged || bar.moving || turned
         let changed = sceneChanged || !(bar.presentation.map { $0.looksLike(presentation) } ?? false)
         bar.moving = bar.animator.isMoving(at: now) || bar.lens.isMoving(at: now)
         var report: CommitReport?
@@ -551,15 +579,7 @@ public final class FrameLoop {
             bar.presentation = presentation
             bar.surface.presented(presentation)
         }
-
-        // The first frame worth showing: every item has rendered once, however that went,
-        // and there is a photograph to show them on, and a palette to colour them with if
-        // anything asks for one (PLAN.md W7). Or the deadline, with what there is.
-        if !bar.isReady, bar.deadlinePassed
-            || (bar.backdrop.image != nil && hasRendered(bar) && (bar.paletteLooked || !wantsPalette)) {
-            bar.isReady = true
-        }
-        setVisible(bar, bar.isReady && bar.placeOnScreen && !hidden)
+        setVisible(bar, wanted || (bar.isVisible && bar.animator.isOnItsWayOut(at: now)))
         return report
     }
 
@@ -570,6 +590,7 @@ public final class FrameLoop {
     private func setVisible(_ bar: Bar, _ visible: Bool) {
         guard visible != bar.isVisible else { return }
         bar.isVisible = visible
+        if !visible { bar.animator.gone() }
         bar.surface.setVisible(visible)
     }
 

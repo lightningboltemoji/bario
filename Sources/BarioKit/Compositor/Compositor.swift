@@ -28,7 +28,8 @@ public struct CommitReport: Sendable, Equatable, CustomStringConvertible {
 ///
 /// ```
 /// host layer (the surface's)
-/// └─ root              bounds = scene.bounds; opacity = 1 − reveal; mask = the hole
+/// └─ root              bounds = scene.bounds; the bar's transform; opacity = the bar's
+///    │                 × (1 − reveal); mask = the hole
 ///    ├─ rest           the desktop, over any menu bar left below a shorter bar
 ///    ├─ bar chrome     the bar's background in scene.bar, while there is a backdrop; a
 ///    │                 photograph stops at the bottom of the menu bar
@@ -128,7 +129,9 @@ public final class Compositor {
             apply(presentation.scene, isMoving: presentation.isMoving, inputs: inputs, report: &report)
             hasScene = true
         }
-        root.updateOpacity(1 - presentation.reveal)
+        // The bar's own opacity is how it comes and goes (DESIGN.md §7), and the reveal is
+        // how it gets out of the way of a menu; either can be part way at once.
+        root.updateOpacity(presentation.scene.style.opacity * (1 - presentation.reveal))
         if presentation.hole.isVisible {
             hole.update(presentation.hole, in: root.bounds, scale: inputs.scale)
             if root.mask !== hole.layer { root.mask = hole.layer }
@@ -155,6 +158,8 @@ public final class Compositor {
 
     private func apply(_ scene: Scene, isMoving: Bool, inputs: Inputs, report: inout CommitReport) {
         root.place(scene.bounds)
+        let matrix = scene.style.transform.matrix
+        if !CATransform3DEqualToTransform(root.transform, matrix) { root.transform = matrix }
         let resolver = inputs.resolver.with(current: inputs.resolver.resolve(scene.style.color))
         let context = Chrome.Context(resolver: resolver, backdrop: inputs.backdrop,
                                      shadows: inputs.shadows, barSize: scene.bounds.size)

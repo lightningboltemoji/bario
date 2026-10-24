@@ -31,6 +31,8 @@ public struct BarLayout: Sendable {
         var scene = Scene(display: display, bounds: bounds, bar: box, style: bar.style,
                           notch: config.notch == .avoid ? display.notchInStrip : nil,
                           hole: config.hole)
+        scene.starting = bar.starting
+        scene.leaving = bar.leaving
 
         let content = bar.style.padding.inset(box)
         let gap = bar.style.gap

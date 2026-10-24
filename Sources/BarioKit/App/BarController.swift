@@ -226,6 +226,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         var seen: Set<CGDirectDisplayID> = []
         var changed = false
         let fullscreen = SkyLight.fullscreenDisplays(among: NSScreen.screens.compactMap(\.displayID))
+        loop.menuBarStaysInFullscreen = MenuBar.staysInFullscreen
         for screen in NSScreen.screens {
             guard let info = strip(on: screen) else { continue }
             seen.insert(info.displayID)
@@ -313,7 +314,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         // Pressing or releasing Option with the pointer resting on a bar moves nothing, and
         // without Accessibility permission sends nothing either. So while the pointer is on a
         // bar, and only then, Option is read a few times a second.
-        let onBar = loop.bars.contains { $0.isVisible && $0.surface.frame.containsPointer(mouse) }
+        let onBar = loop.bars.contains { $0.isShowing && $0.surface.frame.containsPointer(mouse) }
         if onBar, modifierPoll == nil {
             let poll = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -332,7 +333,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// pointer leaves, so the menu you clicked is usable. One below the menu bar, where a tall
     /// bar hangs over a window, is on the window, and opened no menu.
     private func clicked(at point: CGPoint) {
-        if let bar = loop.bars.first(where: { $0.isVisible && $0.menuBarFrame.containsPointer(point)
+        if let bar = loop.bars.first(where: { $0.isShowing && $0.menuBarFrame.containsPointer(point)
                                               && $0.config?.hole.click == .reveal }) {
             loop.revealed = bar.id
         }
@@ -387,7 +388,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
         }
         guard !screenIsLocked else { return }
         let pending = covers.values.compactMap { cover -> (BarCover, DisplayInfo, WallpaperSpec)? in
-            guard let screen = NSScreen.screens.first(where: { $0.displayID == cover.displayID }),
+            guard photographs(cover.displayID),
+                  let screen = NSScreen.screens.first(where: { $0.displayID == cover.displayID }),
                   let info = strip(on: screen) else { return nil }
             return (cover, info, WallpaperSpec(screen: screen))
         }
@@ -402,7 +404,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
             var changed = false
             for (cover, info, spec) in pending {
                 let strip = await StripSource.strip(info: info, spec: spec, mode: mode, captureAllowed: allowed)
-                guard self.covers[cover.displayID] === cover else { continue }
+                // A full screen app may have taken the display while this was out.
+                guard self.covers[cover.displayID] === cover, self.photographs(cover.displayID) else { continue }
                 var stripNew = false
                 if let strip {
                     if cover.lastSource != strip.source {
@@ -434,9 +437,18 @@ public final class BarController: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Whether a display's desktop is photographed for its bar. A full screen Space has no
+    /// desktop, so its photograph is black: right for a bar shown over the app, in the black strip
+    /// beside a notch, but one that is not would wear it on its way out, mid-fade, and come back
+    /// in it. That one keeps the photograph it had.
+    private func photographs(_ id: CGDirectDisplayID) -> Bool {
+        guard let bar = loop.bars.first(where: { $0.id == id }), bar.fullscreen else { return true }
+        return bar.placeOnScreen(menuBarStays: loop.menuBarStaysInFullscreen)
+    }
+
     /// One display's wallpaper, measured into a palette off the main actor, against the last
     /// one (PLAN.md W5, W11). A full screen Space has no wallpaper window, so its display keeps
-    /// the palette it had, as it keeps its last photograph.
+    /// the palette it had.
     private func measurePalette(of id: CGDirectDisplayID, info: DisplayInfo, spec: WallpaperSpec,
                                 mode: SourceMode, captureAllowed: Bool) async {
         guard let bar = loop.bars.first(where: { $0.id == id }), !bar.fullscreen else { return }

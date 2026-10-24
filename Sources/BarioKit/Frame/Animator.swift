@@ -11,6 +11,9 @@ public struct Animator {
     private var motions: [String: Motion] = [:]
     /// The bar's own style, which transitions like an item's.
     private var bar = StyleMotion()
+    /// The bar is on its way off screen, easing to its `:leaving` style, which it is presented
+    /// in instead of its own until it has gone or comes back.
+    public private(set) var isLeaving = false
     /// Per item name, items that have left the scene and are easing to their `:leaving` style.
     private var ghosts: [String: Ghost] = [:]
 
@@ -99,11 +102,12 @@ public struct Animator {
         guard animated, let old = target else {
             motions = [:]
             bar = StyleMotion()
+            isLeaving = false
             ghosts = [:]
             return
         }
 
-        bar.retarget(from: old.style, to: scene.style, at: now)
+        bar.retarget(from: barStyle(of: old), to: barStyle(of: scene), at: now)
         let layout = scene.style.transitions.last { $0.property == "layout" }
         let before = Dictionary(old.allItems.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
         let after = Set(scene.allItems.map(\.name))
@@ -164,6 +168,52 @@ public struct Animator {
         for (row, items) in old.rows.map(\.items).enumerated() { visit(items, row: row, parent: nil) }
     }
 
+    // MARK: - The bar coming and going
+
+    /// The bar comes on screen: back from wherever it had got to on its way off, or from its
+    /// `@starting-style`, or, with neither, as it is. Returns whether its style changed.
+    @discardableResult
+    public mutating func arrive(at now: CFTimeInterval) -> Bool {
+        guard let target else { return false }
+        if isLeaving {
+            bar.retarget(from: barStyle(of: target), to: target.style, at: now)
+            isLeaving = false
+            return true
+        }
+        guard let starting = target.starting else { return false }
+        bar = StyleMotion()
+        bar.retarget(from: starting, to: target.style, at: now)
+        return true
+    }
+
+    /// The bar goes off screen, easing to its `:leaving` style from wherever it is. Returns
+    /// whether its style changed.
+    @discardableResult
+    public mutating func leave(at now: CFTimeInterval) -> Bool {
+        guard !isLeaving, let target, let leaving = target.leaving else { return false }
+        bar.retarget(from: target.style, to: leaving, at: now)
+        isLeaving = true
+        return true
+    }
+
+    /// Whether the bar is still easing to its `:leaving` style, and so still has to be on
+    /// screen. With no transition to it, it never was.
+    public func isOnItsWayOut(at now: CFTimeInterval) -> Bool {
+        isLeaving && bar.isMoving(at: now)
+    }
+
+    /// The bar went off screen. Whatever it was easing to, it is not there to ease, and it
+    /// comes back from its `@starting-style`.
+    public mutating func gone() {
+        bar = StyleMotion()
+        isLeaving = false
+    }
+
+    /// What the bar's own style is easing to: its `:leaving` style while it goes.
+    private func barStyle(of scene: Scene) -> Style {
+        isLeaving ? scene.leaving ?? scene.style : scene.style
+    }
+
     /// The motion an item that was not in the last scene starts with, if any.
     private mutating func arrive(_ item: SceneItem, layout: Transition?, at now: CFTimeInterval) -> Motion? {
         var motion = Motion()
@@ -183,8 +233,8 @@ public struct Animator {
     /// The scene as it should be on screen at `now`.
     public func presented(at now: CFTimeInterval) -> Scene? {
         guard var scene = target else { return nil }
-        guard !motions.isEmpty || !bar.tweens.isEmpty || !ghosts.isEmpty else { return scene }
-        scene.style = bar.sample(scene.style, at: now)
+        scene.style = bar.sample(barStyle(of: scene), at: now)
+        guard !motions.isEmpty || !ghosts.isEmpty else { return scene }
         scene.rows = scene.rows.map { row in
             var row = row
             row.items = row.items.map { present($0, at: now) }

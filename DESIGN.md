@@ -441,18 +441,39 @@ Over a native full screen app a bar is hidden, `bar { fullscreen "hide" }`, the 
 Which displays have one is SkyLight's to say too: each display's current Space, and whether a
 full screen app made it. That is asked when the active Space changes and on the quarter-second
 timer, since clicking into a full screen app on another display announces nothing. The menu bar
-is no guide: a notched display reports it the same either way, because the app sits below the
-notch and leaves the strip beside it black. A fixed bar holds still through the slide and fades
-as the full screen app lands; one riding its Space has already slid off with the desktop.
+is no guide: measured in October 2026, a full screen app leaves a display's visible frame as the
+desktop had it, on a notched display and a Studio Display alike, and says the same to the app
+itself. A fixed bar holds still through the slide and goes as the full screen app lands, as
+its stylesheet says (section 7); one riding its Space has already slid off with the desktop.
+A full screen Space has no desktop, so its photograph is black, which a bar shown over the app
+wears in the black strip beside a notch. A bar that is not shown there takes no photograph of
+it, and keeps the one it had: otherwise it goes dark mid-fade on its way out, and comes back
+dark.
 
-`fullscreen "show"` keeps it there, and while a full screen app has its display the bar wears
-`fullscreen`, a mode bario turns on itself. So the stylesheet can dim the bar there, and items
-can step aside:
+`fullscreen "if-room"` shows it only where the app leaves it room, so it never covers the app. On
+a notched display the app sits below the notch and leaves the menu bar's strip black, 39pt on a
+MacBook Pro. Elsewhere it has the whole screen, and the menu bar slides down over it on demand,
+unless "Automatically hide and show the menu bar" is Never or On Desktop Only, when the app sits
+below the menu bar there too. So the bar shows where there is a strip and it is no taller than
+the strip. The setting is `AppleMenuBarVisibleInFullscreen` in the global domain, which System
+Settings writes and announces nothing about, so it is read on the same timer. The strip is as
+tall as the menu bar's own window: the window server keeps one the menu bar's size at the top of
+each display, shown or not (MenuBarAgent's, on macOS 27), and the app's top edge is at its
+bottom. The inset is a poorer guide, reading 38pt or 39pt depending on when and who asks, and
+nothing while the menu bar hides on the desktop. Neither read is an API. Without the window the
+inset stands in, and without the key the menu bar is taken to hide, so what goes missing hides a
+bar rather than covering an app. Neither depends on the app either, so the bar is decided the
+moment SkyLight reports the full screen Space, as for `hide` and `show`, and nothing waits on
+the app's window to land.
+
+`fullscreen "show"` keeps it there whatever it covers. Shown either way, while a full screen app
+has its display the bar wears `fullscreen`, a mode bario turns on itself. So the stylesheet can
+dim the bar there, and items can step aside:
 
 ```kdl
-bar display="built-in" {
+bar {
   position "fixed"
-  fullscreen "show"                         // in the black strip beside the notch
+  fullscreen "if-room"                      // beside the notch, and off a display without one
   item "clock" module="clock" format="HH:mm"
   item "net" module="net" unless="fullscreen"
 }
@@ -591,6 +612,21 @@ item with neither snaps, as before. A group goes as one. A roll, as on a drum:
 Both are transitions, run by the frame loop like any other, so they retarget from what is on
 screen; a Core Animation `animation` could not turn round mid-way. Neither draws anything:
 the layers keep their pixels and move.
+
+The bar comes and goes the same way: on screen at start, over a full screen app or off it, with
+a menu bar that hides, or put away from the menu bar item. The window comes up on the first
+frame of its `@starting-style` and goes down after the last frame of its `:leaving` one, and
+while it goes it takes no pointer and opens no hole. Its `opacity` and `transform` are the whole
+bar's, every item in it and the hole with it. It wears `fullscreen` as it goes over a full
+screen app, so that one can go differently. The built-in look cross-fades it with the real menu
+bar underneath; a stylesheet that sets the bar's `transition` names `opacity` in it to keep that.
+
+```css
+bar { transition: opacity 400ms ease-in-out, transform 400ms ease-in, layout 160ms ease-out; }
+@starting-style { bar { opacity: 0; } }
+bar:leaving { opacity: 0; }
+bar.fullscreen:leaving { opacity: 0; transform: translateY(-12pt); }
+```
 
 An example that reads as a finished bar:
 
@@ -982,7 +1018,7 @@ those, before setting them aside.
 ### The layer tree
 
 ```
-bar            opacity = 1 − reveal; mask = the hole
+bar            transform; opacity = the bar's × (1 − reveal); mask = the hole
 ├─ backdrop    contents = the capture
 └─ item        frame, opacity, background colour, border, corner radii, shadow;
    │           clips what is inside it to its rounded rect
@@ -1039,7 +1075,8 @@ Where the lens is clear by `h` and the strength is `s`, the mask's alpha is
 what the `destinationOut` pass cut. Moving the hole sets six properties and draws nothing: a
 spike measured it at about 5µs, with the feather and half strength coming out right.
 Everything bario shows is under the mask, every plugin's layer included, so the hole still cuts
-through all of it. The click reveal is the bar's opacity.
+through all of it. The click reveal is the bar's opacity, times whatever opacity the bar's own
+style has as it comes and goes.
 
 ### Commit
 
@@ -1173,8 +1210,9 @@ placeholders drawn over the real menu bar.
   independently, so one slow to start holds up nothing but itself. This holds at startup and for a module a reload
   restarts, so no first render is an empty slot, and a restarted module's item keeps showing
   what it showed until its new render arrives.
-- A bar, whether it exists from startup or appears with a new display, is ordered in with a
-  short cross-fade after its first frame in which every item has rendered once (or failed,
+- A bar, whether it exists from startup or appears with a new display, is ordered in, and
+  eases from its `@starting-style` (a short cross-fade, in the built-in look), after its first
+  frame in which every item has rendered once (or failed,
   or run out of budget) and a backdrop exists. If anything is coloured from the wallpaper, it
   also waits for the wallpaper to have been measured, or found unmeasurable, so it does not
   come in wearing fallbacks and then ease to the wallpaper's colours.
@@ -1314,6 +1352,8 @@ Each phase ends with something you can run and look at.
   full screen app. There is a public way to tell a full screen Space, measured and not used: a
   plain `NSWindow` (not a panel) with `.canJoinAllSpaces` at normal level is left off them, so
   its `isOnActiveSpace` turns false the moment one arrives. Panels join them whatever they say.
+  Whether a full screen app leaves the menu bar room has no public API either: `if-room` reads
+  System Settings' key and the menu bar's window, and without them it hides.
 - **Now Playing and Spaces** have no public API. Media is `MediaRemote` (private); Spaces come
   from yabai or AeroSpace over `exec`. Neither is a built-in module for that reason.
 - **Screen Recording permission** must attach to a stable bundle identifier, hence the `.app`

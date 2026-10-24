@@ -261,6 +261,111 @@ struct FrameLoopTests {
         #expect(other?.map(\.style.opacity) == [1, 1])
     }
 
+    @Test("an if-room bar shows over a full screen app only where the app leaves it room")
+    func fullscreenIfRoom() async throws {
+        let h = try Harness(#"height 30; fullscreen "if-room"; item "a" module="echo-test""#, bars: 2)
+        await h.start()
+        for bar in h.loop.bars { h.loop.setBackdrop(FrameLoopTests.checker, for: bar.id) }
+        await h.settle()
+        let (left, right) = (h.surfaces[0], h.surfaces[1])
+
+        // The left display is notched, with a 39pt menu bar; the right has a 30pt one, which a
+        // full screen app covers unless the menu bar is set to stay over it.
+        var notched = h.loop.bars[0].display
+        notched.menuBarHeight = 39
+        notched.menuBarWindowHeight = 39
+        notched.notch = CGRect(x: 150, y: 861, width: 100, height: 39)
+        var plain = h.loop.bars[1].display
+        plain.menuBarHeight = 30
+        plain.menuBarWindowHeight = 30
+        h.loop.updateBar(1, display: notched, menuBarShown: true, fullscreen: true)
+        h.loop.updateBar(2, display: plain, menuBarShown: true, fullscreen: true)
+        await h.settle()
+        #expect(left.visible, "beside the notch, out of the app's way")
+        #expect(!right.visible, "over the app")
+
+        h.loop.menuBarStaysInFullscreen = true
+        await h.settle()
+        #expect(left.visible)
+        #expect(right.visible, "the app sits below the menu bar, and the bar fits there")
+
+        // A bar taller than the strip would hang over the app, so it stays off it.
+        h.loop.config = try ConfigLoader.parse(#"bar { height 38; fullscreen "if-room"; item "a" module="echo-test" }"#)
+        await h.settle()
+        #expect(left.visible)
+        #expect(!right.visible)
+
+        h.loop.updateBar(2, display: plain, menuBarShown: true, fullscreen: false)
+        await h.settle()
+        #expect(right.visible, "the desktop is the menu bar's, whatever the bar's height")
+    }
+
+    @Test("a bar comes on screen from its @starting-style, and goes to its :leaving style before it goes")
+    func barArrivesAndLeaves() async throws {
+        let h = try Harness(#"item "a" module="echo-test""#, css: """
+            bar { transition: opacity 200ms }
+            @starting-style { bar { opacity: 0 } }
+            bar:leaving { opacity: 0; transform: translateY(-12pt) }
+            """)
+        let bar = h.loop.bars[0]
+        func opacity() -> Double? { h.surface.presentations.last?.scene.style.opacity }
+        func step(_ frames: Int) {
+            for _ in 0..<frames where h.scheduler.pending != nil {
+                h.scheduler.advance(by: 1.0 / 60)
+                h.scheduler.run()
+            }
+        }
+        await h.start()
+        h.loop.setBackdrop(FrameLoopTests.checker, for: 1)
+        await h.settle()
+        #expect(h.surface.visible)
+        #expect(h.surface.orderedInWith.last??.scene.style.opacity == 0, "ordered in as it starts, not as it ends")
+        step(30)
+        #expect(opacity() == 1)
+        #expect(bar.compositor.root.opacity == 1)
+
+        // A full screen app takes the display: the bar eases out on screen, and takes no pointer.
+        h.loop.updateBar(1, display: bar.display, menuBarShown: true, fullscreen: true)
+        await h.settle()
+        step(6)
+        #expect(h.surface.visible, "still on screen while it goes")
+        #expect(!bar.isShowing)
+        let going = try #require(opacity())
+        #expect(going > 0 && going < 1)
+        #expect(abs(Double(bar.compositor.root.opacity) - going) < 0.01, "the whole bar fades, as one")
+        #expect(bar.compositor.root.transform.m42 > 0, "and rises: translateY is down, the layer's y is up")
+
+        // Back before it has gone: it turns round from where it had got to, in the next frame,
+        // which is already coming.
+        h.loop.updateBar(1, display: bar.display, menuBarShown: true, fullscreen: false)
+        step(1)
+        #expect(bar.isShowing)
+        let back = try #require(opacity())
+        #expect(back > 0 && back < 1, "from \(going), not from the start")
+        step(30)
+        #expect(opacity() == 1)
+
+        // And off for good: the window goes once the bar has got there, not before.
+        h.loop.updateBar(1, display: bar.display, menuBarShown: true, fullscreen: true)
+        await h.settle()
+        step(30)
+        #expect(!h.surface.visible)
+        #expect(opacity() == 0, "the last frame on screen was the last of the fade")
+    }
+
+    @Test("a bar with no way in or out of its own comes and goes at once")
+    func barSnaps() async throws {
+        let h = try Harness(#"item "a" module="echo-test""#)
+        await h.start()
+        h.loop.setBackdrop(FrameLoopTests.checker, for: 1)
+        await h.settle()
+        #expect(h.surface.visible)
+        h.loop.updateBar(1, display: h.loop.bars[0].display, menuBarShown: true, fullscreen: true)
+        await h.settle()
+        #expect(!h.surface.visible)
+        #expect(h.scheduler.pending == nil, "nothing left to ease")
+    }
+
     @Test("a pointer nowhere near a bar costs nothing; near one, only that bar repaints")
     func pointer() async throws {
         let h = try Harness(#"item "a" module="echo-test""#, bars: 2)

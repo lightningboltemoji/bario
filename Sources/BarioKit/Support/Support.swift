@@ -17,16 +17,18 @@ extension NSScreen {
     }
 
     /// How much of the top of this screen the menu bar is currently eating, in points.
-    /// Zero-ish when the menu bar is auto-hidden or a full screen app owns the space.
+    /// Zero-ish while the menu bar hides on the desktop. A full screen app does not change it:
+    /// over one, it is whatever the desktop's is, measured on both kinds of display.
     public var menuBarInset: CGFloat { frame.maxY - visibleFrame.maxY }
 
-    /// The inset, or a sane guess if the bar is hidden right now.
-    public var menuBarHeight: CGFloat {
+    /// The inset, or while the menu bar is hidden, its height as its window has it, and a sane
+    /// guess where there is no such window.
+    @MainActor public var menuBarHeight: CGFloat {
         let inset = menuBarInset
-        return inset > 1 ? inset : max(NSStatusBar.system.thickness, 24)
+        return inset > 1 ? inset : MenuBar.height(on: self) ?? max(NSStatusBar.system.thickness, 24)
     }
 
-    public var menuBarFrame: CGRect {
+    @MainActor public var menuBarFrame: CGRect {
         let h = menuBarHeight
         return CGRect(x: frame.minX, y: frame.maxY - h, width: frame.width, height: h)
     }
@@ -34,13 +36,59 @@ extension NSScreen {
     /// The notch, in screen coordinates, or nil on a display without one. `NSScreen` says
     /// exactly where: the two auxiliary areas are the usable rects and the gap between them
     /// is the obstacle. DESIGN.md §6.
-    public var notchFrame: CGRect? {
+    @MainActor public var notchFrame: CGRect? {
         guard let left = auxiliaryTopLeftArea, let right = auxiliaryTopRightArea else { return nil }
         let height = safeAreaInsets.top > 0 ? safeAreaInsets.top : menuBarHeight
         let x = left.maxX
         let width = right.minX - left.maxX
         guard width > 1 else { return nil }
         return CGRect(x: x, y: frame.maxY - height, width: width, height: height)
+    }
+}
+
+/// The system menu bar, where `NSScreen` says nothing. Neither read is an API, and either one
+/// missing errs towards a bar that hides rather than one that covers something. DESIGN.md §6.
+@MainActor
+public enum MenuBar {
+    /// Whether macOS keeps the menu bar over full screen apps, so they leave its strip clear on
+    /// every display and not only beside a notch: "Automatically hide and show the menu bar" set
+    /// to Never or On Desktop Only. System Settings writes this key and announces nothing, so
+    /// it is read on the timer that looks for full screen Spaces. Missing, it is the default.
+    public static var staysInFullscreen: Bool {
+        (CFPreferencesCopyAppValue("AppleMenuBarVisibleInFullscreen" as CFString,
+                                   kCFPreferencesAnyApplication) as? NSNumber)?.boolValue ?? false
+    }
+
+    /// What `height(on:)` found for each display, the frame the display had then, and when.
+    private static var heights: [CGDirectDisplayID: (frame: CGRect, height: CGFloat?, at: CFTimeInterval)] = [:]
+
+    /// The menu bar's height as its own window has it, shown or not. The window server keeps a
+    /// window the menu bar's size at the top of each display whether it is showing or hidden
+    /// (MenuBarAgent's, on macOS 27), so a menu bar that only shows over full screen apps has
+    /// its height before one comes. Steadier than the inset, too: on a notched display the
+    /// inset reads 38pt or 39pt depending on when and who asks, while the window, and the top
+    /// of a full screen app, are at 39. A listing costs about 2ms, too much for every tick, so
+    /// a height is kept until the display changes size, and a window not found yet (bario
+    /// started at login before it was made, say) is looked for again every few seconds.
+    static func height(on screen: NSScreen) -> CGFloat? {
+        guard let id = screen.displayID else { return nil }
+        let now = CACurrentMediaTime()
+        if let known = heights[id], known.frame == screen.frame,
+           known.height != nil || now - known.at < 5 { return known.height }
+        // The window server's list is y-down from the top of the primary display.
+        let top = (NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY) - screen.frame.maxY
+        let level = Int(CGWindowLevelForKey(.mainMenuWindow))
+        let list = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
+        let height = list.lazy.compactMap { entry -> CGFloat? in
+            guard (entry[kCGWindowLayer as String] as? Int) == level,
+                  let bounds = entry[kCGWindowBounds as String] as? [String: CGFloat],
+                  bounds["X"] == screen.frame.minX, bounds["Y"] == top,
+                  bounds["Width"] == screen.frame.width,
+                  let height = bounds["Height"], height > 1 else { return nil }
+            return height
+        }.first
+        heights[id] = (screen.frame, height, now)
+        return height
     }
 }
 
@@ -92,25 +140,29 @@ public struct DisplayInfo: Sendable, Hashable {
     /// The system's menu bar on this display, which varies with the display (30pt on most on
     /// macOS 27, 38–39pt on a notched MacBook) and is not the bar's height. DESIGN.md §6.
     public var menuBarHeight: CGFloat
+    /// The menu bar's own window, shown or not: what a full screen app leaves clear when it
+    /// leaves the menu bar room. nil where the window server has no such window.
+    public var menuBarWindowHeight: CGFloat?
     public var isBuiltIn: Bool
     /// In screen coordinates; nil on a display without a notch.
     public var notch: CGRect?
 
     public init(displayID: CGDirectDisplayID, name: String, frame: CGRect, scale: CGFloat,
-                stripHeight: CGFloat, menuBarHeight: CGFloat? = nil, isBuiltIn: Bool = false,
-                notch: CGRect? = nil) {
+                stripHeight: CGFloat, menuBarHeight: CGFloat? = nil,
+                menuBarWindowHeight: CGFloat? = nil, isBuiltIn: Bool = false, notch: CGRect? = nil) {
         self.displayID = displayID
         self.name = name
         self.frame = frame
         self.scale = scale
         self.stripHeight = stripHeight
         self.menuBarHeight = menuBarHeight ?? stripHeight
+        self.menuBarWindowHeight = menuBarWindowHeight
         self.isBuiltIn = isBuiltIn
         self.notch = notch
     }
 
     /// The display as the system has it, with a strip exactly over its menu bar.
-    public init?(screen: NSScreen) {
+    @MainActor public init?(screen: NSScreen) {
         guard let id = screen.displayID else { return nil }
         displayID = id
         name = screen.localizedName
@@ -118,6 +170,7 @@ public struct DisplayInfo: Sendable, Hashable {
         scale = screen.backingScaleFactor
         menuBarHeight = screen.menuBarHeight
         stripHeight = menuBarHeight
+        menuBarWindowHeight = MenuBar.height(on: screen)
         isBuiltIn = CGDisplayIsBuiltin(id) != 0
         notch = screen.notchFrame
     }

@@ -43,6 +43,8 @@ public struct Styler: Sendable {
             }
         }
         return StyledBar(config: bar, style: barStyle,
+                         starting: cascade.startingStyle(for: [barNode]),
+                         leaving: cascade.leavingStyle(for: [barNode]),
                          items: siblings(visible, parentPath: [barNode], parentStyle: barStyle,
                                          shown: shown, interaction: interaction),
                          notchMarker: marker, styler: self)
@@ -189,6 +191,10 @@ public struct Styler: Sendable {
 public struct StyledBar: Sendable {
     public var config: BarConfig
     public var style: Style
+    /// What the bar transitions from when it comes on screen, and to when it goes off it, if
+    /// the stylesheet says. DESIGN.md §7.
+    public var starting: Style?
+    public var leaving: Style?
     /// In config order, without the notch marker.
     public var items: [StyledItem]
     /// Where an explicit `notch` marker splits `items`, and on which displays.

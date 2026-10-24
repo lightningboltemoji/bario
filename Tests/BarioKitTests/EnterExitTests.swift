@@ -41,6 +41,22 @@ struct EnterExitStyleTests {
         #expect(cascade.leavingStyle(for: [StyleNode(type: "bar"), StyleNode(type: "item", id: "app")]) == nil)
     }
 
+    @Test("the bar has a way in and out too, and the built-in look cross-fades it")
+    func bar() throws {
+        let cascade = Cascade(stylesheet: try Stylesheet.parse(defaultStyleCSS))
+        let bar = [StyleNode(type: "bar")]
+        #expect(cascade.style(for: bar).style.opacity == 1)
+        #expect(cascade.startingStyle(for: bar)?.opacity == 0)
+        #expect(cascade.leavingStyle(for: bar)?.opacity == 0)
+        #expect(cascade.style(for: bar).style.transition(for: "opacity")?.duration == 0.15)
+        #expect(cascade.startingStyle(for: item) == nil, "an item does not arrive with the bar")
+
+        // A full screen app's can be told apart: the bar wears `fullscreen` as it goes.
+        let own = Cascade(stylesheet: try Stylesheet.parse("bar:leaving { opacity: 0.5 } bar.fullscreen:leaving { opacity: 0 }"))
+        #expect(own.leavingStyle(for: bar)?.opacity == 0.5)
+        #expect(own.leavingStyle(for: [StyleNode(type: "bar", classes: ["fullscreen"])])?.opacity == 0)
+    }
+
     @Test("what is wrong with them is said")
     func errors() {
         #expect(message("@starting-style { @media (prefers-color-scheme: dark) { item { opacity: 0 } } }")

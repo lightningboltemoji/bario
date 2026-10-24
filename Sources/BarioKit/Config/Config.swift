@@ -70,6 +70,16 @@ public struct BarConfig: Sendable, Equatable {
     public func height(on display: DisplayInfo) -> Double {
         height ?? Double(display.menuBarHeight)
     }
+
+    /// Whether the bar fits in what a full screen app leaves clear at the top of `display`: the
+    /// menu bar's strip on a notched display, where the app sits below the notch, or on any
+    /// display while macOS keeps the menu bar over full screen apps (`menuBarStays`). Elsewhere
+    /// the app has the whole screen. The strip is as tall as the menu bar's own window, which
+    /// is where the app's top edge was measured. DESIGN.md §6.
+    public func fitsAboveFullscreenApp(on display: DisplayInfo, menuBarStays: Bool) -> Bool {
+        guard display.notch != nil || menuBarStays else { return false }
+        return height(on: display) <= Double(display.menuBarWindowHeight ?? display.menuBarHeight)
+    }
 }
 
 /// The probe's knobs, moved into config. DESIGN.md §8.
@@ -119,6 +129,10 @@ public enum BarPlacement: String, Sendable, Equatable, CaseIterable {
 /// Whether a bar shows over a native full screen app. DESIGN.md §6.
 public enum FullscreenPolicy: String, Sendable, Equatable, CaseIterable {
     case hide
+    /// Shown only where the app leaves the bar room, so it never covers the app: beside the
+    /// notch, or below a menu bar macOS keeps over full screen apps. See
+    /// `BarConfig.fitsAboveFullscreenApp`.
+    case ifRoom = "if-room"
     /// Shown, and wearing `fullscreen` as a class, so the stylesheet can dim it there.
     case show
 }

@@ -17,8 +17,14 @@ bar {
   color: var(--fg);
   padding: 0 8pt;
   gap: 6pt;
-  transition: layout 160ms ease-out;
+  transition: layout 160ms ease-out, opacity 150ms;
 }
+
+/* The bar coming on screen and going off it: over the real menu bar at start, over and off a
+   full screen app, with a menu bar that hides. A short cross-fade with the real menu bar
+   underneath, rather than a pop. bar.fullscreen picks out the full screen app's. */
+@starting-style { bar { opacity: 0; } }
+bar:leaving { opacity: 0; }
 
 item {
   padding: 2pt 9pt;

@@ -171,8 +171,44 @@ struct ConfigTests {
         let set = try ConfigLoader.parse(#"bar { position "fixed"; fullscreen "show" }"#).bars[0]
         #expect(set.placement == .fixed)
         #expect(set.fullscreen == .show)
+        #expect(try ConfigLoader.parse(#"bar { fullscreen "if-room" }"#).bars[0].fullscreen == .ifRoom)
         #expect(message(#"bar { position "sticky" }"#).contains(#"position is one of "space", "fixed""#))
-        #expect(message(#"bar { fullscreen "dim" }"#).contains(#"fullscreen is one of "hide", "show""#))
+        #expect(message(#"bar { fullscreen "dim" }"#).contains(#"fullscreen is one of "hide", "if-room", "show""#))
+    }
+
+    @Test("a bar fits above a full screen app beside a notch, or under a menu bar that stays, if it is short enough")
+    func roomAboveFullscreenApp() throws {
+        // As measured: the MacBook's inset reads 38 while its menu bar's window, and the top of
+        // a full screen app, are at 39; the Studio Display's menu bar is 30 either way.
+        let notched = DisplayInfo(displayID: 1, name: "Built-in", frame: CGRect(x: 0, y: 0, width: 1800, height: 1169),
+                                  scale: 2, stripHeight: 38, menuBarWindowHeight: 39,
+                                  notch: CGRect(x: 790, y: 1131, width: 220, height: 38))
+        let plain = DisplayInfo(displayID: 2, name: "Studio", frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
+                                scale: 2, stripHeight: 30, menuBarWindowHeight: 30)
+        func fits(_ height: Double?, on display: DisplayInfo, stays: Bool = false) -> Bool {
+            var bar = BarConfig()
+            bar.height = height
+            return bar.fitsAboveFullscreenApp(on: display, menuBarStays: stays)
+        }
+
+        // Beside a notch the app always leaves the menu bar's strip, all 39pt of it.
+        #expect(fits(38, on: notched))
+        #expect(fits(39, on: notched))
+        #expect(!fits(40, on: notched))
+        #expect(fits(nil, on: notched), "a bar as tall as the menu bar")
+        #expect(fits(38, on: notched, stays: true))
+
+        // Elsewhere the app has the whole screen, unless the menu bar stays over it.
+        #expect(!fits(24, on: plain))
+        #expect(!fits(nil, on: plain))
+        #expect(fits(30, on: plain, stays: true))
+        #expect(!fits(38, on: plain, stays: true))
+
+        // With no menu bar window to go by, the inset is the strip.
+        var unknown = notched
+        unknown.menuBarWindowHeight = nil
+        #expect(fits(38, on: unknown))
+        #expect(!fits(39, on: unknown))
     }
 
     @Test("config errors say what and where")

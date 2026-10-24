@@ -45,7 +45,7 @@ public final class Bar {
     /// the bar off screen with it.
     public internal(set) var menuBarShown: Bool
     /// Whether a native full screen app has this display. It decides whether the bar is on
-    /// screen, not `menuBarShown`, which a notched display reports the same either way.
+    /// screen, not `menuBarShown`, which every display reports the same either way.
     public internal(set) var fullscreen = false
     /// The config's bar for this display, if any matches.
     public internal(set) var config: BarConfig?
@@ -68,6 +68,9 @@ public final class Bar {
     /// Set once the bar has had a frame worth showing, or waited long enough.
     public internal(set) var isReady = false
     public internal(set) var isVisible = false
+    /// On screen and staying there. A bar on its way off, easing to its `:leaving` style, takes
+    /// no pointer and opens no hole, as a leaving item takes no clicks.
+    public var isShowing: Bool { isVisible && !animator.isLeaving }
     /// Option is held with the pointer over this bar: it takes clicks, its items hover, and
     /// its hole is closed. The rest of the time it ignores the pointer, but for the hole.
     public internal(set) var isInteractive = false
@@ -83,9 +86,17 @@ public final class Bar {
     }
 
     /// Whether the bar belongs on screen, as far as the screen goes: over the menu bar while
-    /// there is one, and over a full screen app only if the config asks.
-    var placeOnScreen: Bool {
-        fullscreen ? config?.fullscreen == .show : menuBarShown
+    /// there is one, and over a full screen app only if the config asks, which for `if-room`
+    /// is only where the app leaves it room. `menuBarStays` is whether macOS keeps the menu bar
+    /// over full screen apps.
+    func placeOnScreen(menuBarStays: Bool) -> Bool {
+        guard fullscreen else { return menuBarShown }
+        guard let config else { return false }
+        switch config.fullscreen {
+        case .hide: return false
+        case .ifRoom: return config.fitsAboveFullscreenApp(on: display, menuBarStays: menuBarStays)
+        case .show: return true
+        }
     }
 
     /// The modes the bar wears: every bar's, and `fullscreen` while it is over a full screen

@@ -11,6 +11,10 @@ public struct Scene: Sendable {
     /// the rest of the menu bar is covered by the desktop and nothing else. DESIGN.md §6.
     public var bar: CGRect
     public var style: Style
+    /// What the bar transitions from when it comes on screen (`@starting-style`), and to when
+    /// it goes off it (`:leaving`); nil when the stylesheet says nothing, and it snaps.
+    public var starting: Style?
+    public var leaving: Style?
     public var rows: [SceneRow]
     /// Dropped for lack of room. Still rendered into the store, so a catch-all item can list
     /// them later.

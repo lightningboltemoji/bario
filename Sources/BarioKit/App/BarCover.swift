@@ -62,35 +62,22 @@ public final class BarCover: BarSurface {
         window.ignoresMouseEvents = !takes
     }
 
+    /// The window only comes and goes. How the bar does is its layers', which the frame loop
+    /// eases from its `@starting-style` once the window is up, and to its `:leaving` style
+    /// before it goes down. DESIGN.md §7.
     public func setVisible(_ visible: Bool) {
         guard visible != shown else { return }
         shown = visible
         guard visible else {
-            // A fixed bar held still while its Space slid away, so it is on screen when it
-            // goes, and fades as it came. One that rode the Space has just slid off with it.
-            guard fixed else {
-                window.orderOut(nil)
-                return
-            }
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.15
-                window.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self, !self.shown else { return }
-                    self.window.orderOut(nil)
-                }
-            })
+            window.orderOut(nil)
             return
         }
-        // A short cross-fade with the real menu bar underneath, rather than a pop.
-        window.alphaValue = 0
+        // The layers were just committed at the bar's first frame on screen, but a commit made
+        // inside the run loop's own transaction lands at the end of the turn, and the window
+        // would show the last frame it had until then.
+        CATransaction.flush()
         window.orderFrontRegardless()
         if fixed { SkyLight.fix(window) }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            window.animator().alphaValue = 1
-        }
     }
 
     /// Follow the strip: where the screen now is, and how far down from its top the menu bar
