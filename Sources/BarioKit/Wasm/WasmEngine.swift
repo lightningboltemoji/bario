@@ -1,7 +1,7 @@
 import Foundation
 
-/// The seam between bario and whichever WASM runtime it uses. WasmKit today; wasmtime's C API
-/// if profiling or interruption ever demands it. DESIGN.md §5.
+/// The seam between bario and whichever WASM runtime it uses: wasmtime's Pulley interpreter,
+/// `WasmtimeEngine`. DESIGN.md §5.
 public protocol WasmEngine: Sendable {
     func instantiate(wasm: [UInt8], imports: [WasmHostFunction], memoryLimitBytes: Int)
         throws -> any WasmInstance
@@ -33,6 +33,10 @@ public struct WasmHostFunction: Sendable {
 }
 
 public protocol WasmInstance: AnyObject {
+    /// Every call from now on, together, must end within `seconds`: past it, the guest is
+    /// interrupted where it stands and the call throws. Nothing calls into a guest without
+    /// setting one first; `callJSON` does it for you.
+    func setDeadline(after seconds: Double)
     func hasExport(_ name: String) -> Bool
     @discardableResult
     func call(_ name: String, _ arguments: [Int64]) throws -> [Int64]
@@ -88,8 +92,10 @@ extension WasmInstance {
         return (ptr, Int32(data.count))
     }
 
-    /// Call an export with a JSON payload and read a JSON answer back.
-    public func callJSON(_ name: String, _ payload: JSONValue) throws -> JSONValue? {
+    /// Call an export with a JSON payload and read a JSON answer back, all of it — the allocs
+    /// and deallocs too — within `budget` seconds.
+    public func callJSON(_ name: String, _ payload: JSONValue, budget: Double) throws -> JSONValue? {
+        setDeadline(after: budget)
         let (ptr, len) = try send(payload.encoded())
         let results = try call(name, [Int64(ptr), Int64(len)])
         if hasExport("dealloc"), ptr != 0 {

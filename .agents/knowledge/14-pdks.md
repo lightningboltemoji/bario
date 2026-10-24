@@ -26,7 +26,7 @@ Everything above that is JSON in and JSON out, which every language already has.
 
 ## Running a module with no toolchain
 
-`WasmKitEngine` sniffs the first four bytes: a `.wasm` binary starts with `\0asm`, and
+`WasmtimeEngine` sniffs the first four bytes: a `.wasm` binary starts with `\0asm`, and
 anything else is assembled as WebAssembly text at load. So `path="…/counter.wat"` works, and
 `examples/counter.wat` is a real module that runs on a machine with nothing installed. That
 is also how this increment is tested: the Rust and C PDKs cannot be compiled without their

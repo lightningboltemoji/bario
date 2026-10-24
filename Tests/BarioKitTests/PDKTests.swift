@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import WAT
 @testable import BarioKit
 
 /// The PDKs cannot be compiled here — Rust and the wasi-sdk are not installed — so the ABI
@@ -125,15 +124,20 @@ struct CounterExampleTests {
     @Test("a binary module is passed through, text is assembled")
     func sniffing() throws {
         let binary = try wat2wasm("(module)")
-        #expect(try WasmKitEngine.binary(binary) == binary)
+        #expect(try WasmtimeEngine.binary(binary) == binary)
 
         let text = Array("(module)".utf8)
-        let assembled = try WasmKitEngine.binary(text)
+        let assembled = try WasmtimeEngine.binary(text)
         #expect(Array(assembled.prefix(4)) == [0x00, 0x61, 0x73, 0x6D])
 
         #expect(throws: WasmError.self) {
-            _ = try WasmKitEngine.binary(Array("(not wasm at all".utf8))
+            _ = try WasmtimeEngine.binary(Array("(not wasm at all".utf8))
         }
+        // Where, as line:column, on one line.
+        var message = ""
+        do { _ = try WasmtimeEngine.binary(Array("(module\n  (bogus))".utf8)) } catch { message = "\(error)" }
+        #expect(message.contains("2:4:"))
+        #expect(!message.contains("\n"))
     }
 
     @Test("the number formatting in the WAT PDK is right for more than one digit")

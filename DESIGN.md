@@ -277,16 +277,19 @@ the point.
 
 ### Runtime
 
-Behind a `WasmEngine` protocol with two candidate implementations:
+Behind a `WasmEngine` protocol, which had two candidate implementations:
 
 - **WasmKit** (swiftwasm/WasmKit): pure Swift, a SwiftPM dependency, interpreter. Zero
   build friction. Start here; widget code is tiny and an interpreter is plenty.
-- **wasmtime** via its C API: JIT, fuel metering and epoch interruption for hard time limits.
-  Switch if profiling says so, or if WasmKit cannot give us a reliable way to abort a
-  runaway module.
+- **wasmtime**: fuel metering and epoch interruption for hard time limits. Switch if
+  profiling says so, or if WasmKit cannot give us a reliable way to abort a runaway module.
+
+WasmKit could not, so bario runs on **wasmtime's Pulley interpreter**: an interpreter still,
+so no JIT entitlement under the hardened runtime, behind a narrow C ABI of bario's own
+(`Engine/`, .agents/knowledge/23-wasmtime.md).
 
 Each module instance runs on its own actor with a per-call budget (50ms for `render`, more
-for `poll`). Over budget: the call is abandoned, the item shows its last content plus a
+for `poll`). Over budget: the guest is interrupted, the item shows its last content plus a
 `.stale` class, and the module is restarted after backoff. A module cannot take the bar down.
 A render that finishes late still lands, unless a newer one has.
 
@@ -1369,9 +1372,11 @@ Each phase ends with something you can run and look at.
   from yabai or AeroSpace over `exec`. Neither is a built-in module for that reason.
 - **Screen Recording permission** must attach to a stable bundle identifier, hence the `.app`
   in phase 2. The probe's terminal-attached permission is a dev convenience only.
-- **Aborting a runaway WASM call** depends on the runtime. If WasmKit cannot interrupt, the
-  budget is enforced by tearing down the instance from another thread, which is why every
-  instance gets its own actor and no shared state.
+- **Aborting a runaway WASM call** depends on the runtime. WasmKit could not interrupt one,
+  so bario moved to wasmtime, whose epoch interruption stops a guest at its deadline. What no
+  runtime interrupts is a host import the guest is blocked in, so the wait is still abandoned
+  at the budget and the instance torn down — which is why every instance gets its own actor
+  and no shared state.
 - **120Hz displays**: the display link runs at native rate, and animations are sampled
   against the clock rather than stepped per tick (section 10), so they are frame-rate
   independent by construction.

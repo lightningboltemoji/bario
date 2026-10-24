@@ -35,12 +35,30 @@ SHELL   := /bin/bash
 LD_NOISE = ld: warning: search path '$(DEVDIR)/Developer/.*' not found
 QUIET    = 2> >(grep -vE "$(LD_NOISE)" >&2)
 
-.PHONY: build release test clean app icon zip dist install uninstall print-version
-build:
+.PHONY: build release test clean app icon zip dist install uninstall print-version engine
+build: engine
 	swift build $(QUIET)
 
-release:
+release: engine
 	swift build -c release $(QUIET)
+
+# --- The WASM engine ---------------------------------------------------------------------------
+# wasmtime's Pulley interpreter behind bariowasm's C ABI (Engine/). SwiftPM cannot run cargo, so the
+# static library is built here and wrapped as the XCFramework Package.swift names as a binary target.
+# Cargo is incremental: an unchanged engine costs a moment, a cold one about a minute. A plain
+# `swift build` works once this has run.
+ENGINE     := Engine
+ENGINE_LIB := $(ENGINE)/target/bario/libbariowasm.a
+ENGINE_XCF := Frameworks/BarioWasm.xcframework
+
+engine: $(ENGINE_XCF)
+
+$(ENGINE_LIB): $(wildcard $(ENGINE)/src/*.rs) $(ENGINE)/Cargo.toml
+	cargo build --profile bario --manifest-path $(ENGINE)/Cargo.toml
+
+$(ENGINE_XCF): $(ENGINE_LIB) $(wildcard $(ENGINE)/include/*)
+	rm -rf $@
+	xcodebuild -create-xcframework -library $(ENGINE_LIB) -headers $(ENGINE)/include -output $@ >/dev/null
 
 # Two passes. Most of the suite is pure — layout, style, pixels, a frame loop on a clock the test
 # moves — and runs in parallel. The suites in REAL_TIME wait on something real instead: the kernel's
@@ -49,14 +67,15 @@ release:
 # hosted runner, several times slower than a laptop, a wait that takes a millisecond here can take
 # seconds. So they run afterwards, one at a time. A test that waits on the real world belongs in a
 # suite listed here, and waits the way Tests/BarioKitTests/Waiting.swift says.
-REAL_TIME := \.(FileWatcherTests|ExecTests|SocketServerTests|SocketClientTests|SurfaceHandOffTests|ModuleHostTests|WasmModuleTests|LoginShellTests)/
+REAL_TIME := \.(FileWatcherTests|ExecTests|SocketServerTests|SocketClientTests|SurfaceHandOffTests|ModuleHostTests|WasmModuleTests|WasmDeadlineTests|LoginShellTests)/
 
-test:
+test: engine
 	swift test $(TEST_FLAGS) --skip '$(REAL_TIME)' $(QUIET)
 	swift test $(TEST_FLAGS) --skip-build --no-parallel --filter '$(REAL_TIME)' $(QUIET)
 
 clean:
 	swift package clean
+	rm -rf $(ENGINE_XCF)
 	rm -rf $(DIST)
 
 # --- Version -------------------------------------------------------------------------------------

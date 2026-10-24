@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import WAT
 @testable import BarioKit
 
 /// Guests are written in WebAssembly text and assembled in-process, so these tests exercise
@@ -74,15 +73,15 @@ struct WasmABITests {
     }
 }
 
-@Suite("WasmKit engine")
+@Suite("wasmtime engine")
 struct WasmEngineTests {
-    let engine = WasmKitEngine()
+    let engine = WasmtimeEngine.shared
 
     @Test("a guest renders, and the host reads its answer")
     func render() throws {
         let instance = try engine.instantiate(wasm: try Guest.renderer(text: "hello"),
                                               imports: [], memoryLimitBytes: 16 << 20)
-        let value = try instance.callJSON("render", .object(["pct": .number(43)]))
+        let value = try instance.callJSON("render", .object(["pct": .number(43)]), budget: 1)
         #expect(value?["content"]?["text"]?.stringValue == "hello")
     }
 
@@ -95,7 +94,7 @@ struct WasmEngineTests {
         """)
         let instance = try engine.instantiate(wasm: wasm, imports: [], memoryLimitBytes: 16 << 20)
         let sent = JSONValue.object(["pct": .number(43), "name": .string("battery")])
-        let back = try instance.callJSON("render", sent)
+        let back = try instance.callJSON("render", sent, budget: 1)
         #expect(back?["pct"]?.intValue == 43)
         #expect(back?["name"]?.stringValue == "battery")
     }
@@ -117,7 +116,7 @@ struct WasmEngineTests {
             (i64.const 0))
         """)
         let instance = try engine.instantiate(wasm: wasm, imports: [logger], memoryLimitBytes: 16 << 20)
-        _ = try instance.callJSON("render", .object([:]))
+        _ = try instance.callJSON("render", .object([:]), budget: 1)
         #expect(seen.values == ["from the guest"])
     }
 
@@ -146,7 +145,7 @@ struct WasmEngineTests {
         """)
         let instance = try engine.instantiate(wasm: wasm, imports: [get, read],
                                               memoryLimitBytes: 16 << 20)
-        let value = try instance.callJSON("render", .object([:]))
+        let value = try instance.callJSON("render", .object([:]), budget: 1)
         #expect(value?["pct"]?.intValue == 7)
     }
 
@@ -158,8 +157,28 @@ struct WasmEngineTests {
         """)
         let instance = try engine.instantiate(wasm: wasm, imports: [], memoryLimitBytes: 16 << 20)
         var message = ""
-        do { _ = try instance.callJSON("render", .object([:])) } catch { message = "\(error)" }
+        do { _ = try instance.callJSON("render", .object([:]), budget: 1) } catch { message = "\(error)" }
         #expect(message.contains("`render` trapped"))
+        // One line, for the log: the cause, not wasmtime's backtrace.
+        #expect(message.contains("unreachable"))
+        #expect(!message.contains("\n"))
+    }
+
+    @Test("a host import that throws traps the guest, with its reason")
+    func hostFailure() throws {
+        let failing = WasmHostFunction("now", [], [.i64]) { _, _ in throw WasmError("no clock here") }
+        let wasm = try Guest.build(imports: """
+          (import "bario" "now" (func $now (result i64)))
+        """, """
+          (func (export "render") (param i32 i32) (result i64)
+            (drop (call $now))
+            (i64.const 0))
+        """)
+        let instance = try engine.instantiate(wasm: wasm, imports: [failing], memoryLimitBytes: 16 << 20)
+        var message = ""
+        do { _ = try instance.callJSON("render", .object([:]), budget: 1) } catch { message = "\(error)" }
+        #expect(message.contains("`render` trapped"))
+        #expect(message.contains("no clock here"))
     }
 
     @Test("a read past the end of memory is refused")
@@ -179,7 +198,7 @@ struct WasmEngineTests {
         """)
         // One page is already allocated; cap at two.
         let instance = try engine.instantiate(wasm: wasm, imports: [], memoryLimitBytes: 2 * 65_536)
-        _ = try? instance.callJSON("render", .object([:]))
+        _ = try? instance.callJSON("render", .object([:]), budget: 1)
         // memory.grow returns -1 rather than trapping, so the check is that memory stayed small.
         #expect(try instance.read(ptr: 0, len: 4).count == 4)
         #expect(throws: WasmError.self) { _ = try instance.read(ptr: 3 * 65_536, len: 4) }
@@ -197,6 +216,42 @@ struct WasmEngineTests {
         private var stored: [String] = []
         func record(_ value: String) { lock.lock(); stored.append(value); lock.unlock() }
         var values: [String] { lock.lock(); defer { lock.unlock() }; return stored }
+    }
+}
+
+/// Real time: each waits out a deadline, so this is in the Makefile's `REAL_TIME` and runs in
+/// the serial pass.
+@Suite("WASM deadlines")
+struct WasmDeadlineTests {
+    let engine = WasmtimeEngine.shared
+
+    @Test("a call past its deadline is interrupted, not abandoned")
+    func interrupted() throws {
+        let wasm = try Guest.build("""
+          (func (export "render") (param i32 i32) (result i64)
+            (loop $spin (br $spin))
+            (i64.const 0))
+        """)
+        let instance = try engine.instantiate(wasm: wasm, imports: [], memoryLimitBytes: 16 << 20)
+        let started = ContinuousClock.now
+        var message = ""
+        // Synchronous, on this thread: if nothing stopped the guest, this would never return.
+        do { _ = try instance.callJSON("render", .object([:]), budget: 0.05) } catch { message = "\(error)" }
+        #expect(message.contains("past its budget"))
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test("a start function that never ends is interrupted too")
+    func start() throws {
+        let wasm = try Guest.build("""
+          (func $forever (loop $spin (br $spin)))
+          (start $forever)
+          (func (export "render") (param i32 i32) (result i64) (i64.const 0))
+        """)
+        var message = ""
+        do { _ = try engine.instantiate(wasm: wasm, imports: [], memoryLimitBytes: 16 << 20) }
+        catch { message = "\(error)" }
+        #expect(message.contains("past its deadline"))
     }
 }
 

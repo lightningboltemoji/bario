@@ -54,10 +54,11 @@ because the returned ops go through the same painter as a `canvas` node, `curren
 ## Synchronous, and honest about budgets
 
 Renderers are called from layout and commit, which are synchronous, so a renderer is a locked instance
-rather than an actor. The budget is therefore measured rather than enforced: each call is
-timed, and a renderer that overruns three times is dropped and every node it drew wears
-`.stale`. WasmKit cannot interrupt a call (§13), so this is the same trade the module budget
-makes, stated plainly.
+rather than an actor. Each draw runs against a deadline the engine enforces, so a renderer in
+an infinite loop is interrupted rather than hanging the main thread; each draw is also timed,
+which catches one that ran long inside a host import the engine cannot interrupt
+([23-wasmtime.md](23-wasmtime.md#the-limit-that-remains)). Either counts as an overrun, and a
+renderer that overruns three times is dropped and every node it drew wears `.stale`.
 
 Renderers get the same twelve host imports modules get, with their own subtree of the store
 under `renderer.<type>` — so a module compiled with a PDK links whichever tier it is loaded

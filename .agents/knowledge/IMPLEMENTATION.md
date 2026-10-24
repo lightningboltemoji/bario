@@ -29,7 +29,7 @@ this file; the plan lives in [00-roadmap.md](00-roadmap.md); the intent lives in
 | `Frame/` | the rendering pipeline of §10: `FrameLoop` (invalidation and the frame), `Bar`, the scheduler, the `Animator` (with the ghosts of items on their way out), the `Lens`, the `ModeTracker`, `Presentation` — see [17-frame-loop.md](17-frame-loop.md) and [21-sources-modes-arrivals.md](21-sources-modes-arrivals.md) |
 | `App/` | options and theme loading, the cover window, the view, the controller (glue from AppKit to frame-loop inputs), events, `--shot` |
 | `IPC/` | the socket protocol and its verbs (`BarioService`), the server, and the client the CLI uses |
-| `Wasm/` | the `WasmEngine` seam, the WasmKit engine, host imports, permissions, the `wasm` module, the renderer registry |
+| `Wasm/` | the `WasmEngine` seam, the wasmtime engine, host imports, permissions, the `wasm` module, the renderer registry — see [23-wasmtime.md](23-wasmtime.md) |
 
 Beside it, `Sources/CBarioShim` holds what Swift cannot reach: `shm_open`, which is variadic, and
 the Mach hand-off of shared surfaces, since `bootstrap.h` is invisible to Swift and a message
@@ -51,8 +51,8 @@ Inputs only invalidate; a frame does all the work ([17-frame-loop.md](17-frame-l
 2. The built-in modules fill those bubbles; config and stylesheet reload on save; `bario.app`
    is what permissions attach to.
 3. A Unix socket carries the protocol, and the `bario` CLI is a one-for-one wrapper.
-4. WASM modules run on WasmKit behind a `WasmEngine` seam, with the bytes ABI, gated host
-   imports and per-call budgets; `canvas` display lists are themed by the node's own style, so
+4. WASM modules run on wasmtime's Pulley interpreter behind a `WasmEngine` seam, with the bytes
+   ABI, gated host imports and per-call budgets the engine enforces; `canvas` display lists are themed by the node's own style, so
    `currentColor` and `var()` mean what they say inside a drawing bario never wrote.
 5. Holding Option over a bar closes its hole and lets items take clicks, scrolls and hover;
    `on-click` shortcuts run; styles and layout ease through `transition`.
@@ -115,10 +115,11 @@ does not react to the pointer at all ([15-interaction.md](15-interaction.md)).
 
 ## Building and looking at it
 
-`make` and `make test` rather than `swift build` and `swift test` — on a Command Line Tools
-install swift-testing's macro plugin needs an explicit `-load-plugin-library`, and SwiftPM
-passes link flags for an Xcode-only directory that ld then warns about once per target. The
-Makefile handles both; see its comments.
+`make` and `make test` rather than `swift build` and `swift test` — the WASM engine is Rust,
+which SwiftPM cannot build, so `make engine` runs first (cargo is needed, about a minute cold);
+on a Command Line Tools install swift-testing's macro plugin needs an explicit
+`-load-plugin-library`; and SwiftPM passes link flags for an Xcode-only directory that ld then
+warns about once per target. The Makefile handles all three; see its comments.
 
 - `bario --run` runs the bar.
 - `bario --shot out.png --width 900 --notch 120` renders one bar offscreen to a PNG, with no
@@ -145,6 +146,7 @@ theme and shows the message as a red bubble on the bar. `killall -HUP bario` doe
 
 | directory | holds |
 |---|---|
+| `Engine/` | `bariowasm`, the WASM engine: a narrow C ABI over wasmtime's Pulley interpreter, which `make engine` builds and wraps as `Frameworks/BarioWasm.xcframework` ([23-wasmtime.md](23-wasmtime.md)) |
 | `pdk/rust`, `pdk/c`, `pdk/wat` | the bytes ABI in three languages |
 | `examples/weather` | the design's worked example, in Rust |
 | `examples/counter.wat` | the same lifecycle with no toolchain — bario assembles `.wat` at load |

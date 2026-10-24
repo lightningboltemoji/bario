@@ -1,0 +1,36 @@
+[package]
+name = "bariowasm"
+version = "0.1.0"
+edition = "2024"
+description = "bario's WASM engine: a narrow C ABI over wasmtime's Pulley interpreter"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+# Pulley interprets compiled bytecode: no executable memory, so no JIT entitlement under the hardened
+# runtime. Cranelift compiles a module to it; rayon spreads that over the cores.
+wasmtime = { version = "=49.0.4", default-features = false, features = ["runtime", "std", "cranelift", "pulley", "parallel-compilation"] }
+# So a module can be dropped in as WebAssembly text, with no toolchain. `wast` rather than `wat`, its
+# front end, for errors that say where.
+wast = "262"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
+
+# Size-optimized, but the interpreter and wasmtime's runtime at -O3: "s" on the interpreter alone costs
+# Pulley about a quarter of its speed (measured in dock2).
+[profile.bario]
+inherits = "release"
+opt-level = "s"
+
+[profile.bario.package.pulley-interpreter]
+opt-level = 3
+
+[profile.bario.package.wasmtime]
+opt-level = 3

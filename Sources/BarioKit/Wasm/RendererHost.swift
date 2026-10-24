@@ -4,9 +4,9 @@ import AppKit
 /// by dropping a `.wasm` in a directory.
 ///
 /// Renderers are called from layout, to measure, and from commit, to draw, both synchronous on
-/// the main actor, so each one is a locked instance rather than an actor, and its budget is
-/// measured rather than enforced — WasmKit cannot interrupt a call, so a renderer that overruns
-/// is dropped instead.
+/// the main actor, so each one is a locked instance rather than an actor. A draw past its budget
+/// is interrupted by the engine; one that ran long waiting in a host import, which the engine
+/// cannot interrupt, is caught by timing it. Either is a strike, and three drop the renderer.
 public final class RendererHost: @unchecked Sendable {
     private let lock = NSLock()
     private var renderers: [String: Renderer] = [:]
@@ -44,7 +44,7 @@ public final class RendererHost: @unchecked Sendable {
             }
             do {
                 next[config.nodeType] = try Renderer(config: config, store: store,
-                                                     engine: engine ?? WasmKitEngine(),
+                                                     engine: engine ?? WasmtimeEngine.shared,
                                                      events: events)
                 note("  renderer \(config.nodeType): \(config.path)")
             } catch {
@@ -108,7 +108,7 @@ public final class RendererHost: @unchecked Sendable {
         let started = CFAbsoluteTimeGetCurrent()
         let answer: JSONValue?
         do {
-            answer = try renderer.draw(request)
+            answer = try renderer.draw(request, budget: budget)
         } catch {
             warn("renderer \(nodeType): \(error)")
             disgrace(nodeType)
@@ -147,6 +147,9 @@ final class Renderer: @unchecked Sendable {
     private let control = WasmModule.Control()
     var strikes = 0
     var disabled = false
+    /// `init` sets a renderer up once, so it gets the second a start function gets rather than
+    /// a draw's budget.
+    static let initBudget = 1.0
 
     init(config: RendererConfig, store: StateStore, engine: any WasmEngine,
          events: EventBus = EventBus()) throws {
@@ -163,16 +166,16 @@ final class Renderer: @unchecked Sendable {
         instance = try engine.instantiate(wasm: [UInt8](data), imports: imports,
                                           memoryLimitBytes: 16 * 1024 * 1024)
         if instance.hasExport("init") {
-            _ = try? instance.callJSON("init", config.options)
+            _ = try? instance.callJSON("init", config.options, budget: Renderer.initBudget)
         }
         guard instance.hasExport("draw") else {
             throw WasmError("a renderer must export `draw`")
         }
     }
 
-    func draw(_ request: JSONValue) throws -> JSONValue? {
+    func draw(_ request: JSONValue, budget: Double) throws -> JSONValue? {
         lock.lock(); defer { lock.unlock() }
-        return try instance.callJSON("draw", request)
+        return try instance.callJSON("draw", request, budget: budget)
     }
 
     func takeFrameRequest() -> Bool {

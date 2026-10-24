@@ -6,13 +6,10 @@ surface is ours to keep small.
 
 ## Runtime
 
-WasmKit (swiftwasm/WasmKit), pinned at 0.4.2: pure Swift, a SwiftPM dependency, an
-interpreter. Zero build friction, and widget code is tiny. The `WasmEngine` protocol stands
-between bario and it, so swapping in wasmtime's C API later — for JIT, fuel metering and
-epoch interruption — is one file.
-
-The pin is exact because the 16MB memory cap goes through `Store.resourceLimiter`, which is SPI
-(`@_spi(Fuzzing)`) and can change in any release.
+wasmtime's Pulley interpreter, through `Engine/` (the Rust crate `bariowasm` and its narrow C
+ABI), behind the `WasmEngine` protocol. This increment started on WasmKit — pure Swift, a
+SwiftPM dependency, zero build friction — and the protocol kept the move small: one new file
+of Swift, and a deadline on `WasmInstance`. [23-wasmtime.md](23-wasmtime.md) has why and how.
 
 ## The ABI, and two places it departs from §5
 
@@ -78,25 +75,25 @@ runs a command with the same budget an `exec` item gets.
 ## Budgets, and the honest limit
 
 Each instance runs on its own actor with a per-call budget: 50ms for `render` and `draw`,
-longer for `poll`. Over budget, the call is abandoned, the item keeps its last content plus
+longer for `poll`. Over budget, the guest is interrupted, the item keeps its last content plus
 `.stale`, and the instance is dropped and rebuilt on the next call with backoff.
 
-The honest part (DESIGN.md §13 anticipates it): WasmKit has no way to interrupt a running
-call, so "abandoned" means the host stops waiting, not that the guest stops running. A module
-in a genuinely infinite loop leaks one thread until bario exits. That is a leak, and it is the
-reason the engine is behind a protocol; it must not also be a corruption, so an abandoned call
-keeps its instance to itself. The instance is discarded before the next call starts, and the
-bytes `get` stashes for `read` and the requests a guest makes (timer, frame, subscriptions)
-belong to the instance, not the item, so a replacement shares nothing with the call it replaced.
+The honest part: the engine interrupts guest code, not a host import the guest is blocked in.
+So the wait is also abandoned at the same budget, and "abandoned" there means the host stops
+waiting while an `http` or `exec` finishes alone ([23-wasmtime.md](23-wasmtime.md#the-limit-that-remains)).
+That must not be a corruption, so an abandoned call keeps its instance to itself. The instance
+is discarded before the next call starts, and the bytes `get` stashes for `read` and the
+requests a guest makes (timer, frame, subscriptions) belong to the instance, not the item, so
+a replacement shares nothing with the call it replaced.
 
 Calls into one instance run one at a time, queued on the module. An instance is one thread's
 worth of stack and heap, and the actor alone does not ensure that: it is re-entrant across
 the `await` on a call's budget, so without the queue an event arriving mid-render ran in the
 same instance at once. That showed up as a guest `out of bounds memory access` inside its own
 allocator — two calls' `get`/`read` pairs crossed, and one wrote a longer answer into the
-other's buffer — and as a segfault in WasmKit itself. A queued call's budget starts when it
-does, not when it was asked for. Memory is capped at 16MB per instance through WasmKit's resource
-limiter.
+other's buffer — and as a segfault in WasmKit, the engine of the time. A queued call's budget
+starts when it does, not when it was asked for. Memory is capped at 16MB per instance through
+wasmtime's resource limiter.
 
 ## Where the tiers meet
 
@@ -106,8 +103,8 @@ script and `bario set` can be promoted without changing the item's config or its
 
 ## Tests
 
-Guests are written in WebAssembly text and assembled in-process with WasmKit's own `WAT`
-module, so the tests exercise real WASM with no toolchain to install: a module that renders
+Guests are written in WebAssembly text and assembled in-process by bariowasm (the `wat` crate),
+so the tests exercise real WASM with no toolchain to install: a module that renders
 text, one that reads state through `get`/`read`, one that writes state through `set`, one that
 sets its own timer, one that traps, one that loops forever (budget), one that asks for a
 gated import it was not granted, and one that tries to allocate past the memory cap.

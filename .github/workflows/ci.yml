@@ -16,8 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The WASM engine is Rust (Engine/), which `make build` compiles with cargo.
       - name: Toolchain
-        run: swift --version
+        run: |
+          swift --version
+          cargo --version
 
       - name: Build
         run: make build

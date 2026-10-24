@@ -29,7 +29,7 @@ public actor WasmModule: Module {
         }
         self.path = (raw as NSString).expandingTildeInPath
         self.permissions = try WasmPermissions.parse(context.config)
-        self.engine = engine ?? WasmKitEngine()
+        self.engine = engine ?? WasmtimeEngine.shared
         self.memoryLimit = context.config["memory-limit"]?.intValue ?? 16 * 1024 * 1024
         self.renderBudget = context.double("render-budget", default: 0.050) ?? 0.050
         self.pollBudget = context.double("poll-budget", default: 2.0) ?? 2.0
@@ -69,7 +69,7 @@ public actor WasmModule: Module {
                           control: control)
         guest = fresh
         if fresh.hasExport("init") {
-            _ = try fresh.callJSON("init", context.config["config"] ?? context.config)
+            _ = try fresh.callJSON("init", context.config["config"] ?? context.config, budget: pollBudget)
         }
         backoff = 1
         return fresh
@@ -141,10 +141,11 @@ public actor WasmModule: Module {
     /// call — an event, a render — before this one is done; without the queue the two run in
     /// the same instance at once, and the guest's allocator corrupts itself.
     ///
-    /// The budget is enforced by abandoning the wait, not by interrupting the guest — see
-    /// .agents/knowledge/13-wasm.md for why that is honest rather than ideal. So a call that
-    /// overran discards its instance before the queue moves on: the guest still running in it
-    /// is left alone, and the next call gets a fresh one.
+    /// The engine interrupts a guest that runs past its budget, but not a host import it is
+    /// waiting in — `http`, `exec`, a `get` — so the wait is abandoned at the same budget too
+    /// (.agents/knowledge/13-wasm.md). A call that overran discards its instance before the
+    /// queue moves on: an import still running in it finishes alone, and the next call gets a
+    /// fresh one.
     private func run(_ name: String, _ payload: JSONValue, budget: Double) async throws -> JSONValue? {
         let previous = queue
         let call = Task { () async throws -> JSONValue? in
@@ -159,7 +160,7 @@ public actor WasmModule: Module {
         let guest = try load()
         defer { drainControl(guest.control) }
         do {
-            return try await withBudget(budget) { try guest.callJSON(name, payload) }
+            return try await withBudget(budget) { try guest.callJSON(name, payload, budget: budget) }
         } catch {
             discard("\(error)", guest)
             throw error
@@ -206,9 +207,9 @@ public actor WasmModule: Module {
 
         func hasExport(_ name: String) -> Bool { instance.hasExport(name) }
 
-        func callJSON(_ name: String, _ payload: JSONValue) throws -> JSONValue? {
+        func callJSON(_ name: String, _ payload: JSONValue, budget: Double) throws -> JSONValue? {
             lock.lock(); defer { lock.unlock() }
-            return try instance.callJSON(name, payload)
+            return try instance.callJSON(name, payload, budget: budget)
         }
     }
 

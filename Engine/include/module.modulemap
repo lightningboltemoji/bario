@@ -1,0 +1,5 @@
+module BarioWasm {
+    header "bariowasm.h"
+    link "iconv"
+    export *
+}
