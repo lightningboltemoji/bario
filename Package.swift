@@ -9,8 +9,9 @@ let package = Package(
         .library(name: "BarioKit", targets: ["BarioKit"]),
     ],
     targets: [
-        // Only exists because shm_open is variadic and therefore unavailable to Swift.
-        .target(name: "CBarioShim", path: "Sources/CBarioShim"),
+        // Only exists for what Swift cannot call or declare: see its header.
+        .target(name: "CBarioShim", path: "Sources/CBarioShim",
+                linkerSettings: [.linkedFramework("IOKit")]),
         // The WASM runtime: wasmtime's Pulley interpreter behind a narrow C ABI, a Rust static
         // library that `make engine` builds, since SwiftPM cannot run cargo. See
         // .agents/knowledge/23-wasmtime.md.

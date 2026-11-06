@@ -148,11 +148,29 @@ public enum Humanise {
     /// as wide as a digit whatever the font (`CoreTextMetrics.line`), which fonts do not all
     /// promise on their own.
     public static func rate(_ value: Double) -> String {
-        let text = bytes(value, perSecond: true)
-        return String(repeating: "\u{2007}", count: max(0, 8 - text.count)) + text
+        rightAligned(bytes(value, perSecond: true), width: 8)
+    }
+
+    /// `2.1k`: a byte rate in the fewest characters that still read, for a stat short of room.
+    /// The unit is a letter and "bytes, per second" is left to the widget, at a fixed four
+    /// characters for the same reason as `rate`.
+    public static func shortRate(_ value: Double) -> String {
+        let (text, unit) = scaled(value)
+        return rightAligned(text + unit.prefix(1), width: 4)
+    }
+
+    /// `6.6W`, ` 12W`: a power at a fixed four characters, as `shortRate` is, with a decimal
+    /// only while it fits.
+    public static func watts(_ value: Double) -> String {
+        rightAligned(number(max(0, value), decimal: true) + "W", width: 4)
     }
 
     public static func bytes(_ value: Double, perSecond: Bool = false) -> String {
+        let (text, unit) = scaled(value)
+        return "\(text) \(unit)\(perSecond ? "/s" : "")"
+    }
+
+    private static func scaled(_ value: Double) -> (text: String, unit: String) {
         var value = max(0, value)
         var index = 0
         // Scaled by what the number would print as, so 999.7 is "1.0 kB" and not "1000 B".
@@ -160,10 +178,16 @@ public enum Humanise {
             value /= 1000
             index += 1
         }
-        let text = value < 9.95 && index > 0
-            ? String(format: "%.1f", value)
-            : String(format: "%.0f", value)
-        return "\(text) \(units[index])\(perSecond ? "/s" : "")"
+        return (number(value, decimal: index > 0), units[index])
+    }
+
+    /// A decimal below 10, if one is wanted, and at 9.95 not "10.0".
+    private static func number(_ value: Double, decimal: Bool) -> String {
+        String(format: value < 9.95 && decimal ? "%.1f" : "%.0f", value)
+    }
+
+    private static func rightAligned(_ text: String, width: Int) -> String {
+        String(repeating: "\u{2007}", count: max(0, width - text.count)) + text
     }
 
     /// `3:10`, the shape a battery estimate is always written in.

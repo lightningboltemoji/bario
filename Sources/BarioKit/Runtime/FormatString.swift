@@ -119,8 +119,8 @@ public struct FormatString: Sendable, Hashable {
     }
 
     /// The spec's shape decides what it means: `%…` is a printf format, digits are a maximum
-    /// length, `bytes` and `rate` scale a number of bytes to a unit, anything else is a
-    /// `DateFormatter` pattern over an epoch or an ISO date.
+    /// length, `bytes`, `rate` and `rate-short` scale a number of bytes to a unit, `watts` writes
+    /// a power, and anything else is a `DateFormatter` pattern over an epoch or an ISO date.
     public static func format(_ value: JSONValue?, spec: String?) -> String {
         guard let value, !value.isNull else { return "" }
         guard let spec, !spec.isEmpty else { return value.stringValue ?? "" }
@@ -128,6 +128,8 @@ public struct FormatString: Sendable, Hashable {
         switch spec {
         case "bytes": return value.doubleValue.map { Humanise.bytes($0) } ?? ""
         case "rate": return value.doubleValue.map { Humanise.rate($0) } ?? ""
+        case "rate-short": return value.doubleValue.map { Humanise.shortRate($0) } ?? ""
+        case "watts": return value.doubleValue.map { Humanise.watts($0) } ?? ""
         default: break
         }
 

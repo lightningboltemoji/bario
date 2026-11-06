@@ -1,4 +1,5 @@
 import AppKit
+import Synchronization
 import Testing
 @testable import BarioKit
 
@@ -266,6 +267,29 @@ struct ContentTemplateTests {
         #expect(FormatString.format(.string("x"), spec: "rate") == "")
     }
 
+    @Test("a short rate is a letter for its unit, at four characters whatever the value")
+    func shortRates() {
+        #expect(FormatString.format(.number(0), spec: "rate-short") == "\u{2007}\u{2007}0B")
+        #expect(Humanise.shortRate(993) == "993B")
+        #expect(Humanise.shortRate(2_147) == "2.1k")
+        #expect(Humanise.shortRate(12_345) == "\u{2007}12k")
+        #expect(Humanise.shortRate(999_700) == "1.0M")
+        #expect(Humanise.shortRate(1_234_567_890) == "1.2G")
+        for value in [0.0, 12, 999.4, 999.7, 1234, 9_960, 12_345, 123_456, 1_234_567, 999_400_000] {
+            #expect(Humanise.shortRate(value).count == 4, "\(value) → \(Humanise.shortRate(value))")
+        }
+    }
+
+    @Test("a power is four characters, with a decimal only below 10")
+    func watts() {
+        #expect(FormatString.format(.number(6.6), spec: "watts") == "6.6W")
+        #expect(Humanise.watts(12.4) == "\u{2007}12W")
+        #expect(Humanise.watts(9.96) == "\u{2007}10W", "not 10.0W, which would be wider")
+        #expect(Humanise.watts(123) == "123W")
+        #expect(Humanise.watts(0) == "0.0W")
+        #expect(Humanise.watts(-1) == "0.0W")
+    }
+
     /// The width has to hold on screen, not just in characters. SF Mono draws its figure space
     /// narrower than a digit, which moved the whole bar a point whenever the padding changed.
     /// Measured before rounding: rounded up to a whole point, a bare rate hides the difference
@@ -531,5 +555,122 @@ struct ContentStructureTests {
         #expect(lines[0].style.font.size == 11)
         #expect(lines[1].style.font.size == 9)
         #expect(root.children[1].children[0].style.font.size == 14)
+    }
+}
+
+/// Fed readings rather than this machine's SMC, which a CI runner in a VM may not have.
+@Suite("Power")
+struct PowerTests {
+    func run(_ options: [String: JSONValue], readings: [Double?],
+             battery: BatteryEnergy? = nil) async throws -> (RenderResult, JSONValue) {
+        let remaining = Mutex(readings)
+        let store = StateStore()
+        let context = ModuleContext(item: "power", config: .object(options), interval: .seconds(1), store: store)
+        let module = try PowerModule(context: context, read: { remaining.withLock { $0.removeFirst() } },
+                                     battery: { battery })
+        for _ in readings {
+            if let patch = await module.poll().patch { await store.merge(patch, at: "power") }
+        }
+        return (try await module.render(await store.reader(for: "power")), await store.value(at: "power") ?? .null)
+    }
+
+    func lines(_ node: Node?) -> [String] {
+        node?.children.compactMap { child in
+            if case .text(let text) = child.kind { return text }
+            return nil
+        } ?? []
+    }
+
+    @Test("it is a built-in")
+    func registered() {
+        ModuleRegistry.registerBuiltIns()
+        #expect(ModuleRegistry.names.contains("power"))
+    }
+
+    @Test("the draw is the newest reading, and a window the mean of its samples")
+    func windows() async throws {
+        let (_, state) = try await run(["windows": "2s"], readings: [100, 4, 8])
+        #expect(state["draw"]?.doubleValue == 8)
+        #expect(state["draw-2s"]?.doubleValue == 6, "the 100 has left the window")
+    }
+
+    @Test("stacked is the reading over a 30s mean unless told otherwise")
+    func stacked() async throws {
+        let (result, state) = try await run(["preset": "stacked"], readings: [6, 7])
+        #expect(result.content?.classes.contains("stacked") == true)
+        #expect(lines(result.content) == ["7.0W", "6.5W"])
+        #expect(state["draw-30s"]?.doubleValue == 6.5)
+        #expect(result.tooltip == "Drawing 7.0 W\n30s: 6.5 W")
+
+        let (wider, _) = try await run(["preset": "stacked", "windows": "1s 2s"], readings: [6, 7])
+        #expect(lines(wider.content).count == 3)
+    }
+
+    @Test("the graph preset graphs the history")
+    func graph() async throws {
+        let (result, _) = try await run(["preset": "graph", "scroll": "smooth"], readings: [6, 7])
+        guard case .graph(let graph)? = result.content?.children[0].kind else {
+            Issue.record("a graph preset starts with its graph"); return
+        }
+        #expect(graph.values.suffix(2) == [6, 7])
+        #expect(graph.floor == 10)
+    }
+
+    @Test("thresholds class the current draw")
+    func thresholds() async throws {
+        let (warm, _) = try await run(["warn": 40, "critical": 80], readings: [50])
+        #expect(warm.classes == ["warn"])
+        let (hot, _) = try await run(["warn": 40, "critical": 80], readings: [90])
+        #expect(hot.classes == ["critical"])
+    }
+
+    @Test("full is a full battery gone in two hours, however big the battery")
+    func level() async throws {
+        let small = BatteryEnergy(full: 70, remaining: 70, plugged: true)
+        #expect(try await run([:], readings: [7], battery: small).1["level"]?.doubleValue == 0.2)
+        #expect(try await run([:], readings: [17.5], battery: small).1["level"]?.doubleValue == 0.5)
+        #expect(try await run([:], readings: [65], battery: small).1["level"]?.doubleValue == 1)
+        let big = BatteryEnergy(full: 100, remaining: 100, plugged: true)
+        #expect(try await run([:], readings: [25], battery: big).1["level"]?.doubleValue == 0.5)
+    }
+
+    @Test("max gives the top in watts, and without it or a battery the level is empty")
+    func maximum() async throws {
+        #expect(try await run(["max": 100], readings: [25]).1["level"]?.doubleValue == 0.25)
+        #expect(try await run([:], readings: [25]).1["level"]?.doubleValue == 0)
+        await #expect(throws: ModuleError.self) { try await run(["max": 0], readings: [25]) }
+    }
+
+    @Test("on battery the tooltip says what is left at the window's rate, plugged in it says nothing")
+    func timeRemaining() async throws {
+        let battery = BatteryEnergy(full: 70, remaining: 35, plugged: false)
+        let (result, state) = try await run(["windows": "2s"], readings: [100, 5, 15], battery: battery)
+        #expect(state["time-remaining"]?.doubleValue == 210, "35 Wh at the 2s mean of 10 W")
+        #expect(result.tooltip?.hasSuffix("\n3:30 left at this rate") == true)
+
+        var plugged = battery
+        plugged.plugged = true
+        let (charging, chargingState) = try await run([:], readings: [10], battery: plugged)
+        #expect(chargingState["time-remaining"]?.isNull == true)
+        #expect(charging.tooltip == "Drawing 10.0 W")
+    }
+
+    @Test("a battery's energy is its milliamp-hours at its voltage")
+    func energy() throws {
+        let data: [String: Any] = ["AppleRawMaxCapacity": 5659, "AppleRawCurrentCapacity": 2717]
+        let energy = try #require(BatteryEnergy(data: data, millivolts: 12195, plugged: true))
+        #expect(abs(energy.full - 69.0) < 0.1)
+        #expect(abs(energy.remaining - 33.1) < 0.1)
+        #expect(energy.plugged)
+        #expect(BatteryEnergy(data: [:], millivolts: 12195, plugged: true) == nil)
+        #expect(BatteryEnergy(data: data, millivolts: nil, plugged: true) == nil)
+    }
+
+    @Test("with no reading there is no bubble, and it comes back with one")
+    func noReading() async throws {
+        let (gone, _) = try await run([:], readings: [nil, nil])
+        #expect(!gone.visible)
+        let (back, _) = try await run([:], readings: [nil, 7])
+        #expect(back.visible)
     }
 }

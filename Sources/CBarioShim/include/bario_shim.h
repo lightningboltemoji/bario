@@ -6,6 +6,9 @@
  *
  * `bootstrap.h` is not visible to Swift at all, and handing bario a pair of IOSurfaces is a Mach
  * message with port rights in it (DESIGN.md §9), which Swift has no way to build.
+ *
+ * The SMC takes one C struct of the driver's own, and Swift promises no layout for a struct it
+ * declares.
  */
 #ifndef BARIO_SHIM_H
 #define BARIO_SHIM_H
@@ -73,5 +76,15 @@ kern_return_t bario_surfaces_answer(mach_port_t reply, int status);
  * Returns a BARIO_SURFACES_ status, or -1 if nothing answered within `timeout_ms`. */
 int bario_surfaces_hand_off(const char *service, const char *name, mach_port_t surface0,
                             mach_port_t surface1, mach_port_t owner, int timeout_ms);
+
+/* --- The SMC ----------------------------------------------------------------------------- */
+
+/* Opens the System Management Controller. Returns the connection, or MACH_PORT_NULL on a machine
+ * without one. */
+mach_port_t bario_smc_open(void);
+
+/* Reads a key that holds a float, such as "PSTR". Returns 1 and fills `value`, or 0 if the key is
+ * missing or holds anything else. */
+int bario_smc_read_float(mach_port_t connection, const char *key, float *value);
 
 #endif /* BARIO_SHIM_H */

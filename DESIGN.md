@@ -127,6 +127,7 @@ The initial set, chosen because each one replaces something the cover is hiding:
 | `volume` | CoreAudio default output device listener | `level`, `muted` |
 | `net` | `getifaddrs` counters on an interval | `rx`, `tx`, rolling history for `graph` |
 | `cpu` / `mem` | `host_statistics` on an interval | `load`, `used`, history |
+| `power` | the SMC's `PSTR` key on an interval, the battery's capacity from the IORegistry | `draw`, `level`, `time-remaining`, windows, history |
 | `text` | none | static content from config |
 | `data` | nothing of its own | renders whatever was pushed under its key (Tier 2) |
 

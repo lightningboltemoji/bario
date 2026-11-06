@@ -160,6 +160,7 @@ public enum ModuleRegistry {
             "net": { try NetModule(context: $0) },
             "cpu": { try CPUModule(context: $0) },
             "mem": { try MemModule(context: $0) },
+            "power": { try PowerModule(context: $0) },
             "exec": { try ExecModule(context: $0) },
             "wasm": { try WasmModule(context: $0) },
         ]

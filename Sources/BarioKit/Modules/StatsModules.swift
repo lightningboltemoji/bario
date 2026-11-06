@@ -1,8 +1,9 @@
 import Darwin
 import Foundation
+import IOKit
 import SystemConfiguration
 
-// `net`, `cpu` and `mem`: the three genuinely sampled modules. Each keeps a ring of raw
+// `net`, `cpu`, `mem` and `power`: the genuinely sampled modules. Each keeps a ring of raw
 // snapshots as deep as its longest window, so a window is the newest snapshot against one that
 // many samples back, exactly, and a per-sample history for graphs. How often, which windows and
 // how much history are all the item's config ([20-stats-widgets.md]).
@@ -462,7 +463,163 @@ public actor MemModule: Module {
     }
 }
 
-// MARK: - What the three share
+/// What the whole machine is drawing, from the SMC. `PSTR` is the one reading that covers the
+/// display and everything else, reads the same on the adapter and on battery, turns over every
+/// second and wants no privileges. The battery's own telemetry agrees but only every 30s,
+/// `powermetrics` wants root, and IOReport's CPU energy arrives in rare batches rather than as it
+/// is spent (an M5 Pro on macOS 27), so this is the total and not a breakdown.
+///
+/// `level` puts the draw on a scale that means something. No documented figure says what a Mac
+/// can draw, and a scale that follows recent peaks reads full under any steady load, so it comes
+/// from the battery: full is a full battery gone in `fullLevelHours`, half is twice that, and it
+/// holds on the adapter as what the draw would cost off it. `max` gives a Mac with no battery
+/// its top in watts.
+public actor PowerModule: Module {
+    private let context: ModuleContext
+    private let view: StatsRenderer
+    private let sampling: Sampling
+    private let thresholds: Thresholds
+    private let read: @Sendable () -> Double?
+    private let readBattery: @Sendable () -> BatteryEnergy?
+    private let maximum: Double?
+    /// Power is a gauge, so a window is the mean of the samples in it, as for `mem`.
+    private var samples: Ring<Double>
+    private var history: History
+    private var battery: (energy: BatteryEnergy?, checkedAt: Double)?
+
+    static let fullLevelHours: Double = 2
+    /// How long a reading of the battery is trusted. It is slow to change, but this is also how
+    /// long `time-remaining` takes to notice the adapter.
+    static let batteryRecheck: Double = 5
+
+    public init(context: ModuleContext,
+                read: @escaping @Sendable () -> Double? = PowerModule.systemDraw,
+                battery: @escaping @Sendable () -> BatteryEnergy? = BatteryEnergy.read) throws {
+        self.context = context
+        self.read = read
+        self.readBattery = battery
+        self.maximum = context.double("max")
+        if let maximum, maximum <= 0 { throw ModuleError("max is a number of watts above 0") }
+        // `stacked` is the reading over a line per window, so it needs one to show.
+        let sampling = try Sampling(context: context, defaultInterval: 2,
+                                    defaultWindows: context.string("preset") == "stacked" ? ["30s"] : [])
+        self.sampling = sampling
+        let lines = sampling.windows.map { "  text \"{draw-\($0.name):watts}\"" }.joined(separator: "\n")
+        self.view = try StatsRenderer(context, module: "power", format: "{draw:watts}", fallback: "draw", presets: [
+            "stacked": "column class=\"stacked\" align=\"end\" {\n  text \"{draw:watts}\"\n\(lines)\n}",
+            "graph": """
+                row class="graph" align="center" {
+                  graph values="{history}" floor=10 \(try StatsRenderer.graph(context))
+                  text "{draw:watts}"
+                }
+                """,
+        ])
+        self.thresholds = Thresholds(context)
+        self.samples = Ring(capacity: sampling.depth)
+        self.history = History(capacity: sampling.history)
+    }
+
+    public func poll() async -> PollResult {
+        guard let watts = read() else {
+            return PollResult(patch: .object(["draw": .null]), every: sampling.interval)
+        }
+        samples.append(watts)
+        history.append(watts)
+        let now = ProcessInfo.processInfo.systemUptime
+        if battery == nil || now - battery!.checkedAt >= PowerModule.batteryRecheck {
+            battery = (readBattery(), now)
+        }
+        let energy = battery?.energy
+
+        var patch: [String: JSONValue] = [
+            "draw": .number(PowerModule.tenths(watts)),
+            "level": .number(PowerModule.level(watts, maximum: maximum, energy: energy)),
+            "history": history.padded,
+            "icon": .string("bolt"),
+        ]
+        var rate = watts
+        for window in sampling.windows {
+            rate = MemModule.mean(samples.suffix(window.samples))
+            patch["draw-\(window.name)"] = .number(PowerModule.tenths(rate))
+        }
+        // The longest window is the steadiest rate there is to divide by.
+        if let energy, !energy.plugged, rate > 0 {
+            patch["time-remaining"] = .number((energy.remaining / rate * 60).rounded())
+        } else {
+            patch["time-remaining"] = .null
+        }
+        return PollResult(patch: .object(patch), every: sampling.interval)
+    }
+
+    /// 0…1. With no battery and no `max` there is no scale to put the draw on, so it is empty.
+    static func level(_ watts: Double, maximum: Double?, energy: BatteryEnergy?) -> Double {
+        guard let top = maximum ?? energy.map({ $0.full / fullLevelHours }), top > 0 else { return 0 }
+        return (min(1, max(0, watts / top)) * 1000).rounded() / 1000
+    }
+
+    public func render(_ state: StateReader) async throws -> RenderResult {
+        guard let draw = state.value("draw")?.doubleValue else { return RenderResult(visible: false) }
+        var tooltip = "Drawing \(PowerModule.written(draw))"
+        for window in sampling.windows {
+            tooltip += "\n\(window.name): \(PowerModule.written(state.value("draw-\(window.name)")?.doubleValue ?? 0))"
+        }
+        if let minutes = state.value("time-remaining")?.intValue {
+            tooltip += "\n\(Humanise.duration(minutes: minutes)) left at this rate"
+        }
+        return RenderResult(content: try view.render(state), classes: thresholds.classes(draw), tooltip: tooltip)
+    }
+
+    /// Nil on a Mac without the key, and for anything no machine draws.
+    @Sendable public static func systemDraw() -> Double? {
+        guard let watts = SMC.float("PSTR"), watts.isFinite, watts >= 0 else { return nil }
+        return Double(watts)
+    }
+
+    private static func tenths(_ watts: Double) -> Double { (watts * 10).rounded() / 10 }
+
+    private static func written(_ watts: Double) -> String { String(format: "%.1f W", watts) }
+}
+
+/// What the battery holds, in watt-hours. The public power source API reports percentages, and
+/// watts over a percentage is no time at all, so this is the battery's own milliamp-hours at its
+/// present voltage, which moves a little with its charge.
+public struct BatteryEnergy: Sendable, Equatable {
+    public var full: Double
+    public var remaining: Double
+    public var plugged: Bool
+
+    public init(full: Double, remaining: Double, plugged: Bool) {
+        self.full = full
+        self.remaining = remaining
+        self.plugged = plugged
+    }
+
+    /// `data` is the battery's `BatteryData`, which is where macOS 27 keeps the raw capacities.
+    init?(data: [String: Any], millivolts: Int?, plugged: Bool) {
+        guard let full = data["AppleRawMaxCapacity"] as? Int,
+              let remaining = data["AppleRawCurrentCapacity"] as? Int,
+              let millivolts, full > 0, millivolts > 0 else { return nil }
+        let volts = Double(millivolts) / 1000
+        self.init(full: Double(full) / 1000 * volts, remaining: Double(remaining) / 1000 * volts,
+                  plugged: plugged)
+    }
+
+    /// Nil on a Mac with no battery, or one that keeps its capacities elsewhere.
+    @Sendable public static func read() -> BatteryEnergy? {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != IO_OBJECT_NULL else { return nil }
+        defer { IOObjectRelease(service) }
+        func property(_ name: String) -> Any? {
+            IORegistryEntryCreateCFProperty(service, name as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue()
+        }
+        return BatteryEnergy(data: property("BatteryData") as? [String: Any] ?? [:],
+                             millivolts: property("Voltage") as? Int,
+                             plugged: property("ExternalConnected") as? Bool ?? false)
+    }
+}
+
+// MARK: - What they share
 
 /// What a stats item shows: its own content block or format, or one of the presets its module
 /// ships, written in KDL like a user's own.
