@@ -44,17 +44,17 @@ public final class MenuBarItem: NSObject, NSMenuDelegate {
         guard let button = item.button else { return }
         let hidden = isHidden()
         let image = NSImage(systemSymbolName: hidden ? "eyeglasses.slash" : "eyeglasses",
-                            accessibilityDescription: "bario")
+                            accessibilityDescription: "Bario")
         image?.isTemplate = true
         button.image = image
-        button.toolTip = error() != nil ? "bario — config error" : hidden ? "bario — hidden" : "bario"
+        button.toolTip = error() != nil ? "Bario — config error" : hidden ? "Bario — hidden" : "Bario"
     }
 
     /// Rebuilt every time it opens rather than kept in sync: the login item can be switched off in
     /// System Settings, and the error can come and go while the menu is closed.
     public func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(disabled("bario \(barioVersion)"))
+        menu.addItem(disabled("Bario \(barioVersion)"))
 
         if let error = error() {
             menu.addItem(.separator())
@@ -78,7 +78,7 @@ public final class MenuBarItem: NSObject, NSMenuDelegate {
         switch LoginItem.current {
         case .unavailable:
             login.isEnabled = false
-            login.toolTip = "Available when bario runs from Bario.app."
+            login.toolTip = "Available only when run from Bario.app."
         case .enabled:
             login.state = .on
         case .disabled:
@@ -91,7 +91,7 @@ public final class MenuBarItem: NSObject, NSMenuDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        menu.addItem(action("Quit bario", #selector(quit), key: "q"))
+        menu.addItem(action("Quit Bario", #selector(quit), key: "q"))
     }
 
     private func action(_ title: String, _ selector: ObjectiveC.Selector, key: String = "") -> NSMenuItem {

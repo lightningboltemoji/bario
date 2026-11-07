@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  bario.app — the bundle the bar runs from (.agents/knowledge/09-live-reload-and-bundle.md).
+  Bario.app — the bundle the bar runs from (.agents/knowledge/09-live-reload-and-bundle.md).
 
   The bundle exists so Screen Recording permission attaches to a stable bundle identifier rather
   than to whichever terminal launched the binary — grant it to a terminal and you have granted it
@@ -15,13 +15,16 @@
   `Assets.car`, and `CFBundleIconFile` names the `.icns` actool writes beside it, for anything that
   reads an icon file directly. Both are absent when the bundle was built without Xcode, and it runs
   the same without.
+
+  The name is `Bario`, which is what Finder, Spotlight and System Settings show. The executable,
+  identifier and icon stay `bario`: a script calls the first, and TCC grants are keyed to the second.
 -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>bario</string>
+	<string>Bario</string>
 	<key>CFBundleDisplayName</key>
-	<string>bario</string>
+	<string>Bario</string>
 	<key>CFBundleExecutable</key>
 	<string>bario</string>
 	<key>CFBundleIdentifier</key>
@@ -50,6 +53,6 @@
 	<true/>
 	<!-- Without this key macOS never shows the prompt, and the wifi module stays SSID-less. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>macOS requires Location Services before it will tell an app the name of the Wi-Fi network you are on. bario uses it only for that, and only if your bar shows {ssid}.</string>
+	<string>macOS requires Location Services before it will tell an app the name of the Wi-Fi network you are on. Bario uses it only for that, and only if your bar shows {ssid}.</string>
 </dict>
 </plist>
