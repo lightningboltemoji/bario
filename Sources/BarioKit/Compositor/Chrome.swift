@@ -225,6 +225,11 @@ final class Chrome {
         case .backdrop(let spec):
             image = context.backdrop.image(blur: spec.blur, saturate: spec.saturate)
             if image != nil { kind = .plain }
+        case .glass:
+            // On a bar, the photograph as glass would show it. A menu has no photograph, and its
+            // window puts the system's glass behind the panel instead (`MenuPanel`).
+            image = context.backdrop.image(blur: Glass.stand.blur, saturate: Glass.stand.saturate)
+            if image != nil { kind = .plain }
         }
         if kind == .none, border.color != nil { kind = .plain }
 

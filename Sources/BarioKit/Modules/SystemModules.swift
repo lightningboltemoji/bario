@@ -122,6 +122,24 @@ public actor BatteryModule: Module {
         PollResult(patch: BatteryModule.read(), nextIn: nil)
     }
 
+    /// The menu bario shows for the battery when the config has none. Copy it into an item's
+    /// `menu { … }` to change it.
+    public static let defaultMenuKDL = """
+    row class="title" { text "Battery"; spacer; text "{pct}%" class="value" }
+    row { text "Power source"; spacer; text "{source}" class="value" }
+    if "time" { row { text "{time-label}"; spacer; text "{time}" class="value" } }
+    if "health" { row { text "Condition"; spacer; text "{health}" class="value" } }
+    separator
+    row on-click="exec open 'x-apple.systempreferences:com.apple.Battery-Settings.extension'" { text "Battery Settings…" }
+    """
+
+    private static let defaultMenu = MenuConfig.builtIn(defaultMenuKDL, for: "battery")
+
+    public func menu(_ state: StateReader) async throws -> Node? {
+        guard state.value("present")?.boolValue == true else { return nil }
+        return try BatteryModule.defaultMenu?.render(state)
+    }
+
     public func render(_ state: StateReader) async throws -> RenderResult {
         var classes: [String] = []
         let percent = state.value("pct")?.doubleValue ?? 100
@@ -152,6 +170,9 @@ public actor BatteryModule: Module {
 
         var patch: [String: JSONValue] = [
             "present": .bool(true),
+            "source": .string(plugged ? "Power adapter" : "Battery"),
+            "time-label": .string(charging ? "Until full" : plugged ? "Time to full" : "Remaining"),
+            "health": (description[kIOPSBatteryHealthKey] as? String).map(JSONValue.string) ?? .null,
             "pct": .number(percent.rounded()),
             "fraction": .number((percent / 100 * 1000).rounded() / 1000),
             "charging": .bool(charging),
@@ -210,9 +231,12 @@ public actor VolumeModule: Module {
         listener = Unmanaged.passRetained(CallbackBox { [weak self] in
             Task { await self?.changed() }
         }).toOpaque()
-        listen(to: AudioObjectID(kAudioObjectSystemObject),
-               selector: kAudioHardwarePropertyDefaultOutputDevice,
-               scope: kAudioObjectPropertyScopeGlobal)
+        // The default output, and for the menu, the default input and the list of devices.
+        for selector in [kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultInputDevice,
+                         kAudioHardwarePropertyDevices] {
+            listen(to: AudioObjectID(kAudioObjectSystemObject), selector: selector,
+                   scope: kAudioObjectPropertyScopeGlobal)
+        }
         followDeviceChanges()
     }
 
@@ -242,6 +266,40 @@ public actor VolumeModule: Module {
         PollResult(patch: VolumeModule.read(speakers: speakers), nextIn: nil)
     }
 
+    /// The menu bario shows for volume when the config has none: the level as a slider, and
+    /// every output and input, the chosen one checked. Copy it into an item's `menu { … }` to
+    /// change it.
+    public static let defaultMenuKDL = """
+    row class="title" { text "Sound"; spacer; text "{device}" class="value" }
+    row { icon "{level-icon}" class="glyph"; slider value="{fraction}" on-change="set-level" }
+    if "outputs" {
+      separator
+      row class="header" { text "Output" }
+      each "outputs" {
+        row class="device {state}" on-click="output {id}" keep-open=#true {
+          icon "checkmark" class="check"; text "{name}"
+        }
+      }
+    }
+    if "inputs" {
+      separator
+      row class="header" { text "Input" }
+      each "inputs" {
+        row class="device {state}" on-click="input {id}" keep-open=#true {
+          icon "checkmark" class="check"; text "{name}"
+        }
+      }
+    }
+    separator
+    row on-click="exec open 'x-apple.systempreferences:com.apple.Sound-Settings.extension'" { text "Sound Settings…" }
+    """
+
+    private static let defaultMenu = MenuConfig.builtIn(defaultMenuKDL, for: "volume")
+
+    public func menu(_ state: StateReader) async throws -> Node? {
+        try VolumeModule.defaultMenu?.render(state)
+    }
+
     public func render(_ state: StateReader) async throws -> RenderResult {
         var classes: [String] = []
         if state.value("muted")?.boolValue == true { classes.append("muted") }
@@ -269,6 +327,17 @@ public actor VolumeModule: Module {
             VolumeModule.setLevel((VolumeModule.read()["level"]?.doubleValue ?? 0) + 5)
         case "down":
             VolumeModule.setLevel((VolumeModule.read()["level"]?.doubleValue ?? 0) - 5)
+        case "set-level", "set":
+            // A slider's `value` is 0…1; `set 40` and `set-level 40` are percent.
+            if let value = event.payload["value"]?.doubleValue {
+                VolumeModule.setLevel(value * 100)
+            } else if let percent = event.payload["args"]?.arrayValue?.first?.stringValue.flatMap(Double.init) {
+                VolumeModule.setLevel(percent)
+            }
+        case "output", "input":
+            guard let uid = event.payload["args"]?.arrayValue?.first?.stringValue ?? event.payload["id"]?.stringValue,
+                  let device = VolumeModule.device(uid: uid) else { return nil }
+            VolumeModule.setDefault(device, input: event.name == "input")
         default:
             return nil
         }
@@ -361,8 +430,11 @@ public actor VolumeModule: Module {
     /// 'vmvc', the virtual main volume: one scalar across however many channels the device has.
     static let virtualMainVolume = AudioObjectPropertySelector(0x766D_7663)
 
-    static func defaultOutputDevice() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+    static func defaultOutputDevice() -> AudioDeviceID? { defaultDevice(input: false) }
+
+    static func defaultDevice(input: Bool) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: input ? kAudioHardwarePropertyDefaultInputDevice
+                                                                  : kAudioHardwarePropertyDefaultOutputDevice,
                                                  mScope: kAudioObjectPropertyScopeGlobal,
                                                  mElement: kAudioObjectPropertyElementMain)
         var device = AudioDeviceID(0)
@@ -394,6 +466,70 @@ public actor VolumeModule: Module {
         var size = UInt32(MemoryLayout<UInt32>.size)
         guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value) == noErr else { return nil }
         return value
+    }
+
+    /// Every device with channels that way, in CoreAudio's order: what a menu lists.
+    static func devices(input: Bool) -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids.filter { channels($0, input: input) > 0 }
+    }
+
+    static func channels(_ device: AudioDeviceID, input: Bool) -> Int {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration,
+                                                 mScope: input ? kAudioDevicePropertyScopeInput
+                                                               : kAudioDevicePropertyScopeOutput,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(device, &address, 0, nil, &size) == noErr, size > 0 else { return 0 }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, raw) == noErr else { return 0 }
+        let list = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+        return list.reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
+    /// A device's UID, which unlike its ID is the same from one boot to the next.
+    static func uid(_ device: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var uid: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid) == noErr else { return nil }
+        return uid?.takeRetainedValue() as String?
+    }
+
+    static func device(uid: String) -> AudioDeviceID? {
+        (devices(input: false) + devices(input: true)).first { self.uid($0) == uid }
+    }
+
+    static func setDefault(_ device: AudioDeviceID, input: Bool) {
+        var address = AudioObjectPropertyAddress(mSelector: input ? kAudioHardwarePropertyDefaultInputDevice
+                                                                  : kAudioHardwarePropertyDefaultOutputDevice,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var id = device
+        AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil,
+                                   UInt32(MemoryLayout<AudioDeviceID>.size), &id)
+    }
+
+    /// One way's devices as a menu lists them: `id` (the UID), `name`, and `state`, which is
+    /// `selected` on the default one, a class for the stylesheet.
+    static func list(input: Bool) -> JSONValue {
+        let chosen = defaultDevice(input: input)
+        return .array(devices(input: input).compactMap { device in
+            guard let uid = uid(device), let name = name(device) else { return nil }
+            return .object(["id": .string(uid), "name": .string(name),
+                            "transport": .string(Transport(code(device, kAudioDevicePropertyTransportType)).rawValue),
+                            "state": .string(device == chosen ? "selected" : "")])
+        })
     }
 
     static func name(_ device: AudioDeviceID) -> String? {
@@ -478,6 +614,9 @@ public actor VolumeModule: Module {
             "icon": .string(headphones ? Symbols.headphones(name: name, muted: muted != 0) : speakerIcon),
             // The level as waves whatever the device, for a format that wants both.
             "level-icon": .string(speakerIcon),
+            "outputs": list(input: false),
+            "inputs": list(input: true),
+            "input": defaultDevice(input: true).flatMap { self.name($0) }.map(JSONValue.string) ?? .null,
         ])
     }
 }

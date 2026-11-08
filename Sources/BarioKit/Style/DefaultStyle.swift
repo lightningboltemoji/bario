@@ -37,6 +37,8 @@ item {
    an item: while Option is held over it, or, under `option "reveal"`, while it is not. The
    rest of the time the bar ignores the pointer, bar the hole. */
 item:hover { background: var(--bubble-hover); }
+/* The item a menu hangs from, lit while it is open, as the menu bar's own titles are. */
+item:open { background: var(--bubble-hover); }
 item:overflow { opacity: 0; }
 item:stale { opacity: 0.5; }
 
@@ -63,10 +65,60 @@ graph { fill: currentColor; stroke-width: 1.5pt; line-cap: round; }
 #battery.low { background: rgba(255, 70, 70, 0.35); }
 #battery.charging .icon { color: system(systemGreenColor); }
 
+/* Menus: what drops down from an item when it is clicked. A menu is a piece of the bar, not one
+   of the system's menus: it inherits the bar's type and colour (it is selected under its item,
+   `#wifi menu`, `#battery.charging menu`, but inherits from the bar, not the bubble), and it is
+   a bubble of its own: one as it shows over the wallpaper, made solid, since a menu hangs over
+   windows rather than the desktop, with a soft shadow to lift it off them. Its rows light as a
+   bubble does under the pointer, and only a node with an action lights, so information rows sit
+   still. Everything dimmed in it is dimmed from its own colour, so a bar in any colour has a
+   menu that reads. Its opacity and transform are how its window comes and goes. */
+menu {
+  background: color-mix(in srgb, white 14%, wallpaper(dominant, system(windowBackgroundColor)));
+  border-radius: 12pt;
+  padding: 4pt;
+  margin: 5pt 0 0 0;
+  min-width: 240pt;
+  gap: 0;
+  shadow: 0 -6pt 20pt rgba(0, 0, 0, 0.14);
+  transition: opacity 110ms ease-out, transform 110ms ease-out;
+}
+@starting-style { menu { opacity: 0; transform: translateY(-3pt); } }
+menu:leaving { opacity: 0; transition: opacity 160ms ease-in; }
+
+menu row { padding: 3pt 9pt; gap: 8pt; border-radius: 8pt; }
+menu row:hover { background: var(--bubble-hover); }
+menu .header { padding: 6pt 9pt 2pt; font-size: 11pt; font-weight: semibold; opacity: 0.6; }
+menu .title { font-weight: semibold; }
+menu .value { opacity: 0.6; }
+menu .note { font-size: 11pt; opacity: 0.6; }
+menu .separator {
+  padding: 0.5pt 0;
+  margin: 4pt 9pt;
+  background: color-mix(in oklch, currentColor 18%, transparent);
+}
+
+/* A slider is a meter you can drag: a capsule filled from the left, with its icon beside it. */
+menu slider {
+  stroke-width: 7pt;
+  fill: currentColor;
+  track: color-mix(in oklch, currentColor 18%, transparent);
+}
+menu .glyph { width: 18pt; }
+
+/* A choice among several, like an output: the check shows on the one that is chosen, and keeps
+   its column on the rest so the names line up. */
+menu .check { opacity: 0; icon-weight: semibold; icon-size: 11pt; }
+menu .selected .check { opacity: 1; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bubble: rgba(0, 0, 0, 0.30);
     --bubble-hover: rgba(0, 0, 0, 0.45);
+  }
+  menu {
+    background: color-mix(in srgb, black 30%, wallpaper(dominant, system(windowBackgroundColor)));
+    shadow: 0 -6pt 20pt rgba(0, 0, 0, 0.30);
   }
 }
 """

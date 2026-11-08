@@ -6,11 +6,16 @@ public struct Node: Sendable, Hashable {
     public var kind: NodeKind
     public var id: String?
     public var classes: [String]
+    /// What the pointer does to it. A node with any is a control: it is hit, it hovers, and its
+    /// action runs as its item's would (PLAN.md M5).
+    public var actions: NodeActions
 
-    public init(_ kind: NodeKind, id: String? = nil, classes: [String] = []) {
+    public init(_ kind: NodeKind, id: String? = nil, classes: [String] = [],
+                actions: NodeActions = NodeActions()) {
         self.kind = kind
         self.id = id
         self.classes = classes
+        self.actions = actions
     }
 
     public var children: [Node] {
@@ -28,6 +33,9 @@ public indirect enum NodeKind: Sendable, Hashable {
     case text(String)
     case icon(IconSpec)
     case meter(Meter)
+    /// A meter you can drag, which sends its item `on-change` with the value it was dragged to
+    /// (PLAN.md M7).
+    case slider(Meter)
     case graph(Graph)
     case row(Container)
     case column(Container)
@@ -43,6 +51,7 @@ public indirect enum NodeKind: Sendable, Hashable {
         case .text: return "text"
         case .icon: return "icon"
         case .meter: return "meter"
+        case .slider: return "slider"
         case .graph: return "graph"
         case .row: return "row"
         case .column: return "column"
@@ -52,6 +61,35 @@ public indirect enum NodeKind: Sendable, Hashable {
         case .custom(let name, _): return name
         }
     }
+}
+
+// MARK: - Controls
+
+/// A node's own shortcuts, in the action language of an item's (DESIGN.md §8), and whether
+/// using one leaves its menu open.
+public struct NodeActions: Sendable, Hashable {
+    public var click: String?
+    public var rightClick: String?
+    public var scroll: String?
+    /// A slider's: sent with the value it was dragged or scrolled to.
+    public var change: String?
+    /// Clicking it, or anything inside it, leaves its menu open (PLAN.md M6).
+    public var keepOpen: Bool
+
+    public init(click: String? = nil, rightClick: String? = nil, scroll: String? = nil,
+                change: String? = nil, keepOpen: Bool = false) {
+        self.click = click
+        self.rightClick = rightClick
+        self.scroll = scroll
+        self.change = change
+        self.keepOpen = keepOpen
+    }
+
+    /// Whether the pointer has anything to do here.
+    public var isControl: Bool { click != nil || rightClick != nil || scroll != nil || change != nil }
+
+    /// The JSON keys, which sit on the node beside `id` and `class`.
+    static let keys = ["on-click", "on-right-click", "on-scroll", "on-change", "keep-open"]
 }
 
 // MARK: - Payloads

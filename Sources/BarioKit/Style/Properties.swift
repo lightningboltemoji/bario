@@ -175,6 +175,25 @@ public enum Background: Sendable, Hashable {
     case gradient(Gradient)
     /// The probe's photograph. DESIGN.md §7.
     case backdrop(Backdrop)
+    /// The system's Liquid Glass (PLAN.md M13).
+    case glass(Glass)
+}
+
+/// Liquid Glass: on a menu, the live screen behind it through an `NSGlassEffectView`; on a bar,
+/// which has the real menu bar behind it and must hide it, the photograph blurred and saturated.
+public struct Glass: Sendable, Hashable {
+    /// `glass(clear)`: the system's clearer glass, for over media.
+    public var clear = false
+    /// A colour the glass is tinted toward.
+    public var tint: Color?
+
+    public init(clear: Bool = false, tint: Color? = nil) {
+        self.clear = clear
+        self.tint = tint
+    }
+
+    /// What stands in for it on a bar: the photograph, blurred and saturated as glass is.
+    static let stand = Backdrop(blur: 18, saturate: 1.8)
 }
 
 // MARK: - Effects
@@ -649,6 +668,18 @@ enum CSSValue {
                 }
             }
             return .backdrop(backdrop)
+        }
+        if components.count == 1, components[0].identValue == "glass" { return .glass(Glass()) }
+        if case .function("glass", let args)? = components.first, components.count == 1 {
+            var glass = Glass()
+            for arg in args where !arg.isEmpty {
+                if arg.count == 1, let word = arg[0].identValue, word == "clear" || word == "regular" {
+                    glass.clear = word == "clear"
+                } else {
+                    glass.tint = try color(arg, at: position)
+                }
+            }
+            return .glass(glass)
         }
         if case .function("linear-gradient", let args)? = components.first, components.count == 1 {
             return .gradient(try gradient(args, at: position))

@@ -17,8 +17,25 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "class": { "$ref": "#/$defs/classList" }
+        "class": { "$ref": "#/$defs/classList" },
+        "on-click": { "$ref": "#/$defs/action" },
+        "on-right-click": { "$ref": "#/$defs/action" },
+        "on-scroll": { "$ref": "#/$defs/action" },
+        "on-change": {
+          "$ref": "#/$defs/action",
+          "description": "A slider's: sent with the value it was dragged or scrolled to, 0 to 1, as `value`."
+        },
+        "keep-open": {
+          "type": "boolean",
+          "default": false,
+          "description": "Clicking this node, or anything inside it, leaves its menu open."
+        }
       }
+    },
+
+    "action": {
+      "description": "A shortcut in the action language of an item's on-click (DESIGN.md section 8). A node with one is a control: it is hit by the pointer and matches :hover and :active. In content a WASM module wrote, every verb but menu is delivered back to that module.",
+      "type": "string"
     },
 
     "node": {
@@ -29,6 +46,7 @@
         { "required": ["text"] },
         { "required": ["icon"] },
         { "required": ["meter"] },
+        { "required": ["slider"] },
         { "required": ["graph"] },
         { "required": ["row"] },
         { "required": ["column"] },
@@ -38,7 +56,7 @@
         {
           "not": {
             "anyOf": [
-              { "required": ["text"] }, { "required": ["icon"] }, { "required": ["meter"] },
+              { "required": ["text"] }, { "required": ["icon"] }, { "required": ["meter"] }, { "required": ["slider"] },
               { "required": ["graph"] }, { "required": ["row"] }, { "required": ["column"] },
               { "required": ["spacer"] }, { "required": ["canvas"] }, { "required": ["raster"] }
             ]
@@ -65,6 +83,20 @@
         },
         "meter": {
           "description": "A horizontal fill, e.g. battery or volume.",
+          "oneOf": [
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            {
+              "type": "object",
+              "properties": {
+                "value": { "type": "number", "minimum": 0, "maximum": 1 },
+                "width": { "type": "number", "exclusiveMinimum": 0 }
+              },
+              "required": ["value"]
+            }
+          ]
+        },
+        "slider": {
+          "description": "A meter you can drag. It takes the free space of a row, and sends its node's on-change with the value it was moved to.",
           "oneOf": [
             { "type": "number", "minimum": 0, "maximum": 1 },
             {
@@ -153,6 +185,10 @@
   "type": "object",
   "properties": {
     "content": { "$ref": "#/$defs/node" },
+    "menu": {
+      "$ref": "#/$defs/node",
+      "description": "Written under an item's key in the store, what drops down when the item is clicked, if its config has no menu of its own."
+    },
     "classes": {
       "description": "State classes on the item itself, in the waybar sense: #battery.charging.",
       "$ref": "#/$defs/classList"

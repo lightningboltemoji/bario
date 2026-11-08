@@ -125,7 +125,7 @@ public struct BarLayout: Sendable {
         return measured
     }
 
-    private func measureNode(_ styled: SceneNode) -> SceneNode {
+    func measureNode(_ styled: SceneNode) -> SceneNode {
         var node = styled
         let style = node.style
         var size: CGSize
@@ -135,7 +135,7 @@ public struct BarLayout: Sendable {
             size = metrics.textSize(text, style: style)
         case .icon(let icon):
             size = metrics.iconSize(icon, style: style)
-        case .meter(let meter):
+        case .meter(let meter), .slider(let meter):
             size = CGSize(width: meter.width ?? 24, height: max(3, style.strokeWidth * 2))
         case .graph(let graph):
             size = CGSize(width: graph.width ?? 40, height: metrics.lineHeight(style))
@@ -173,8 +173,17 @@ public struct BarLayout: Sendable {
             }
         }
 
+        // A node's margin is room around it, and not part of its frame: placing it takes the
+        // margin back off (`place(_:in:)`), so its background, its leaf and its hit area all stop
+        // at its own edge. It is what spaces a menu's separators.
         size.width += style.padding.horizontal
-        size.height += style.padding.vertical
+        // `width`, `min-width` and `max-width` size a node's box as they do an item's: a column
+        // of a menu's glyphs, all one width, keeps the sliders beside them in line.
+        if let width = style.width { size.width = width }
+        if let min = style.minWidth { size.width = max(size.width, min) }
+        if let max = style.maxWidth { size.width = min(size.width, max) }
+        size.width += style.margin.horizontal
+        size.height += style.padding.vertical + style.margin.vertical
         node.frame = CGRect(origin: .zero, size: size)
         return node
     }
@@ -303,13 +312,14 @@ public struct BarLayout: Sendable {
         }
         guard var node = item.content else { return }
         let height = min(node.frame.height, inner.height)
-        node.frame = CGRect(x: inner.minX, y: inner.minY + (inner.height - height) / 2,
-                            width: inner.width, height: height)
+        node.frame = node.style.margin.inset(CGRect(x: inner.minX, y: inner.minY + (inner.height - height) / 2,
+                                                    width: inner.width, height: height))
         placeNode(&node, in: node.frame, align: .center)
         item.content = node
     }
 
-    private func placeNode(_ node: inout SceneNode, in rect: CGRect, align: Align) {
+    /// `align` is what a container that says nothing aligns its children by, and is handed down.
+    func placeNode(_ node: inout SceneNode, in rect: CGRect, align: Align) {
         let inner = node.style.padding.inset(rect)
         switch node.kind {
         case .row(let container):
@@ -329,7 +339,7 @@ public struct BarLayout: Sendable {
                 case .end: y = inner.minY
                 default: y = inner.minY + (inner.height - height) / 2
                 }
-                child.frame = CGRect(x: x, y: y, width: widths[index], height: height)
+                child.frame = child.style.margin.inset(CGRect(x: x, y: y, width: widths[index], height: height))
                 placeNode(&child, in: child.frame, align: align)
                 node.children[index] = child
                 x += widths[index] + gap
@@ -341,14 +351,16 @@ public struct BarLayout: Sendable {
             for index in node.children.indices {
                 var child = node.children[index]
                 let height = child.frame.height
-                let width = min(child.frame.width, inner.width)
+                // Stretched, every child is as wide as the column: a menu's rows, so a row's
+                // hover reaches both edges and a spacer in it has room to push.
+                let width = align == .stretch ? inner.width : min(child.frame.width, inner.width)
                 let x: Double
                 switch align {
-                case .start: x = inner.minX
+                case .start, .stretch: x = inner.minX
                 case .end: x = inner.maxX - width
                 default: x = inner.minX + (inner.width - width) / 2
                 }
-                child.frame = CGRect(x: x, y: y - height, width: width, height: height)
+                child.frame = child.style.margin.inset(CGRect(x: x, y: y - height, width: width, height: height))
                 placeNode(&child, in: child.frame, align: align)
                 node.children[index] = child
                 y -= height + gap
@@ -360,9 +372,13 @@ public struct BarLayout: Sendable {
 }
 
 extension SceneNode {
-    /// A spacer inside a content row is the only thing that takes free space.
+    /// What takes a content row's free space: a spacer, and a slider, which is as long as the
+    /// row lets it be (PLAN.md M7).
     var isFlexible: Bool {
-        if case .spacer(let spacer) = kind { return (spacer.grow ?? 1) > 0 }
-        return false
+        switch kind {
+        case .spacer(let spacer): return (spacer.grow ?? 1) > 0
+        case .slider: return true
+        default: return false
+        }
     }
 }

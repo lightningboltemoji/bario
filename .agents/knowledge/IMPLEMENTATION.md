@@ -22,12 +22,12 @@ this file; the plan lives in [00-roadmap.md](00-roadmap.md); the intent lives in
 | `Config/` | a KDL 2.0 reader, and the typed `Config` it builds |
 | `Style/` | the CSS subset: parser, selectors, typed properties, cascade, the style stage (`Styler`), the default look; Oklab and the CSS Color 4 and 5 functions |
 | `Runtime/` | the `StateStore` actor, the `Module` protocol, format strings, content templates, the `EventBus`, `ModuleHost` |
-| `Modules/` | the built-in modules: `text` `clock` `data` `front-app` `battery` `wifi` `volume` `net` `cpu` `mem` `exec` (`wasm` lives in `Wasm/`) |
+| `Modules/` | the built-in modules: `text` `clock` `data` `front-app` `battery` `wifi` `volume` `net` `cpu` `mem` `power` `brightness` `exec` (`wasm` lives in `Wasm/`); the default menus of `wifi`, `volume`, `battery` and `brightness`, in KDL |
 | `Layout/` | `Metrics`, the flex solver, the `Scene`, the layout stage (`BarLayout`), and `SceneBuilder` (style + layout in one call) |
 | `Paint/` | colour resolution, rounded rects, the backdrop cache, display lists and the canvas painter, rasters, offscreen rendering on `CARenderer` |
 | `Compositor/` | each bar's layer tree and the commit stage: chrome as layers, raster keys, the node rasterizer, the hole as a mask, the window-shadow plane — see [18-compositor.md](18-compositor.md) |
-| `Frame/` | the rendering pipeline of §10: `FrameLoop` (invalidation and the frame), `Bar`, the scheduler, the `Animator` (with the ghosts of items on their way out), the `Lens`, the `ModeTracker`, `Presentation` — see [17-frame-loop.md](17-frame-loop.md) and [21-sources-modes-arrivals.md](21-sources-modes-arrivals.md) |
-| `App/` | options and theme loading, the cover window, the view, the controller (glue from AppKit to frame-loop inputs), events, `--shot` |
+| `Frame/` | the rendering pipeline of §10: `FrameLoop` (invalidation and the frame), `Bar`, `Menu`, the scheduler, the `Animator` (with the ghosts of items on their way out), the `Lens`, the `ModeTracker`, `Presentation` — see [17-frame-loop.md](17-frame-loop.md), [21-sources-modes-arrivals.md](21-sources-modes-arrivals.md) and [24-menus.md](24-menus.md) |
+| `App/` | options and theme loading, the cover window, the menu window, the views, the controller (glue from AppKit to frame-loop inputs), events, `--shot` |
 | `IPC/` | the socket protocol and its verbs (`BarioService`), the server, and the client the CLI uses |
 | `Wasm/` | the `WasmEngine` seam, the wasmtime engine, host imports, permissions, the `wasm` module, the renderer registry — see [23-wasmtime.md](23-wasmtime.md) |
 
@@ -64,7 +64,8 @@ Inputs only invalidate; a frame does all the work ([17-frame-loop.md](17-frame-l
    run by the window server, and native processes' IOSurfaces shown with no copy
    ([18-compositor.md](18-compositor.md)).
 
-What remains is what §12.8 lists as later: popovers, an overflow catch-all item,
+From §12.8, menus are built: an item's menu is a second render of its state, shown as a one-item
+scene on a window of its own ([24-menus.md](24-menus.md)). What remains is an overflow catch-all item,
 `NSAccessibility`, and a Component Model binding.
 
 **A frame draws what changed, and nothing else (§10).** Each bar is a tree of layers, one per
@@ -127,6 +128,7 @@ warns about once per target. The Makefile handles all three; see its comments.
   is how rendering is verified without looking at a screen, and the pixel tests assert pixels
   from it.
 - `bario --diagnose` prints the resolved scene as text: items, frames, classes, hole modes.
+- `bario --shot out.png --menu wifi` renders the bar with an item's menu open under it.
 - `--mode <name>`, with `--shot` or `--diagnose`, holds a mode on, to see what it arranges.
 - `bario --run --trace-frames` prints what every frame did; an idle bar prints nothing.
 - `make app` builds `bario.app`, which is what Screen Recording and Location permissions
@@ -136,7 +138,7 @@ warns about once per target. The Makefile handles all three; see its comments.
 - `bario --version` prints the git tag `make app` stamped into the bundle, or `dev` when there
   is no bundle around the binary. Nothing in the tree carries a version number, so a release is
   `git tag v0.2.0 && make app` and nothing else.
-- `bario set / content / emit / get / watch / style / reload / ping / frame` talk to a running
+- `bario set / content / emit / get / watch / style / reload / ping / frame / menu` talk to a running
   bar over `$TMPDIR/bario/sock`.
 
 Config and stylesheet are watched: a save reloads both, a broken one keeps the last good

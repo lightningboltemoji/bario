@@ -26,7 +26,7 @@ enum LeafRole: Equatable {
         case .row, .column: self = .container
         case .text: self = .coverage
         case .icon: self = style.iconRendering == .monochrome ? .coverage : .image
-        case .meter: self = .meter
+        case .meter, .slider: self = .meter
         case .graph(let graph): self = graph.scroll == .smooth ? .scroller : .image
         case .canvas: self = .image
         case .raster: self = .pixels
@@ -104,7 +104,7 @@ struct RasterStyle: Hashable {
             strokeWidth = style.strokeWidth
             lineCap = style.lineCap
             custom = style.custom
-        case .row, .column, .meter, .spacer, .raster:
+        case .row, .column, .meter, .slider, .spacer, .raster:
             break
         }
     }

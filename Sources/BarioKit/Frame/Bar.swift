@@ -151,13 +151,19 @@ public final class Bar {
 }
 
 /// An item on one particular bar. Two displays can show items of the same name, and hovering
-/// one must not light up the other.
+/// one must not light up the other. `node` is the control inside it, by index path in its
+/// content, when the pointer is over one (PLAN.md M5).
 public struct ItemRef: Hashable, Sendable {
     public var bar: CGDirectDisplayID
     public var item: String
+    public var node: [Int]?
 
-    public init(bar: CGDirectDisplayID, item: String) {
+    public init(bar: CGDirectDisplayID, item: String, node: [Int]? = nil) {
         self.bar = bar
         self.item = item
+        self.node = node
     }
+
+    /// The item, whatever control in it.
+    public var bubble: ItemRef { ItemRef(bar: bar, item: item) }
 }

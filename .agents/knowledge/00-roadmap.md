@@ -36,8 +36,9 @@ it belongs:
   posted into a fully transparent hole still reaches the cover, so the cover only takes events
   while Option is held over it. See [15-interaction.md](15-interaction.md).
 
-Out of scope for this pass (DESIGN.md §12.8 "Later"): popovers, overflow catch-all item,
-`NSAccessibility`, WIT/Component Model.
+Out of scope for this pass (DESIGN.md §12.8 "Later"): overflow catch-all item,
+`NSAccessibility`, WIT/Component Model. Popovers came later as menus
+([24-menus.md](24-menus.md), PLAN.md).
 
 Deviations from the design, each argued where it is made: the WASM ABI packs `(ptr, len)` into
 one `i64` and returns host bytes as length-then-read ([13-wasm.md](13-wasm.md)); KDL accepts

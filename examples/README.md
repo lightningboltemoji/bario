@@ -311,3 +311,77 @@ item     { background: scheme(primary-container); color: scheme(on-primary-conta
 <image…>` what it would measure in any picture, with no bar running. `--shot` takes its palette
 from its `--backdrop`, so `bario --style examples/themes/slots.css --shot out.png --backdrop
 ~/Pictures/some.jpg` shows a theme over a wallpaper without setting it.
+
+## menus
+
+What drops down from an item when it is clicked (DESIGN.md §8). `wifi`, `volume`, `battery` and
+`brightness` bring their own; `bario --shot out.png --menu wifi` shows one without a running bar.
+This one is a control centre under the Apple logo: brightness and sound as sliders, reading other
+items' state with `/` and moving it with `send`, a keep-awake switch, and the Apple menu's
+commands.
+
+```kdl
+source "brightness" module="brightness"
+
+bar {
+  item "apple" module="exec" interval="watch" running=#false on-right-click="toggle" {
+    command "exec caffeinate -d -w $PPID"
+    content { icon "apple.logo" }
+    menu {
+      if "/brightness.has-display" {
+        row { icon "sun.max.fill" class="glyph"; slider value="{/brightness.display}" on-change="send brightness set-display" }
+      }
+      if "/brightness.has-keyboard" {
+        row { icon "light.max" class="glyph"; slider value="{/brightness.keyboard}" on-change="send brightness set-keyboard" }
+      }
+      row { icon "{/volume.level-icon}" class="glyph"; slider value="{/volume.fraction}" on-change="send volume set-level" }
+      row class="awake" on-click="toggle" keep-open=#true {
+        icon "cup.and.saucer.fill" class="glyph"; text "Keep awake"; spacer; icon "checkmark" class="check"
+      }
+      separator
+      row on-click="exec open 'x-apple.systempreferences:com.apple.SystemProfiler.AboutExtension'" { text "About This Mac" }
+      row on-click="exec open -b com.apple.systempreferences" { text "System Settings…" }
+      separator
+      row on-click="exec pmset sleepnow" { text "Sleep" }
+      row on-click=#"exec osascript -e 'tell app "loginwindow" to «event aevtrrst»'"# { text "Restart…" }
+      row on-click=#"exec osascript -e 'tell app "loginwindow" to «event aevtrsdn»'"# { text "Shut Down…" }
+      separator
+      row on-click="key ctrl+cmd+q" { text "Lock Screen" }
+    }
+  }
+  spacer
+  item "volume" module="volume" format="{icon}"
+}
+```
+
+```css
+/* Checked while caffeinate runs, which is when the item is .running. */
+#apple.running menu .awake .check { opacity: 1; }
+
+/* Bubbles in a colour of their own, and menus to match: the same tint, made solid as the bubble
+   shows over the wallpaper, since a menu hangs over windows; the same border and corners. A row
+   under the pointer lights from the text's own colour. */
+:root {
+  --tint: wallpaper(muted-dark);
+  --line: color-mix(in oklch, wallpaper(muted-light) 25%, transparent);
+}
+bar { color: on(var(--tint)); }
+item { background: color-mix(in oklch, var(--tint) 85%, transparent); border: 1.5pt var(--line); border-radius: 12pt; }
+menu {
+  background: color-mix(in srgb, var(--tint) 85%, wallpaper(dominant));
+  border: 1.5pt var(--line);
+  border-radius: 14pt;
+  shadow: none;
+}
+menu row:hover { background: color-mix(in oklch, currentColor 16%, transparent); }
+menu .separator { background: var(--line); }
+```
+
+The look is the stylesheet's: `menu` is the panel, every node in it is styled as on the bar, and
+only a node with an `on-…` action hovers, so `menu row:hover` lights up controls and nothing else.
+The built-in look draws a menu as one more bubble, in the bar's type and colour, so a bar that
+restyles its bubbles gives `menu` the same tint, border and corners, as above. `background: glass`
+is the system's Liquid Glass, for a menu that wants it.
+Lists come from `each "outputs" { row on-click="output {id}" … }`, and a tree written under an
+item's key as `menu` (by `exec`, `bario set` or a WASM module's `set`) is shown when the config has
+none.

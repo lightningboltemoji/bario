@@ -43,6 +43,11 @@ public enum Shot {
             palette = backdrop.image.map { Palette.extract($0, accent: accent) }
         }
 
+        if let item = options.shotMenu {
+            return try await menuShot(item, bar: bar, display: display, theme: theme, backdrop: backdrop,
+                                      palette: palette, options: options)
+        }
+
         let scene = try await scene(bar: bar, display: display, theme: theme,
                                     dark: options.dark ?? false, modes: options.modes, palette: palette)
 
@@ -79,6 +84,83 @@ public enum Shot {
                                                             palette: palette))
         let builder = SceneBuilder(cascade: cascade, metrics: metrics)
         return builder.build(bar: bar, display: display, items: bar.items, states: states, modes: modes)
+    }
+
+    /// `--shot --menu <item>`: the bar with that item's menu open under it, over the backdrop
+    /// stretched down the picture. Glass cannot be rendered offscreen, so a menu's backdrop here
+    /// is the picture behind it, which is what the bar's own glass stand-in blurs.
+    @MainActor
+    static func menuShot(_ item: String, bar: BarConfig, display: DisplayInfo, theme: Theme,
+                         backdrop: BackdropImage, palette: Palette?, options: RunOptions) async throws -> CGImage {
+        guard theme.config.item(named: item) != nil else {
+            throw OptionError("there is no item or source called '\(item)'")
+        }
+        let dark = options.dark ?? false
+        let scale = CGFloat(options.shotScale)
+        let host = ModuleHost()
+        await host.load(bar.items, sources: theme.config.sources)
+        await host.renderPending()
+        host.openMenu(item)
+        await host.renderPending()
+        let states = host.states
+        let menuState = host.menuState(for: item)
+        await host.shutdown()
+        if let error = menuState?.error { throw OptionError("\(item)'s menu: \(error)") }
+        guard let content = menuState?.content else { throw OptionError("\(item) has no menu") }
+
+        let environment = StyleEnvironment(dark: dark, accent: RGBA(NSColor.controlAccentColor), palette: palette)
+        let resolver = ColorResolver.system(dark: dark)
+        let builder = SceneBuilder(cascade: Cascade(stylesheet: theme.stylesheet, environment: environment),
+                                   resolver: resolver)
+        let barScene = builder.build(bar: bar, display: display, items: bar.items, states: states, modes: options.modes)
+        let styled = builder.styler.style(menu: content, of: item, bar: bar, states: states, modes: options.modes)
+
+        // The display's top edge is at 900; the cover hangs from it.
+        let cover = CGRect(x: 0, y: 900 - display.stripHeight, width: display.frame.width, height: display.stripHeight)
+        let anchorItem = barScene.allItems.first { $0.name == item } ?? barScene.items.first { $0.kind != .spacer }
+        let anchor = (anchorItem?.frame ?? .zero).offsetBy(dx: cover.minX, dy: cover.minY)
+        let menu = builder.layout.layout(menu: styled, anchor: anchor, top: cover.minY + barScene.bar.minY,
+                                         align: theme.config.item(named: item)?.menu?.align ?? .start, on: display)
+
+        // One picture: the backdrop down to the bottom of the menu, the bar on top, the menu on it.
+        let height = 900 - menu.frame.minY
+        let size = CGSize(width: display.frame.width, height: height)
+        // A picture behind it all, or the checkerboard again at the size of the whole shot.
+        let wall = options.shotBackdrop == nil
+            ? checkerboard(width: Int(size.width * scale), height: Int(size.height * scale), square: Int(8 * scale))
+            : backdrop.image
+        guard let wall,
+              let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale),
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw OptionError("could not render the menu")
+        }
+        ctx.scaleBy(x: scale, y: scale)
+        let canvas = CGRect(origin: .zero, size: size)
+        ctx.draw(wall, in: canvas)
+        let barBackdrop = BackdropImage()
+        barBackdrop.set(crop(wall, to: CGRect(x: 0, y: 0, width: size.width, height: display.stripHeight),
+                             of: canvas.size))
+        if let image = Offscreen.render(barScene, backdrop: barBackdrop, resolver: resolver, scale: scale) {
+            ctx.draw(image, in: CGRect(x: 0, y: height - display.stripHeight, width: size.width,
+                                       height: display.stripHeight))
+        }
+        let window = menu.frame.offsetBy(dx: 0, dy: height - 900)
+        let behind = BackdropImage()
+        behind.set(crop(wall, to: CGRect(x: window.minX, y: height - window.maxY, width: window.width,
+                                         height: window.height), of: canvas.size))
+        if let image = Offscreen.render(menu.scene, backdrop: behind, resolver: resolver, scale: scale) {
+            ctx.draw(image, in: window)
+        }
+        guard let image = ctx.makeImage() else { throw OptionError("could not render the menu") }
+        return image
+    }
+
+    /// The part of `image`, stretched over `size`, under `rect` measured from the top.
+    private static func crop(_ image: CGImage, to rect: CGRect, of size: CGSize) -> CGImage? {
+        let sx = CGFloat(image.width) / size.width, sy = CGFloat(image.height) / size.height
+        return image.cropping(to: CGRect(x: rect.minX * sx, y: rect.minY * sy,
+                                         width: rect.width * sx, height: rect.height * sy).integral)
     }
 
     /// A backdrop stand-in that makes transparency obvious in a screenshot.

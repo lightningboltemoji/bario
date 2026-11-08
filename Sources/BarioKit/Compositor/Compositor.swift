@@ -382,8 +382,12 @@ public final class Compositor {
             return layer
 
         case .meter:
-            guard case .meter(let meter) = node.kind else { return nil }
-            return applyMeter(meter, in: node.frame, style: style, colors: colors, record: record)
+            switch node.kind {
+            case .meter(let meter), .slider(let meter):
+                return applyMeter(meter, in: node.frame, style: style, colors: colors, record: record)
+            default:
+                return nil
+            }
 
         case .scroller:
             guard case .graph(let graph) = node.kind else { return nil }

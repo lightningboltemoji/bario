@@ -51,13 +51,16 @@ public actor StateStore {
 
     /// Deep merge, the socket's `set` semantics. Returns the items whose render is now stale.
     ///
-    /// Under an item's key, `content` is a content tree, and is replaced whole: two trees merged
-    /// key by key are neither, and a row followed by a text would hold two kinds.
+    /// Under an item's key, `content` and `menu` are content trees, and are replaced whole: two
+    /// trees merged key by key are neither, and a row followed by a text would hold two kinds.
     @discardableResult
     public func merge(_ patch: JSONValue, at path: String = "") -> Set<String> {
         var next = path.isEmpty ? root.merging(patch) : root.merging(patch, at: path)
-        if JSONValue.split(path).count == 1, let tree = patch["content"], !tree.isNull {
-            next = next.setting("\(path).content", to: tree)
+        if JSONValue.split(path).count == 1 {
+            for key in ["content", "menu"] {
+                guard let tree = patch[key], !tree.isNull else { continue }
+                next = next.setting("\(path).\(key)", to: tree)
+            }
         }
         return write(next, at: path, value: patch)
     }
@@ -275,7 +278,10 @@ public final class StateReader: @unchecked Sendable {
         value(path)
     }
 
+    /// A path inside this item's subtree, or with a leading `/`, anywhere in the store
+    /// (PLAN.md M9): `{/volume.fraction}` in a control centre's menu.
     public func value(_ path: String) -> JSONValue? {
+        if path.hasPrefix("/") { return global(String(path.dropFirst())) }
         let absolute = path.isEmpty ? item : "\(item).\(path)"
         record(absolute)
         return root.value(at: absolute)

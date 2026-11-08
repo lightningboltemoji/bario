@@ -1,6 +1,6 @@
 # bario design
 
-Status, September 2026: phases 1–7 (section 12) are built. The shared-surface source of phase
+Status, November 2026: phases 1–7 (section 12) are built, and menus (section 8) from phase 8. The shared-surface source of phase
 7 receives its surfaces through the one deprecated call in bario, `bootstrap_register`, because
 an app a user opens has no other way to be found by a Mach port (section 13).
 
@@ -85,6 +85,7 @@ custom node (section 9):
 | `text` | string | one run; style controls font, colour, weight |
 | `icon` | SF Symbol name, or `{ "file": path }` | SF Symbols are the reason to be on macOS; rendered at the current font size and colour |
 | `meter` | `{ value: 0…1, width }` | horizontal fill, e.g. battery, volume |
+| `slider` | `{ value: 0…1, width }` | a meter you can drag; it takes a row's free space and sends `on-change` (section 8) |
 | `graph` | `{ values: [..], width, max? }` | sparkline, e.g. network throughput, CPU |
 | `row` / `column` | `{ gap, align, children }` | containers |
 | `spacer` | `{ grow? }` | flexible space inside a row |
@@ -95,6 +96,11 @@ custom node (section 9):
 Every node takes an optional `class` (a list is fine) and `id`, so the stylesheet can address
 parts of an item: `#battery .pct { font-weight: semibold }`. `classes` at the top level are
 state classes on the item itself, in the waybar sense (`#battery.charging`, `#wifi.off`).
+
+Every node may also take `on-click`, `on-right-click`, `on-scroll` and, for a slider,
+`on-change`, in the action language of an item's own shortcuts (section 8). A node with one is a
+**control**: the pointer hits it, it matches `:hover` and `:active`, and its action runs as the
+item's would. That is all a menu's rows are (section 8), and it works on the bar too.
 
 The tree is data, not code. That is what lets the same shape travel over the socket as JSON,
 through WASM linear memory as JSON bytes, and out of built-in modules as Swift values. There is
@@ -128,6 +134,7 @@ The initial set, chosen because each one replaces something the cover is hiding:
 | `net` | `getifaddrs` counters on an interval | `rx`, `tx`, rolling history for `graph` |
 | `cpu` / `mem` | `host_statistics` on an interval | `load`, `used`, history |
 | `power` | the SMC's `PSTR` key on an interval, the battery's capacity from the IORegistry | `draw`, `level`, `time-remaining`, windows, history |
+| `brightness` | DisplayServices and CoreBrightness, private, looked up at run time; polled | `display`, `keyboard` (0…1), `has-display`, `has-keyboard`; `set-display`, `set-keyboard` |
 | `text` | none | static content from config |
 | `data` | nothing of its own | renders whatever was pushed under its key (Tier 2) |
 
@@ -172,7 +179,8 @@ target. For when a script is too slow, too chatty, or needs to react to events a
 
 Every module, whatever tier, has the same lifecycle: `init(config)`, then zero or more of
 `poll` (on its interval), `on-event` (store changes it subscribed to, clicks, system events),
-and `render(state) → content`. Built-in modules implement this as a Swift protocol; `exec`
+and `render(state) → content`. An item's menu is a second render of the same state, asked for
+only while it is open (section 8). Built-in modules implement this as a Swift protocol; `exec`
 implements it by running a process; WASM implements it by exporting functions. One protocol,
 three backends.
 
@@ -204,6 +212,7 @@ Client to bario:
 | `style` | `css` | apply a stylesheet delta live, for iterating on looks |
 | `reload` | | re-read config and stylesheet |
 | `frame` | `surface`, `index?` | a shared surface's producer drew into one of its pair; show that one, or the other one without `index` (section 9) |
+| `menu` | `target?` | open the item's (or source's) menu, or close it if it is open; with no target, close whatever menu is open (section 8) |
 
 bario to client: `{"id": …, "ok": true, …}` for replies, and `{"event": "click", "target":
 "volume", "button": "left", "x": …}` style lines for subscriptions. Connections are cheap;
@@ -839,9 +848,97 @@ entitlements. Pressing the menu bar clock through Accessibility opens it, but it
 third of a second later. fn+n is the system's own shortcut for it, and what it opens stays open
 (measured on macOS 27).
 
-Popovers (a calendar under the clock, a slider under volume) are a second window anchored
-to the item's frame. Deferred past v1, but the content model is the same tree, so nothing
-has to change to allow them.
+### Menus
+
+Clicking an item can drop a menu down from it: Wi-Fi's network and addresses, the outputs under
+volume, a control centre under the Apple logo. Earlier versions of this document said a popover
+would be "a second window anchored to the item's frame, and the content model is the same
+tree, so nothing has to change to allow them". That is how it was built, taken literally.
+
+**A menu is a second render of the item's state.** `menu { … }` on an item is a content tree,
+templated like `content` and filled from the item's state. Several nodes inside it are a column,
+since a menu is a list:
+
+```kdl
+item "wifi" module="wifi" format="{icon}" {
+  menu align="end" {
+    row class="title" { text "Wi-Fi"; spacer; text "{ssid}" class="value" }
+    row { text "IP address"; spacer; text "{ip}" class="value" }
+    separator
+    row on-click="exec open 'x-apple.systempreferences:com.apple.wifi-settings-extension'" {
+      text "Wi-Fi Settings…"
+    }
+  }
+}
+```
+
+Without one in the config, a tree written under the item's key as `menu` is shown (an `exec`
+line, `bario set`, a WASM module's `set`), and without that, the module's own default:
+`wifi`, `volume`, `battery` and `brightness` bring one, written in KDL in their source so that
+copying it is how to change it. A menu renders only while it is open, with its reads tracked
+apart from its bubble's, so it can show rates and addresses the bubble never does without the
+bubble restyling every second. It opens after its first render, as a bar comes on screen after
+its first frame, and a render with nothing in it opens nothing.
+
+Templates grew three things for menus, and they work in `content` too. `each "outputs" { … }`
+repeats what is inside it for every element of a list, reading slots from the element first;
+`if "ssid" { … }` (or `if "!ssid"`) keeps what is inside it while a value is truthy; and a slot
+starting with `/` reads from the root of the store, so a control centre can show
+`{/volume.fraction}`. A slot filled into an `on-…` action is single-quoted, so a network called
+`x; rm -rf ~` is one argument, to a module verb or to `exec`'s shell alike.
+
+**A menu is a one-item scene on a window of its own**: a non-activating panel at pop-up-menu
+level, a little larger than the panel so its shadow is not cut. The panel is a `SceneItem` whose
+content is the menu's tree, so the compositor, the animator, raster keys, tinted coverage,
+`transition`, `@starting-style` and `:leaving` all work as they do on a bar, through the same
+frame (section 10). The window hangs from the bottom of the bar, its left edge under the item's
+(`menu align="center"` or `"end"` otherwise), moved in to stay on the display; the gap is the
+menu's `margin-top`.
+
+**Styled as `menu`, under its item, inheriting from the bar.** The cascade path is
+`bar › group › item#wifi.classes › menu`, so `menu`, `#wifi menu` and `#battery.charging menu`
+all select it, but inherited properties come from the bar, not the bubble: a bubble's colour and
+icon size stay in the bubble. The menu's `opacity`, `transform` and `transition` are how its
+window comes and goes; the rest is the panel's chrome.
+
+**A menu looks like the bar, not like the system's menus**, because the bar does not look like
+the menu bar either. The built-in look makes it one more bubble: the bubble's colour as it shows
+over the wallpaper, made solid, since a menu hangs over windows rather than the desktop; the
+bar's type and colour, inherited; rows that light as a bubble does under the pointer; and
+everything dimmed in it (values, headers, separators, a slider's track) dimmed from its own
+colour rather than the system's label colours, so a bar restyled in any colour has a menu that
+still reads. A stylesheet that restyles its bubbles gives `menu` the same treatment, from the same
+custom properties: tint, border, radius and corner shape. The wallpaper's colour costs a bar nothing: a first frame never shows a menu,
+so a rule that styles only menus does not make the first frame wait for a palette.
+`background: glass` is there for a menu that wants the system's Liquid Glass after all:
+`NSGlassEffectView` behind the panel, following its box, radius and opacity, with `glass(clear)`
+and a tint colour as its knobs. A bar has the real menu bar behind it, which glass would show, so
+on a bar `glass` is the photograph blurred and saturated instead.
+
+**Controls.** A click on a control runs its action as its item's own shortcut would, and closes
+the menu, as choosing a menu item does, unless the control or something around it says
+`keep-open=#true`. A press that comes up on a control chooses it; Escape closes the menu, and the
+arrow keys and Return move through and choose its controls. A `slider` is dragged, scrolled or
+clicked, and sends `on-change` with `value` (0…1) in the payload, one at a time with the newest
+value next, so a drag never queues a process per pixel; an `exec` sees it as `BARIO_VALUE`. The
+slider shows where it was dragged to until a render after the release says otherwise.
+`separator` is a spacer with a class, which the default look draws as a line; nodes take
+`margin`, `width`, `min-width` and `max-width`, which is how it is spaced and how a column of
+glyphs lines up.
+
+Two verbs join the action language. `menu [item]` opens a menu, or closes it if it is open:
+the item's own by default, and what a click on an item with no `on-click` does. `menu wifi` on
+another item hangs Wi-Fi's menu from that item, and `bario menu wifi` opens it from the socket.
+`send <item> <verb> [args…]` delivers a verb to another item's or a source's module, so a control
+centre's slider can say `send volume set-level`. In content a WASM module wrote, every verb but
+`menu` goes back to that module as an event of that name: bario's own verbs would let it out of
+its sandbox.
+
+**While a menu is open its bar is shut**, whatever Option says, as the menu bar tracks while one
+of its menus is open: the hole closes, the bubbles hover, the item wears `:open`, and moving onto
+another item whose click opens a menu switches to it. A click outside bario, a click on the bar
+away from the item, Escape, or the item leaving the bar closes the menu. The window reaches up
+over the bar's bottom edge for its shadow, so a press there is passed on to the bar.
 
 ## 9. Custom renderers
 
@@ -1364,9 +1461,8 @@ Each phase ends with something you can run and look at.
    2. a layer and a raster key per node, text and symbols as tinted masks, meters as layers;
    3. renderers drawn at commit with `request_frame` per node, `transform` and `animation`,
       and the shared-surface raster source.
-8. **Later.** Popovers, an overflow catch-all item, accessibility (expose items through
-   `NSAccessibility`), a
-   Component Model / WIT binding once the tooling is boring.
+8. **Later.** Menus (built, section 8), an overflow catch-all item, accessibility (expose items
+   through `NSAccessibility`), a Component Model / WIT binding once the tooling is boring.
 
 ## 13. Open questions and known traps
 

@@ -133,7 +133,7 @@ public struct ProtocolError: Error, CustomStringConvertible {
 }
 
 public enum SocketVerb: String, CaseIterable, Sendable {
-    case set, content, emit, get, subscribe, unsubscribe, style, reload, ping, frame
+    case set, content, emit, get, subscribe, unsubscribe, style, reload, ping, frame, menu
 
     public static var names: String {
         allCases.map(\.rawValue).sorted().joined(separator: ", ")
@@ -151,6 +151,8 @@ public final class BarioService {
     public var onStyle: ((String) throws -> Void)?
     /// A producer has drawn into one of a shared surface's pair (DESIGN.md §9.3).
     public var onFrame: ((String, Int?) throws -> Void)?
+    /// An item's menu toggled, or with nil, whatever menu is open closed (PLAN.md M11).
+    public var onMenu: ((String?) throws -> Void)?
     /// How an event reaches the subscribers of a connection.
     public var publish: ((SocketEvent) -> Void)?
 
@@ -244,6 +246,11 @@ public final class BarioService {
             }
             guard let onFrame else { throw ProtocolError("this bario takes no surfaces") }
             try onFrame(surface, index)
+            return .ok(request.id)
+
+        case .menu:
+            guard let onMenu else { throw ProtocolError("this bario has no menus") }
+            try onMenu(request["target"]?.stringValue)
             return .ok(request.id)
 
         case .subscribe, .unsubscribe:

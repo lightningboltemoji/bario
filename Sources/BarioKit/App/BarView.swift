@@ -10,8 +10,9 @@ public final class BarView: NSView {
 
     /// Where pointer events go. Set by the controller.
     public var onEvent: (@MainActor (BarEvent) -> Void)?
-    /// The item a press went down on, and nil when it comes up: `:active`.
-    public var onPress: (@MainActor (String?) -> Void)?
+    /// The item a press went down on, and the control in it if any, and nil when it comes up:
+    /// `:active`.
+    public var onPress: (@MainActor ((item: String, node: [Int]?)?) -> Void)?
     /// The pointer moved over the bar while the window was taking events. The global
     /// monitor sees none of those moves, so they come from here.
     public var onPointer: (@MainActor () -> Void)?
@@ -96,14 +97,19 @@ public final class BarView: NSView {
     private func event(_ kind: BarEvent.Kind, _ nsEvent: NSEvent, delta: CGPoint = .zero) -> BarEvent {
         let point = convert(nsEvent.locationInWindow, from: nil)
         let item = item(at: point)
-        let local = item.map { CGPoint(x: point.x - $0.frame.minX, y: point.y - $0.frame.minY) } ?? point
-        return BarEvent(kind: kind, item: item?.name, point: point, local: local, delta: delta,
-                        modifiers: UInt(nsEvent.modifierFlags.rawValue))
+        let control = item?.content?.control(at: point)
+        let origin = control?.1.frame ?? item?.frame
+        let local = origin.map { CGPoint(x: point.x - $0.minX, y: point.y - $0.minY) } ?? point
+        var event = BarEvent(kind: kind, item: item?.name, point: point, local: local, delta: delta,
+                             modifiers: UInt(nsEvent.modifierFlags.rawValue))
+        event.node = control?.0
+        event.nodeID = control?.1.id
+        return event
     }
 
     public override func mouseDown(with nsEvent: NSEvent) {
         let event = event(.click, nsEvent)
-        onPress?(event.item)
+        onPress?(event.item.map { ($0, event.node) })
         onEvent?(event)
     }
 

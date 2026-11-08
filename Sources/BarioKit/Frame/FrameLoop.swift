@@ -110,6 +110,22 @@ public final class FrameLoop {
     // MARK: - State
 
     public private(set) var bars: [Bar] = []
+
+    // MARK: - Menus
+
+    /// The menu that is open, if any (PLAN.md M3). One at a time, as the menu bar's own.
+    public private(set) var menu: Menu?
+    /// Menus on their way out, easing to their `:leaving` style before their windows go.
+    public private(set) var closingMenus: [Menu] = []
+    /// A menu asked for and not rendered yet: it opens once its first render has something in
+    /// it, in place of the one that is open, and never if it has nothing (PLAN.md M2). One asked
+    /// for by a click that turns out to have nothing closes the open menu, as a click outside it
+    /// would; one the pointer moving onto an item asked for leaves it be.
+    public private(set) var pendingMenu: (item: String, anchor: ItemRef, hovering: Bool)?
+    /// Makes the window a menu is shown in, on a display. The controller's makes a panel; a
+    /// test's records.
+    public var makeMenuSurface: ((DisplayInfo) -> any MenuSurface)?
+
     /// How long a new bar waits for its first frame before it is shown anyway.
     public var revealDeadline = 1.0
     /// A backdrop for a bar whose capture has not come back by the deadline.
@@ -151,6 +167,7 @@ public final class FrameLoop {
         // refresh of each other, as every item on the same `Tick` does, are styled in one
         // frame and not one each. Nothing waits for a render that is still running.
         host.onRendered = { [weak self] item in self?.rendered(item) }
+        host.onMenuRendered = { [weak self] item in self?.menuRendered(item) }
         // A producer's `frame` changes a layer's contents and nothing else.
         surfaces.onChange = { [weak self] _ in self?.invalidate(.commit) }
     }
@@ -161,8 +178,12 @@ public final class FrameLoop {
     public func invalidate(_ stage: Stage) {
         switch stage {
         case .render: host.markDirty(Set(host.itemNames)); return
-        case .style: dirty.style.insertAll()
-        case .layout: dirty.layout.insertAll()
+        case .style:
+            dirty.style.insertAll()
+            dirty.menu = true
+        case .layout:
+            dirty.layout.insertAll()
+            dirty.menu = true
         case .present: dirty.present = true
         case .commit: dirty.commit.insertAll()
         }
@@ -191,6 +212,8 @@ public final class FrameLoop {
         case .present: dirty.present = true
         case .commit: dirty.commit.insert(id)
         }
+        // A menu is styled from its bar's palette and modes, and hangs from its bar.
+        if stage == .style || stage == .layout, menu?.anchor.bar == id { dirty.menu = true }
         requestFrame()
     }
 
@@ -211,6 +234,11 @@ public final class FrameLoop {
     /// An item's render finished and it looks different.
     private func rendered(_ item: String) {
         for bar in bars where bar.contains(item) { dirty.style.insert(bar.id) }
+        // A menu is selected by its item's classes: `#apple.running menu .check`.
+        if let menu, menu.item == item || menu.anchor.item == item {
+            menu.dirty = true
+            dirty.menu = true
+        }
         rendersWaiting = true
         requestFrame(atRefresh: true)
     }
@@ -241,6 +269,8 @@ public final class FrameLoop {
     public func removeBar(_ id: CGDirectDisplayID) {
         let measured = bars.contains { $0.id == id && $0.palette != nil }
         bars.removeAll { $0.id == id }
+        if menu?.anchor.bar == id { closeMenu() }
+        if pendingMenu?.anchor.bar == id { cancelPendingMenu() }
         if hovered?.bar == id { hovered = nil }
         if pressed?.bar == id { pressed = nil }
         if measured { publishPalettes() }
@@ -348,6 +378,7 @@ public final class FrameLoop {
     // MARK: - The pointer
 
     public func pointerMoved(to point: CGPoint) {
+        if point != pointer { menu?.hoverFromKeys = false }
         pointer = point
         if let id = revealed, !bars.contains(where: { $0.id == id && isNear(point, bar: $0) }) {
             revealed = nil
@@ -383,9 +414,10 @@ public final class FrameLoop {
 
     /// Whether a bar is bario's right now rather than a lens onto the real menu bar: its hole
     /// shut, and the pointer its own while it is over it. Option held, or, on a bar whose
-    /// Option reveals the real menu bar instead, Option not held.
+    /// Option reveals the real menu bar instead, Option not held; or one of its items has its
+    /// menu open, as the menu bar tracks while one of its menus is (PLAN.md M12).
     private func isShut(_ bar: Bar) -> Bool {
-        optionHeld != (bar.config?.option == .reveal)
+        optionHeld != (bar.config?.option == .reveal) || menu?.anchor.bar == bar.id
     }
 
     /// Which bar is interactive, and which item on it is hovered. Asked when the pointer moves
@@ -404,12 +436,288 @@ public final class FrameLoop {
             bar.surface.setTakesPointer(interactive)
         }
 
-        let next = pointer.flatMap { item(at: $0) }
-            .flatMap { $0.bar.isInteractive ? ItemRef(bar: $0.bar.id, item: $0.item.name) : nil }
+        let next = pointer.flatMap { point in item(at: point).flatMap { hit -> ItemRef? in
+            guard hit.bar.isInteractive else { return nil }
+            return ItemRef(bar: hit.bar.id, item: hit.item.name, node: control(at: point, in: hit)?.path)
+        } }
+        updateMenuHover()
         guard next != hovered else { return }
         let previous = hovered
         hovered = next
         for ref in [previous, next].compactMap({ $0 }) { invalidate(.style, bar: ref.bar) }
+        if let next, next.item != previous?.item { switchMenu(to: next) }
+    }
+
+    /// The control under a point on a bar, inside the item there.
+    private func control(at point: CGPoint, in hit: (bar: Bar, item: SceneItem)) -> (path: [Int], node: SceneNode)? {
+        let frame = hit.bar.surface.frame
+        let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        return hit.item.content?.control(at: local).map { (path: $0.0, node: $0.1) }
+    }
+
+    /// What is under a point on a bar: the item, and the control in it if there is one.
+    public func target(at point: CGPoint) -> (bar: Bar, item: SceneItem, control: (path: [Int], node: SceneNode)?)? {
+        guard let hit = item(at: point) else { return nil }
+        return (hit.bar, hit.item, control(at: point, in: hit))
+    }
+
+    // MARK: - Menus
+
+    /// Open `item`'s menu under `anchor`, or close it if it is the one open there (PLAN.md M11).
+    public func toggleMenu(_ item: String, from anchor: ItemRef) {
+        let anchor = anchor.bubble
+        if let menu, menu.item == item, menu.anchor == anchor {
+            closeMenu()
+        } else {
+            openMenu(item, from: anchor)
+        }
+    }
+
+    /// Ask for `item`'s menu under `anchor`. It opens once it has rendered, in place of any menu
+    /// that is open, if it has anything in it (PLAN.md M2).
+    public func openMenu(_ item: String, from anchor: ItemRef, hovering: Bool = false) {
+        let anchor = anchor.bubble
+        if let menu, menu.item == item, menu.anchor == anchor {
+            cancelPendingMenu()
+            return
+        }
+        if let pending = pendingMenu, pending.item == item, pending.anchor == anchor {
+            pendingMenu?.hovering = pending.hovering && hovering
+            return
+        }
+        cancelPendingMenu()
+        pendingMenu = (item, anchor, hovering)
+        host.openMenu(item)
+        // Already rendering for the menu that is open, which hangs from somewhere else.
+        if host.menuState(for: item)?.rendered == true { menuRendered(item) }
+    }
+
+    /// Close the open menu: it eases to its `:leaving` style, and its window goes once it is
+    /// there. Its bar is the pointer's again, as Option says.
+    public func closeMenu() {
+        cancelPendingMenu()
+        guard let menu else { return }
+        retire(menu, rendering: false)
+    }
+
+    private func retire(_ menu: Menu, rendering: Bool) {
+        if self.menu === menu { self.menu = nil }
+        menu.isClosing = true
+        menu.hovered = nil
+        menu.pressed = nil
+        menu.surface.setTakesPointer(false)
+        closingMenus.append(menu)
+        if !rendering { host.closeMenu(menu.item) }
+        dirty.menu = true
+        updatePointerTarget()
+        // It no longer wears `:open`, and the bar may open its hole again.
+        invalidate(.style, bar: menu.anchor.bar)
+        invalidate(.present)
+    }
+
+    private func cancelPendingMenu() {
+        guard let pending = pendingMenu else { return }
+        pendingMenu = nil
+        if pending.item != menu?.item { host.closeMenu(pending.item) }
+    }
+
+    /// Moving onto another item while a menu is open switches to that item's menu, if a click on
+    /// it would open one, as the menu bar's own titles do (PLAN.md M12).
+    private func switchMenu(to ref: ItemRef) {
+        guard let menu, ref.bar == menu.anchor.bar else { return }
+        guard ref.item != menu.anchor.item, let item = menuItem(forClickOn: ref.item) else {
+            cancelPendingMenu()
+            return
+        }
+        openMenu(item, from: ref, hovering: true)
+    }
+
+    /// Whose menu a click on an item opens: its own when it has no `on-click`, or the one a
+    /// `menu` shortcut names. nil when its click does something else.
+    public func menuItem(forClickOn name: String) -> String? {
+        guard let config = config.item(named: name) else { return nil }
+        guard let click = config.actions.click else { return name }
+        if case .menu(let other)? = Action.parse(click) { return other ?? name }
+        return nil
+    }
+
+    /// An open or asked-for menu rendered. A first render with something in it opens the menu;
+    /// one with nothing in it opens nothing; any other restyles the menu that is open.
+    private func menuRendered(_ item: String) {
+        guard let state = host.menuState(for: item) else { return }
+        if let pending = pendingMenu, pending.item == item {
+            pendingMenu = nil
+            guard state.content != nil,
+                  let bar = bars.first(where: { $0.id == pending.anchor.bar }),
+                  let make = makeMenuSurface else {
+                if menu?.item != item { host.closeMenu(item) }
+                if !pending.hovering { closeMenu() }
+                return
+            }
+            if let open = menu { retire(open, rendering: open.item == item) }
+            menu = Menu(item: item, anchor: pending.anchor, surface: make(bar.display))
+            updatePointerTarget()
+            invalidate(.style, bar: bar.id)
+            invalidate(.present)
+        }
+        guard let menu, menu.item == item else { return }
+        // A drag that has let go shows what the module made of it from now on.
+        if menu.dragged?.released == true { menu.dragged = nil }
+        menu.dirty = true
+        dirty.menu = true
+        // Styled at the next refresh, with whatever else lands by then, as a bubble's render is.
+        rendersWaiting = true
+        requestFrame(atRefresh: true)
+    }
+
+    /// The control under the pointer in the open menu, which hovers.
+    private func updateMenuHover() {
+        guard let menu, !menu.hoverFromKeys else { return }
+        var next: [Int]?
+        if let pointer, case .control(let path, _) = menu.target(at: pointer) { next = path }
+        guard next != menu.hovered else { return }
+        menu.hovered = next
+        menuChanged(menu)
+    }
+
+    /// Move the open menu's hover to the next control, or the one before, as the arrow keys do.
+    public func moveMenuHover(by step: Int) {
+        guard let menu, let content = menu.presentation?.scene.items.first?.content else { return }
+        var paths: [[Int]] = []
+        func visit(_ node: SceneNode, _ path: [Int]) {
+            if node.actions.isControl { paths.append(path) }
+            for (index, child) in node.children.enumerated() { visit(child, path + [index]) }
+        }
+        visit(content, [])
+        guard !paths.isEmpty else { return }
+        let current = menu.hovered.flatMap { paths.firstIndex(of: $0) }
+        let next = current.map { ($0 + step + paths.count) % paths.count } ?? (step > 0 ? 0 : paths.count - 1)
+        menu.hovered = paths[next]
+        menu.hoverFromKeys = true
+        menuChanged(menu)
+    }
+
+    /// The control a press went down on in the open menu, and nil when it comes up: `:active`.
+    public func pressMenu(_ path: [Int]?) {
+        guard let menu, menu.pressed != path else { return }
+        menu.pressed = path
+        menuChanged(menu)
+    }
+
+    /// A slider in the open menu dragged, or scrolled, to `value`. It shows that value until a
+    /// render after the release.
+    public func dragMenu(_ path: [Int], to value: Double) {
+        guard let menu else { return }
+        menu.dragged = (path, min(1, max(0, value)), false)
+        menuChanged(menu)
+    }
+
+    /// The drag let go. The slider keeps the dragged value until the next render lands.
+    public func releaseMenuDrag() {
+        guard let menu, let dragged = menu.dragged else { return }
+        menu.dragged = (dragged.path, dragged.value, true)
+    }
+
+    private func menuChanged(_ menu: Menu) {
+        menu.dirty = true
+        dirty.menu = true
+        requestFrame()
+    }
+
+    /// Where the open menu hangs from and what it is, laid out again when something changed:
+    /// returns false when it can no longer be shown, because its item or its bar has gone, or
+    /// it has nothing in it.
+    private func layOut(_ menu: Menu, force: Bool, at now: CFTimeInterval) -> Bool {
+        guard !hidden,
+              let bar = bars.first(where: { $0.id == menu.anchor.bar }), bar.isShowing,
+              let barConfig = bar.config,
+              let scene = bar.animator.target,
+              let anchorItem = scene.allItems.first(where: { $0.name == menu.anchor.item && !$0.states.contains(.leaving) }),
+              let state = host.menuState(for: menu.item) else { return false }
+        guard let content = state.content else { return !state.rendered && menu.layout != nil }
+        let frame = bar.surface.frame
+        let anchor = anchorItem.frame.offsetBy(dx: frame.minX, dy: frame.minY)
+        guard force || menu.dirty || menu.layout == nil || menu.anchorFrame != anchor else { return true }
+
+        // Styled as its bar is: the bar's palette, schemes and modes.
+        let sheet = stylesheet.appending(liveStyle)
+        var cascade = Cascade(stylesheet: sheet, environment: StyleEnvironment(dark: dark, accent: resolver.accent))
+        cascade.environment.palette = bar.palette ?? Palette.nothing(accent: resolver.accent)
+        cascade.environment.schemes = bar.schemes(for: sheet, in: cascade.environment)
+        let styled = Styler(cascade: cascade).style(
+            menu: menu.content(content), of: menu.item, bar: barConfig, states: host.states,
+            interaction: Styler.NodeInteraction(hovered: menu.hovered, active: menu.pressed),
+            modes: bar.modes(modes))
+        let layout = BarLayout(metrics: metrics, renderers: renderers, rasters: rasters, resolver: resolver)
+            .layout(menu: styled, anchor: anchor, top: frame.minY + scene.bar.minY,
+                    align: config.item(named: menu.item)?.menu?.align ?? .start, on: bar.display)
+
+        menu.styled = styled
+        menu.layout = layout
+        menu.anchorFrame = anchor
+        menu.dirty = false
+        menu.sceneChanged = true
+        menu.animator.retarget(layout.scene, at: now, animated: menu.isVisible)
+        if menu.surface.frame != layout.frame { menu.surface.place(layout.frame) }
+        return true
+    }
+
+    /// Lay out the open menu if it needs it, then present and commit it and those on their way
+    /// out. Returns whether any is still moving.
+    private func presentMenus(_ dirty: Dirty, at now: CFTimeInterval) -> (moving: Bool, committed: [CommitReport]) {
+        if let menu, !layOut(menu, force: dirty.menu, at: now) { closeMenu() }
+        var moving = false
+        var committed: [CommitReport] = []
+        for menu in [menu].compactMap({ $0 }) + closingMenus {
+            if let report = present(menu, at: now) { committed.append(report) }
+            if menu.moving { moving = true }
+        }
+        closingMenus.removeAll(where: \.finished)
+        return (moving, committed)
+    }
+
+    /// One menu at a timestamp: in from its `@starting-style` on its first frame, out to its
+    /// `:leaving` style once closed, and its window closed when it gets there.
+    @discardableResult
+    private func present(_ menu: Menu, at now: CFTimeInterval) -> CommitReport? {
+        var report: CommitReport?
+        var turned = false
+        if menu.isClosing, menu.closedAt == nil {
+            menu.closedAt = now
+            turned = menu.isVisible && menu.animator.leave(at: now)
+        } else if !menu.isClosing, !menu.isVisible, menu.animator.target != nil {
+            turned = menu.animator.arrive(at: now)
+        }
+        if let scene = menu.animator.presented(at: now) {
+            let isMoving = menu.animator.isMoving(at: now)
+            if menu.sceneChanged || menu.moving || turned {
+                let presentation = Presentation(scene: scene, isMoving: isMoving)
+                report = menu.compositor.commit(presentation,
+                                       inputs: Compositor.Inputs(backdrop: menu.backdrop, resolver: resolver,
+                                                                 scale: scene.display.scale,
+                                                                 renderers: renderers, rasters: rasters,
+                                                                 surfaces: surfaces),
+                                       sceneChanged: true)
+                menu.presentation = presentation
+                menu.surface.presented(presentation)
+            }
+            menu.sceneChanged = false
+            menu.moving = isMoving
+        }
+
+        let visible = menu.animator.target != nil
+            && (!menu.isClosing || (menu.isVisible && menu.animator.isOnItsWayOut(at: now)))
+        if visible != menu.isVisible {
+            menu.isVisible = visible
+            menu.surface.setVisible(visible)
+            menu.surface.setTakesPointer(visible && !menu.isClosing)
+        }
+        if menu.isClosing, !visible, !menu.finished {
+            menu.finished = true
+            menu.moving = false
+            menu.surface.close()
+        }
+        return report
     }
 
     // MARK: - The frame
@@ -445,6 +753,8 @@ public final class FrameLoop {
                 drawing = true
             }
         }
+        // An open menu, and those on their way out, after the bars they hang from.
+        let (menusMoving, menuCommits) = presentMenus(dirty, at: now)
         updatePointerTarget()
         inFrame = false
 
@@ -452,16 +762,17 @@ public final class FrameLoop {
         // drawn again, hover changing under a pointer standing still — waits for the next
         // refresh, so no frame can feed the next one faster than the display shows them.
         let next: String
-        if drawing || bars.contains(where: \.moving) || !self.dirty.isEmpty {
+        if drawing || menusMoving || bars.contains(where: \.moving) || !self.dirty.isEmpty {
             framePending = true
             scheduler.scheduleRefresh()
             next = "refresh"
         } else {
             next = "idle"
         }
-        trace?(String(format: "frame %d at %.3f: %@laid out %d, committed %d of %d%@ in %.2fms → %@",
+        trace?(String(format: "frame %d at %.3f: %@laid out %d, committed %d of %d%@%@ in %.2fms → %@",
                       frameCount, now, dirty.summary, laidOut.count, committed.count, bars.count,
                       committed.isEmpty ? "" : " (" + committed.map(\.description).joined(separator: "; ") + ")",
+                      menuCommits.isEmpty ? "" : ", menu (" + menuCommits.map(\.description).joined(separator: "; ") + ")",
                       (CACurrentMediaTime() - started) * 1000, next))
     }
 
@@ -496,7 +807,10 @@ public final class FrameLoop {
                 styler.cascade.environment.schemes = bar.schemes(for: sheet, in: styler.cascade.environment)
                 let interaction = Styler.Interaction(
                     hovered: hovered?.bar == bar.id ? hovered?.item : nil,
-                    active: pressed?.bar == bar.id ? pressed?.item : nil)
+                    active: pressed?.bar == bar.id ? pressed?.item : nil,
+                    hoveredNode: hovered?.bar == bar.id ? hovered?.node : nil,
+                    activeNode: pressed?.bar == bar.id ? pressed?.node : nil,
+                    open: menu?.anchor.bar == bar.id ? menu?.anchor.item : nil)
                 bar.styled = styler.style(bar: config, items: (banner.map { [$0.config] } ?? []) + config.items,
                                           states: states, interaction: interaction,
                                           modes: bar.modes(modes))
@@ -614,15 +928,17 @@ struct Dirty {
     var layout = BarSet()
     var present = false
     var commit = BarSet()
+    /// The open menu restyles and lays out again.
+    var menu = false
 
     var isEmpty: Bool {
-        !render && style.isEmpty && layout.isEmpty && !present && commit.isEmpty
+        !render && style.isEmpty && layout.isEmpty && !present && commit.isEmpty && !menu
     }
 
     /// The dirty stages, earliest first, for a trace.
     var summary: String {
         [(render, "render"), (!style.isEmpty, "style"), (!layout.isEmpty, "layout"),
-         (present, "present"), (!commit.isEmpty, "commit")]
+         (present, "present"), (!commit.isEmpty, "commit"), (menu, "menu")]
             .filter(\.0).map { $0.1 + " " }.joined()
     }
 }

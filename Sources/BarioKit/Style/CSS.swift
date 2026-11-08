@@ -207,9 +207,14 @@ public struct Stylesheet: Sendable, Hashable {
     }
 
     /// Whether anything here is coloured from the wallpaper, so a bar's first frame has a
-    /// palette to wait for (PLAN.md W7).
+    /// palette to wait for (PLAN.md W7). A first frame never shows a menu, so a rule that styles
+    /// only menus and what is in them has nothing to wait for: the built-in look's menus are
+    /// coloured from the wallpaper, and a bar that is not should not wait on them.
     public var usesWallpaper: Bool {
-        rules.contains { $0.declarations.contains { $0.value.mentions(CSSComponent.fromWallpaper) } }
+        rules.contains { rule in
+            let menuOnly = !rule.selectors.isEmpty && rule.selectors.allSatisfy(\.isInMenu)
+            return !menuOnly && rule.declarations.contains { $0.value.mentions(CSSComponent.fromWallpaper) }
+        }
     }
 
     public func appending(_ other: Stylesheet) -> Stylesheet {

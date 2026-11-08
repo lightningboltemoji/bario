@@ -18,6 +18,12 @@ public struct Config: Sendable, Equatable {
         self.modes = modes
     }
 
+    /// The first item or source of that name, which is the one that runs.
+    public func item(named name: String) -> ItemConfig? {
+        bars.lazy.flatMap(\.items).flatMap(\.flattened).first { $0.name == name }
+            ?? sources.first { $0.name == name }
+    }
+
     /// The bar a display should show: the most specific `bar` node that matches it.
     public func bar(for display: DisplayInfo) -> BarConfig? {
         bars.compactMap { bar in bar.display.score(for: display).map { (bar, $0) } }
@@ -216,8 +222,11 @@ public struct ItemConfig: Sendable, Equatable {
     /// A content tree with slots in it, filled from the item's state on every render; what a
     /// `content` block is when any string in it names a slot.
     public var template: ContentTemplate?
+    /// What drops down when the item is clicked (PLAN.md M1).
+    public var menu: MenuConfig?
     public var align: Align?
-    /// The whole config node as JSON — what the module receives from `init(config)`.
+    /// The whole config node as JSON — what the module receives from `init(config)`. Not the
+    /// menu, which is bario's to render and not the module's to read.
     public var options: JSONValue = .object([:])
     public var position: KDLPosition = .start
 
@@ -232,6 +241,44 @@ public struct ItemConfig: Sendable, Equatable {
     /// Depth-first, self first: every item that owns a state key.
     public var flattened: [ItemConfig] {
         [self] + children.flatMap(\.flattened)
+    }
+}
+
+/// An item's `menu { … }`: a content tree filled from the item's state while the menu is open,
+/// as `content` is filled for its bubble. PLAN.md M1, M14.
+public struct MenuConfig: Sendable, Equatable {
+    public var content: Node?
+    public var template: ContentTemplate?
+    /// Which of the item's edges the menu's lines up with: `start` (the left, as the menu bar's
+    /// own menus do), `center` or `end`.
+    public var align: Align = .start
+    public var position: KDLPosition = .start
+
+    public init(content: Node? = nil, template: ContentTemplate? = nil, align: Align = .start,
+                position: KDLPosition = .start) {
+        self.content = content
+        self.template = template
+        self.align = align
+        self.position = position
+    }
+
+    /// The tree for this state: the content as written, or the template filled.
+    public func render(_ state: StateReader) throws -> Node? {
+        if let content { return content }
+        return try template?.render(state)
+    }
+
+    /// A built-in module's default menu, written in KDL as a config would write it. A mistake in
+    /// one is bario's, so it is said once and the module has no menu.
+    public static func builtIn(_ kdl: String, for module: String) -> MenuConfig? {
+        do {
+            let nodes = try KDL.parse(kdl, source: "<\(module)'s menu>")
+            let (content, template) = try KDLNode.menuContent(nodes, at: nodes.first?.position ?? .start)
+            return MenuConfig(content: content, template: template)
+        } catch {
+            warn("\(module)'s built-in menu: \(error)")
+            return nil
+        }
     }
 }
 

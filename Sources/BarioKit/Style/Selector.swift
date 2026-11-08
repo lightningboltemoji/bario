@@ -3,6 +3,8 @@ import Foundation
 /// A pseudo-class, i.e. a state the scene tree can be in.
 public enum StyleState: String, Sendable, Hashable, CaseIterable {
     case hover, active, overflow, stale, error
+    /// An item whose menu is showing, hanging from it (PLAN.md M12).
+    case open
     /// An item on its way out: the style it transitions to after it leaves the layout.
     case leaving
     case firstChild = "first-child"
@@ -37,6 +39,9 @@ public struct Selector: Sendable, Hashable {
         self.parts = parts
         self.position = position
     }
+
+    /// Whether it matches only a menu or something in one: a `menu` is in its chain.
+    public var isInMenu: Bool { parts.contains { $0.type == "menu" } }
 
     /// CSS specificity: ids, then classes and pseudo-classes, then types.
     public var specificity: Specificity {

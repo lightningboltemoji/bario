@@ -16,6 +16,11 @@ public protocol Module: Actor {
     /// The only required method. Pure: state in, content out.
     func render(_ state: StateReader) async throws -> RenderResult
 
+    /// What drops down from the item when its config has no `menu` and nothing wrote one: a
+    /// second render of the same state, asked for only while the menu is open. nil is no menu,
+    /// which is the default. PLAN.md M1, M2.
+    func menu(_ state: StateReader) async throws -> Node?
+
     func stop() async
 }
 
@@ -23,6 +28,7 @@ extension Module {
     public func start() async {}
     public func poll() async -> PollResult { PollResult() }
     public func onEvent(_ event: ModuleEvent) async -> JSONValue? { nil }
+    public func menu(_ state: StateReader) async throws -> Node? { nil }
     public func stop() async {}
 }
 
@@ -161,6 +167,7 @@ public enum ModuleRegistry {
             "cpu": { try CPUModule(context: $0) },
             "mem": { try MemModule(context: $0) },
             "power": { try PowerModule(context: $0) },
+            "brightness": { BrightnessModule(context: $0) },
             "exec": { try ExecModule(context: $0) },
             "wasm": { try WasmModule(context: $0) },
         ]

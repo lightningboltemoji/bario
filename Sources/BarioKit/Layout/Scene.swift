@@ -135,6 +135,8 @@ public struct SceneNode: @unchecked Sendable {
     public var children: [SceneNode]
     public var id: String?
     public var classes: [String]
+    /// What the pointer does to it; a node with any is a control (PLAN.md M5).
+    public var actions: NodeActions = NodeActions()
     /// A `canvas` node's ops, parsed when the scene is built, because commits happen far more
     /// often than content changes. A renderer's drawing is kept by the compositor instead, and
     /// set here only on the node it commits.

@@ -10,12 +10,38 @@ public struct Styler: Sendable {
         self.cascade = cascade
     }
 
-    /// Which item the pointer is over, and which is being pressed.
+    /// Which item the pointer is over, and which is being pressed; the control inside it under
+    /// the pointer or the press, by its index path in the item's content; and the item a menu
+    /// hangs from.
     public struct Interaction: Sendable, Hashable {
         public var hovered: String?
         public var active: String?
+        public var hoveredNode: [Int]?
+        public var activeNode: [Int]?
+        public var open: String?
 
-        public init(hovered: String? = nil, active: String? = nil) {
+        public init(hovered: String? = nil, active: String? = nil, hoveredNode: [Int]? = nil,
+                    activeNode: [Int]? = nil, open: String? = nil) {
+            self.hovered = hovered
+            self.active = active
+            self.hoveredNode = hoveredNode
+            self.activeNode = activeNode
+            self.open = open
+        }
+
+        /// The controls under the pointer and the press, in one item's content.
+        func nodes(in item: String) -> NodeInteraction {
+            NodeInteraction(hovered: hovered == item ? hoveredNode : nil,
+                            active: active == item ? activeNode : nil)
+        }
+    }
+
+    /// The control the pointer is over and the one being pressed, by index path in a tree.
+    public struct NodeInteraction: Sendable, Hashable {
+        public var hovered: [Int]?
+        public var active: [Int]?
+
+        public init(hovered: [Int]? = nil, active: [Int]? = nil) {
             self.hovered = hovered
             self.active = active
         }
@@ -112,6 +138,7 @@ public struct Styler: Sendable {
         var itemStates = structural
         if interaction.hovered == config.name { itemStates.insert(.hover) }
         if interaction.active == config.name { itemStates.insert(.active) }
+        if interaction.open == config.name { itemStates.insert(.open) }
         if state?.stale == true { itemStates.insert(.stale) }
         if state?.error != nil { itemStates.insert(.error) }
         if case .module = config.kind, state?.result.content == nil { itemStates.insert(.empty) }
@@ -142,8 +169,9 @@ public struct Styler: Sendable {
                                      parentPath: path, parentStyle: style,
                                      shown: shown, interaction: interaction)
         case .module:
+            let nodes = interaction.nodes(in: config.name)
             item.content = state?.result.content.map {
-                styleNode($0, parentPath: path, parentStyle: style)
+                styleNode($0, parentPath: path, parentStyle: style, interaction: nodes)
             }
         case .spacer, .notch:
             break
@@ -163,28 +191,91 @@ public struct Styler: Sendable {
     // MARK: - Content
 
     /// `structural` is where the node sits among its siblings, so `.stacked text:last-child`
-    /// reaches the second line of a column as `group item:last-child` reaches an item.
+    /// reaches the second line of a column as `group item:last-child` reaches an item. A control
+    /// under the pointer or the press is `:hover` or `:active` (PLAN.md M5), found by `index`,
+    /// its path in the tree.
     private func styleNode(_ node: Node, parentPath: [StyleNode], parentStyle: Style,
-                           structural: Set<StyleState> = []) -> SceneNode {
+                           structural: Set<StyleState> = [], index: [Int] = [],
+                           interaction: NodeInteraction = NodeInteraction()) -> SceneNode {
+        var states = structural
+        if node.actions.isControl {
+            if interaction.hovered == index { states.insert(.hover) }
+            if interaction.active == index { states.insert(.active) }
+        }
         let path = parentPath + [StyleNode(type: node.typeName, id: node.id,
-                                           classes: Set(node.classes), states: structural)]
+                                           classes: Set(node.classes), states: states)]
         let style = cascade.style(for: path, inheriting: parentStyle).style
         var styled = SceneNode(kind: node.kind, style: style, id: node.id, classes: node.classes)
+        styled.actions = node.actions
         switch node.kind {
         case .row(let container), .column(let container):
             let count = container.children.count
-            styled.children = container.children.enumerated().map { index, child in
+            styled.children = container.children.enumerated().map { position, child in
                 var structural: Set<StyleState> = []
-                if index == 0 { structural.insert(.firstChild) }
-                if index == count - 1 { structural.insert(.lastChild) }
+                if position == 0 { structural.insert(.firstChild) }
+                if position == count - 1 { structural.insert(.lastChild) }
                 if count == 1 { structural.insert(.onlyChild) }
-                return styleNode(child, parentPath: path, parentStyle: style, structural: structural)
+                return styleNode(child, parentPath: path, parentStyle: style, structural: structural,
+                                 index: index + [position], interaction: interaction)
             }
         default:
             break
         }
         return styled
     }
+
+    // MARK: - Menus
+
+    /// An item's open menu (PLAN.md M4). It is selected under its item, as
+    /// `bar › group › item#name.classes › menu`, so `#wifi menu` and `#battery.charging menu`
+    /// reach it; but it inherits from the bar, so a bubble's colour and sizes stay in the bubble.
+    public func style(menu content: Node, of item: String, bar: BarConfig, states: [String: ModuleHost.ItemState],
+                      interaction: NodeInteraction = NodeInteraction(), modes: Set<String> = []) -> StyledMenu {
+        let barNode = StyleNode(type: "bar", id: nil, classes: modes, states: [])
+        let barStyle = cascade.style(for: [barNode]).style
+        var path = [barNode]
+        // The groups the item is in, if it is on this bar; a source's is selected by its name alone.
+        for ancestor in Styler.ancestry(of: item, in: bar.items) ?? [] {
+            var classes = Set(states[ancestor.name]?.result.classes ?? [])
+            if states[ancestor.name]?.error != nil { classes.insert("error") }
+            let type = ancestor.name == item ? "item" : "group"
+            path.append(StyleNode(type: type, id: ancestor.name, classes: classes,
+                                  states: ancestor.name == item ? [.open] : []))
+        }
+        if path.count == 1 {
+            path.append(StyleNode(type: "item", id: item, classes: Set(states[item]?.result.classes ?? []),
+                                  states: [.open]))
+        }
+        path.append(StyleNode(type: "menu", id: nil, classes: [], states: []))
+        let style = cascade.style(for: path, inheriting: barStyle).style
+        return StyledMenu(item: item, style: style,
+                          starting: cascade.startingStyle(for: path, inheriting: barStyle),
+                          leaving: cascade.leavingStyle(for: path, inheriting: barStyle),
+                          content: styleNode(content, parentPath: path, parentStyle: style,
+                                             interaction: interaction))
+    }
+
+    /// The item called `name` and the groups it is in, outermost first.
+    static func ancestry(of name: String, in items: [ItemConfig]) -> [ItemConfig]? {
+        for item in items {
+            if item.name == name { return [item] }
+            if let inner = ancestry(of: name, in: item.children) { return [item] + inner }
+        }
+        return nil
+    }
+}
+
+/// An open menu after the style stage: what its layout works from.
+public struct StyledMenu: Sendable {
+    /// Whose menu it is.
+    public var item: String
+    /// The `menu` element's: the window's opacity and transform, and the panel's chrome.
+    public var style: Style
+    /// What it comes in from and goes out to, if the stylesheet says.
+    public var starting: Style?
+    public var leaving: Style?
+    /// The menu's tree, styled, with no frames yet.
+    public var content: SceneNode
 }
 
 /// One bar after the style stage: what layout works from.

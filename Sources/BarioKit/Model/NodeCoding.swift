@@ -12,8 +12,9 @@ extension Node: Codable {
         static let `class` = Key(stringValue: "class")
     }
 
-    /// Keys that describe the node rather than name its kind.
-    private static let reserved: Set<String> = ["id", "class"]
+    /// Keys that describe the node rather than name its kind: the stylesheet's hooks, and what
+    /// the pointer does to it (PLAN.md M5).
+    private static let reserved: Set<String> = Set(["id", "class"] + NodeActions.keys)
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Key.self)
@@ -23,7 +24,7 @@ extension Node: Codable {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: decoder.codingPath,
                 debugDescription: "a content node needs a kind key, one of "
-                    + "text, icon, meter, graph, row, column, spacer, canvas, raster, "
+                    + "text, icon, meter, slider, graph, row, column, spacer, canvas, raster, "
                     + "or a node type registered by a renderer"))
         }
         guard kindKeys.count == 1 else {
@@ -36,6 +37,32 @@ extension Node: Codable {
         kind = try Node.decodeKind(named: key.stringValue, from: c, key: key, path: decoder.codingPath)
         id = try c.decodeIfPresent(String.self, forKey: .id)
         classes = try c.decodeIfPresent(StringList.self, forKey: .class)?.values ?? []
+        actions = try Node.decodeActions(from: c, path: decoder.codingPath)
+    }
+
+    private static func decodeActions(from c: KeyedDecodingContainer<Key>,
+                                      path: [CodingKey]) throws -> NodeActions {
+        func action(_ name: String) throws -> String? {
+            let key = Key(stringValue: name)
+            guard c.contains(key) else { return nil }
+            let value = try c.decode(JSONValue.self, forKey: key)
+            if value.isNull { return nil }
+            guard let text = value.stringValue else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: path + [key], debugDescription: "\(name) takes an action, like \"exec open -a Music\""))
+            }
+            // An empty action, from a slot with nothing in it, is no action.
+            return text.trimmingCharacters(in: .whitespaces).isEmpty ? nil : text
+        }
+        var keepOpen = false
+        let keepKey = Key(stringValue: "keep-open")
+        if c.contains(keepKey) {
+            let value = try c.decode(JSONValue.self, forKey: keepKey)
+            keepOpen = value.boolValue ?? (value.stringValue.map { $0 == "true" } ?? false)
+        }
+        return NodeActions(click: try action("on-click"), rightClick: try action("on-right-click"),
+                           scroll: try action("on-scroll"), change: try action("on-change"),
+                           keepOpen: keepOpen)
     }
 
     private static func decodeKind(named name: String,
@@ -61,13 +88,17 @@ extension Node: Codable {
             if let s = (v["symbol"] ?? v["name"])?.stringValue { return .icon(.symbol(s)) }
             throw bad("icon takes an SF Symbol name, or an object with \"file\" or \"symbol\"")
 
-        case "meter":
+        case "meter", "slider":
             let v = try payload()
-            if let n = v.doubleValue { return .meter(Meter(value: n)) }
-            guard let value = v["value"]?.doubleValue else {
-                throw bad("meter needs a numeric \"value\" from 0 to 1")
+            let meter: Meter
+            if let n = v.doubleValue {
+                meter = Meter(value: n)
+            } else if let value = v["value"]?.doubleValue {
+                meter = Meter(value: value, width: v["width"]?.doubleValue)
+            } else {
+                throw bad("\(name) needs a numeric \"value\" from 0 to 1")
             }
-            return .meter(Meter(value: value, width: v["width"]?.doubleValue))
+            return name == "meter" ? .meter(meter) : .slider(meter)
 
         case "graph":
             let v = try payload()
@@ -157,7 +188,7 @@ extension Node: Codable {
             try c.encode(s, forKey: key)
         case .icon(.file(let f)):
             try c.encode(JSONValue.object(["file": .string(f)]), forKey: key)
-        case .meter(let m):
+        case .meter(let m), .slider(let m):
             var o: [String: JSONValue] = ["value": .number(m.value)]
             if let w = m.width { o["width"] = .number(w) }
             try c.encode(JSONValue.object(o), forKey: key)
@@ -190,6 +221,11 @@ extension Node: Codable {
         }
         try c.encodeIfPresent(id, forKey: .id)
         if !classes.isEmpty { try c.encode(classes, forKey: .class) }
+        for (name, value) in [("on-click", actions.click), ("on-right-click", actions.rightClick),
+                              ("on-scroll", actions.scroll), ("on-change", actions.change)] {
+            try c.encodeIfPresent(value, forKey: Key(stringValue: name))
+        }
+        if actions.keepOpen { try c.encode(true, forKey: Key(stringValue: "keep-open")) }
     }
 }
 
@@ -218,4 +254,6 @@ extension Node {
         Node(.column(Container(gap: gap, align: align, children: children)), id: id, classes: classes)
     }
     public static func spacer(grow: Double? = nil) -> Node { Node(.spacer(Spacer(grow: grow))) }
+    /// A line across a menu, between groups of rows: a spacer the stylesheet draws.
+    public static var separator: Node { Node(.spacer(Spacer()), classes: ["separator"]) }
 }

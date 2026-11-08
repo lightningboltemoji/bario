@@ -249,11 +249,13 @@ public actor ExecModule: Module {
         return environment
     }
 
-    static func run(path: String, arguments: [String], item: String) throws -> ExecResult {
+    /// `extra` is more of the environment: a slider's `on-change` runs with `BARIO_VALUE`.
+    static func run(path: String, arguments: [String], item: String,
+                    extra: [String: String] = [:]) throws -> ExecResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
-        process.environment = environment(item: item)
+        process.environment = environment(item: item).merging(extra) { _, new in new }
         let out = Pipe()
         let err = Pipe()
         process.standardOutput = out

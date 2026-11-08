@@ -118,9 +118,10 @@ public enum ConfigLoader {
         let source = try parseItem(node, ordinal: 0)
         let shown = source.format != nil || source.content != nil || source.template != nil
             || source.when != nil || source.unless != nil || source.actions != Actions()
+            || source.menu != nil
         if shown {
             throw KDLError("source \"\(source.name)\" is never shown, so it takes no format, content, "
-                           + "when, unless or on-click; show its state from an item", at: node.position)
+                           + "menu, when, unless or on-click; show its state from an item", at: node.position)
         }
         return source
     }
@@ -254,7 +255,12 @@ public enum ConfigLoader {
         var item = ItemConfig(name: node.argument(0)?.value.stringValue ?? "\(node.name)-\(ordinal)",
                               kind: .spacer,
                               position: node.position)
-        item.options = node.json
+        // The menu is bario's, rendered from the item's state, and not an option of the module:
+        // editing it neither reaches nor restarts the module.
+        item.options = KDLNode(name: node.name, typeAnnotation: node.typeAnnotation,
+                               arguments: node.arguments, properties: node.properties,
+                               children: node.children.filter { $0.name != "menu" },
+                               position: node.position).json
 
         switch node.name {
         case "spacer":
@@ -337,10 +343,43 @@ public enum ConfigLoader {
                                    + "the other", at: child.position)
                 }
                 (item.content, item.template) = try child.children[0].contentOrTemplate()
+            case "menu":
+                guard item.moduleName != nil else {
+                    throw KDLError("only an item has a menu; a \(node.name) has no state to fill one from",
+                                   at: child.position)
+                }
+                guard item.menu == nil else {
+                    throw KDLError("item \"\(item.name)\" has two menus", at: child.position)
+                }
+                item.menu = try menu(child)
             default: continue
             }
         }
         return item
+    }
+
+    /// `menu align="end" { row { text "{ssid}" } … }`: one node, or several in a column.
+    private static func menu(_ node: KDLNode) throws -> MenuConfig {
+        guard node.arguments.isEmpty else {
+            throw KDLError("menu takes align= and its rows as nodes inside it", at: node.position)
+        }
+        var menu = MenuConfig(position: node.position)
+        for property in node.properties {
+            switch property.name {
+            case "align":
+                guard let raw = property.value.stringValue, let align = Align(rawValue: raw),
+                      [.start, .center, .end].contains(align) else {
+                    throw KDLError("a menu's align is \"start\", \"center\" or \"end\": which of the item's "
+                                   + "edges it lines up with", at: property.position)
+                }
+                menu.align = align
+            default:
+                throw KDLError("menu takes align=, not '\(property.name)'; how it looks is the stylesheet's "
+                               + "(menu { … })", at: property.position)
+            }
+        }
+        (menu.content, menu.template) = try KDLNode.menuContent(node.children, at: node.position)
+        return menu
     }
 
     // MARK: - Styling

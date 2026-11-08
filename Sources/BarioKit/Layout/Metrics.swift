@@ -111,11 +111,13 @@ public final class CoreTextMetrics: Metrics, @unchecked Sendable {
     /// of its point size would have there (`drawText` centres the ascender/descender box), so
     /// symbols sit level with each other and with text. The alignment rectangle starts at the
     /// symbol's baseline. Taller symbols reach past the frame, up to about a third of the point
-    /// size each way (`NodeRasterizer.overhang`).
+    /// size each way (`NodeRasterizer.overhang`). In a frame wider than itself, given a `width`
+    /// so a column of symbols lines up, it is centred.
     public static func symbolRect(_ image: NSImage, in frame: CGRect, style: Style) -> CGRect {
         let font = NSFont.systemFont(ofSize: style.effectiveIconSize)
         let baseline = frame.midY - (font.ascender + font.descender) / 2
-        return CGRect(x: frame.minX, y: baseline - image.alignmentRect.minY,
+        return CGRect(x: frame.minX + max(0, (frame.width - image.size.width) / 2),
+                      y: baseline - image.alignmentRect.minY,
                       width: image.size.width, height: image.size.height)
     }
 

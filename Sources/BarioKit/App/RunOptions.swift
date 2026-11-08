@@ -18,6 +18,8 @@ public struct RunOptions: Sendable {
     /// `--shot-window <gap>`: a focused window this many points below the bar, full width, so a
     /// shot shows the shadow the real thing would cast.
     public var shotWindow: Double?
+    /// `--menu <item>`: the shot is that item's menu, open under the bar.
+    public var shotMenu: String?
     /// Cast the shadows of the windows behind the bar. On by default: without them the bar ends
     /// in a hard edge wherever a window is near the top of the screen.
     public var windowShadows = true
@@ -57,6 +59,8 @@ public struct RunOptions: Sendable {
       --backdrop <path>     an image to use as the photographed backdrop
       --scale <n>           points per pixel (default 2)
       --window <gap>        cast the shadow of a focused window this many points below the bar
+      --menu <item>         show that item's menu open under the bar; glass is stood in for by
+                            the backdrop, blurred
 
     Quit from the menu bar item, or with Ctrl-C.
     """
@@ -84,6 +88,7 @@ public struct RunOptions: Sendable {
             case "--debug-tint": o.debugTint = true
             case "--no-window-shadows": o.windowShadows = false
             case "--window": o.shotWindow = try number("--window")
+            case "--menu": o.shotMenu = try value("--menu")
             case "--dark": o.dark = true
             case "--light": o.dark = false
             case "--diagnose": o.diagnose = true

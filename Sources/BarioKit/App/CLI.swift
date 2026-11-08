@@ -3,7 +3,7 @@ import AppKit
 /// The socket verbs as a command line, one for one. DESIGN.md §4.
 public enum CLI {
     public static let verbs = ["set", "content", "emit", "get", "watch", "style", "reload", "ping", "frame",
-                               "palette"]
+                               "palette", "menu"]
 
     public static let usage = """
     bario <verb> — talk to a running bar over its socket.
@@ -15,6 +15,7 @@ public enum CLI {
       bario watch [topic…]             stream events until Ctrl-C (default '*')
       bario style [css]                apply a stylesheet delta live
       bario reload                     re-read the config and the stylesheet
+      bario menu [item]                open an item's menu, or close it; with no item, close any
       bario frame <surface> [index]    show a shared surface's other image, or the one at index
       bario palette [image…]           print each display's wallpaper palette, or each image's
       bario ping                       say whether a bar is running, and which
@@ -97,6 +98,10 @@ public enum CLI {
             case "reload":
                 try client.send("reload")
                 note("reloaded")
+                return 0
+
+            case "menu":
+                try client.send("menu", rest.first.map { ["target": .string($0)] } ?? [:])
                 return 0
 
             case "frame":

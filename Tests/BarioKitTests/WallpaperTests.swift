@@ -147,6 +147,16 @@ struct WallpaperStyleTests {
         #expect(try !Stylesheet.parse("item { color: oklch(from accent l c h) }").usesWallpaper)
     }
 
+    @Test("a menu is never in a first frame, so one coloured from the wallpaper waits for nothing")
+    func menusDoNotWait() throws {
+        #expect(try !Stylesheet.parse("menu { background: wallpaper(dominant) }").usesWallpaper)
+        #expect(try !Stylesheet.parse("#wifi menu row:hover { color: wallpaper(vibrant) }").usesWallpaper)
+        // A rule that also selects something on the bar still waits.
+        #expect(try Stylesheet.parse("item, menu { background: wallpaper(dominant) }").usesWallpaper)
+        // The built-in look colours only its menus from the wallpaper.
+        #expect(try !Stylesheet.parse(defaultStyleCSS).usesWallpaper)
+    }
+
     @Test("a display list reaches the wallpaper through var(), and not directly")
     func displayLists() throws {
         let custom: [String: [CSSComponent]] = ["--x": [.color(RGBA(r: 0, g: 0.5, b: 1))]]

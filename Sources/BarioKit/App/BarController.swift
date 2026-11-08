@@ -45,6 +45,12 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var hupSource: DispatchSourceSignal?
     private var quitSources: [DispatchSourceSignal] = []
     private var menuBarItem: MenuBarItem?
+    /// The press in an open menu, on a control or a slider being dragged.
+    private var menuPress: (path: [Int], dragging: Bool)?
+    /// A slider's newest value not yet sent, and whether one is on its way: one `on-change` in
+    /// flight at a time, the newest value next (PLAN.md M7).
+    private var pendingChange: (action: Action, item: String, value: Double, confined: Bool)?
+    private var changing = false
 
     public init(options: RunOptions, theme: Theme, startupError: String? = nil) {
         self.options = options
@@ -78,6 +84,19 @@ public final class BarController: NSObject, NSApplicationDelegate {
         let items = theme.config.bars.flatMap(\.items)
         let sources = theme.config.sources
         Task { await host.load(items, sources: sources) }
+
+        loop.makeMenuSurface = { [weak self] display in
+            let panel = MenuPanel(screen: NSScreen.screens.first { $0.displayID == display.displayID })
+            panel.view.onPointer = { [weak self] in self?.pointerMoved() }
+            panel.view.onMouse = { [weak self] mouse, point in self?.menuMouse(mouse, at: point) }
+            panel.view.onKey = { [weak self] key in self?.menuKey(key) }
+            // Another app came forward. Not when another menu took over: that one is open now.
+            panel.onResignKey = { [weak self, weak panel] in
+                guard let self, let panel, self.loop.menu?.surface === panel else { return }
+                self.loop.closeMenu()
+            }
+            return panel
+        }
 
         syncDisplays()
         startTimers()
@@ -258,8 +277,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
                 let cover = BarCover(info: info, screen: screen, debugTint: options.debugTint,
                                      fixed: fixed)
                 cover.view.onEvent = { [weak self] event in self?.handle(event, on: info.displayID) }
-                cover.view.onPress = { [weak self] item in
-                    self?.loop.pressed = item.map { ItemRef(bar: info.displayID, item: $0) }
+                cover.view.onPress = { [weak self] press in
+                    self?.loop.pressed = press.map { ItemRef(bar: info.displayID, item: $0.item, node: $0.node) }
                 }
                 cover.view.onPointer = { [weak self] in self?.pointerMoved() }
                 covers[info.displayID] = cover
@@ -356,6 +375,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// pointer leaves, so the menu you clicked is usable. One below the menu bar, where a tall
     /// bar hangs over a window, is on the window, and opened no menu.
     private func clicked(at point: CGPoint) {
+        // A click anywhere but bario's own windows closes a menu, as one outside a menu does.
+        loop.closeMenu()
         if let bar = loop.bars.first(where: { $0.isShowing && $0.menuBarFrame.containsPointer(point)
                                               && $0.config?.hole.click == .reveal }) {
             loop.revealed = bar.id
@@ -492,15 +513,223 @@ public final class BarController: NSObject, NSApplicationDelegate {
     // MARK: - Events
 
     /// An item's events go to three places at once, which is what keeps the tiers equivalent:
-    /// the module, socket subscribers, and the item's own shortcut. DESIGN.md §8.
+    /// the module, socket subscribers, and the item's own shortcut. DESIGN.md §8. A control
+    /// inside the item takes the event instead of the item's shortcut (PLAN.md M5), and a
+    /// click with no shortcut at all opens the item's menu, if it has one (M11).
     private func handle(_ event: BarEvent, on display: CGDirectDisplayID) {
         server?.broadcast(event.socketEvent)
-        guard let name = event.item else { return }
+        guard let name = event.item else {
+            // The bar between items: as good as outside the menu.
+            if event.kind == .click { loop.closeMenu() }
+            return
+        }
+        let anchor = ItemRef(bar: display, item: name)
+        if let path = event.node, let control = control(at: path, in: name, on: display) {
+            if event.kind == .click, !isMenuToggle(control.actions.click) { loop.closeMenu() }
+            use(control, path: path, kind: event.kind, item: name, anchor: anchor, payload: event.payload,
+                confined: host.isConfined(name), at: event.local)
+            return
+        }
         let action = self.action(for: name, kind: event.kind)
+        if event.kind == .click {
+            if action == nil {
+                loop.toggleMenu(name, from: anchor)
+            } else if !isMenuToggle(theme.config.item(named: name)?.actions.click) {
+                loop.closeMenu()
+            }
+        }
         Task { @MainActor in
             await self.host.deliver(ModuleEvent(name: event.kind.rawValue, payload: event.payload),
                                     to: name)
-            if let action { await self.perform(action, item: name, event: event) }
+            if let action { await self.perform(action, item: name, payload: event.payload, anchor: anchor) }
+        }
+    }
+
+    private func isMenuToggle(_ text: String?) -> Bool {
+        guard let text, case .menu? = Action.parse(text) else { return false }
+        return true
+    }
+
+    /// The control at a path in an item on a bar, as it is on screen.
+    private func control(at path: [Int], in item: String, on display: CGDirectDisplayID) -> SceneNode? {
+        loop.bars.first { $0.id == display }?.presentation?.scene.allItems
+            .first { $0.name == item }?.content?.node(at: path)
+    }
+
+    /// A control used: clicked, right-clicked or scrolled, on a bar or in a menu. A slider
+    /// clicked jumps to where it was clicked, and scrolled moves with the wheel.
+    private func use(_ control: SceneNode, path: [Int], kind: BarEvent.Kind, item: String, anchor: ItemRef,
+                     payload: JSONValue, confined: Bool, at local: CGPoint, delta: CGPoint = .zero) {
+        if case .slider(let meter) = control.kind, let change = control.actions.change,
+           let action = Action.parse(change, confined: confined) {
+            switch kind {
+            case .click:
+                send(action, item: item, value: Double(local.x / max(1, control.frame.width)), confined: confined)
+                return
+            case .scroll where control.actions.scroll == nil:
+                let dy = payload["dy"]?.doubleValue ?? 0, dx = payload["dx"]?.doubleValue ?? 0
+                send(action, item: item, value: meter.value + (dy != 0 ? dy : -dx) * 0.005, confined: confined)
+                return
+            default:
+                break
+            }
+        }
+        let text: String?
+        switch kind {
+        case .click: text = control.actions.click
+        case .rightClick: text = control.actions.rightClick
+        case .scroll: text = control.actions.scroll
+        default: text = nil
+        }
+        guard let text, let action = Action.parse(text, confined: confined) else { return }
+        Task { @MainActor in await self.perform(action, item: item, payload: payload, anchor: anchor) }
+    }
+
+    /// A slider moved: its `on-change`, with the value, once whatever was sent last has been
+    /// dealt with. A drag sends far more values than a module needs; the newest one wins.
+    private func send(_ action: Action, item: String, value: Double, confined: Bool) {
+        pendingChange = (action, item, min(1, max(0, value)), confined)
+        guard !changing else { return }
+        changing = true
+        Task { @MainActor in
+            while let change = self.pendingChange {
+                self.pendingChange = nil
+                await self.perform(change.action, item: change.item,
+                                   payload: .object(["item": .string(change.item), "value": .number(change.value)]),
+                                   anchor: nil, waits: true)
+            }
+            self.changing = false
+        }
+    }
+
+    // MARK: - Menus
+
+    /// The pointer in an open menu's window. A control is used when the press comes up on it,
+    /// as a menu item is chosen, and the menu closes unless it says `keep-open`; a slider moves
+    /// from the press on and never closes it (PLAN.md M6, M7). A press off the panel is outside
+    /// the menu, or, where the window reaches up over its bar, on the bar.
+    private func menuMouse(_ mouse: MenuView.Mouse, at point: CGPoint) {
+        guard let menu = loop.menu else { return }
+        let confined = host.menuState(for: menu.item)?.confined ?? false
+        let target = menu.target(at: point)
+        switch mouse {
+        case .down:
+            menuPress = nil
+            switch target {
+            case .control(let path, let node):
+                loop.pressMenu(path)
+                let slides = { if case .slider = node.kind { return node.actions.change != nil } else { return false } }()
+                menuPress = (path, slides)
+                if slides { slide(menu, path: path, to: point, confined: confined) }
+            case .panel:
+                break
+            case .outside:
+                if let hit = loop.target(at: point), hit.bar.isInteractive {
+                    forward(.click, at: point, to: hit)
+                } else {
+                    loop.closeMenu()
+                }
+            }
+        case .drag:
+            if let press = menuPress, press.dragging { slide(menu, path: press.path, to: point, confined: confined) }
+        case .up:
+            loop.pressMenu(nil)
+            defer { menuPress = nil }
+            if menuPress?.dragging == true {
+                loop.releaseMenuDrag()
+            } else if menuPress != nil, case .control(let path, let node) = target {
+                choose(node, at: path, in: menu, confined: confined)
+            }
+        case .rightDown:
+            if case .control(_, let node) = target, let text = node.actions.rightClick,
+               let action = Action.parse(text, confined: confined) {
+                Task { @MainActor in
+                    await self.perform(action, item: menu.item, payload: .object(["item": .string(menu.item)]),
+                                       anchor: menu.anchor)
+                }
+            } else if case .outside = target, let hit = loop.target(at: point) {
+                forward(.rightClick, at: point, to: hit)
+            }
+        case .scroll(let dx, let dy):
+            switch target {
+            case .control(let path, let node):
+                if case .slider(let meter) = node.kind, node.actions.change != nil, node.actions.scroll == nil {
+                    let value = min(1, max(0, meter.value + (dy != 0 ? dy : -dx) * 0.005))
+                    loop.dragMenu(path, to: value)
+                    loop.releaseMenuDrag()
+                    if let text = node.actions.change, let action = Action.parse(text, confined: confined) {
+                        send(action, item: menu.item, value: value, confined: confined)
+                    }
+                } else if let text = node.actions.scroll, let action = Action.parse(text, confined: confined) {
+                    Task { @MainActor in
+                        await self.perform(action, item: menu.item,
+                                           payload: .object(["item": .string(menu.item), "dx": .number(dx), "dy": .number(dy)]),
+                                           anchor: menu.anchor)
+                    }
+                }
+            case .outside:
+                if let hit = loop.target(at: point) {
+                    forward(.scroll, at: point, to: hit, delta: CGPoint(x: dx, y: dy))
+                }
+            case .panel:
+                break
+            }
+        }
+    }
+
+    /// A slider in the open menu, dragged to a point.
+    private func slide(_ menu: Menu, path: [Int], to point: CGPoint, confined: Bool) {
+        guard let value = menu.value(of: path, at: point),
+              let node = menu.presentation?.scene.items.first?.content?.node(at: path),
+              let text = node.actions.change, let action = Action.parse(text, confined: confined) else { return }
+        loop.dragMenu(path, to: value)
+        send(action, item: menu.item, value: value, confined: confined)
+    }
+
+    /// A control in a menu chosen: its action, as its item's own, and the menu closes unless the
+    /// control or something around it says `keep-open`.
+    private func choose(_ node: SceneNode, at path: [Int], in menu: Menu, confined: Bool) {
+        guard let text = node.actions.click, let action = Action.parse(text, confined: confined) else { return }
+        let keep = menu.presentation?.scene.items.first?.content?.keepsOpen(at: path) ?? false
+        if !keep, !isMenuToggle(text) { loop.closeMenu() }
+        var payload: [String: JSONValue] = ["item": .string(menu.item),
+                                            "node": node.id.map(JSONValue.string) ?? .array(path.map { .number(Double($0)) })]
+        payload["menu"] = .bool(true)
+        server?.broadcast(SocketEvent(kind: "click", topic: "click:\(menu.item)",
+                                      fields: payload.merging(["target": .string(menu.item)]) { a, _ in a }))
+        Task { @MainActor in await self.perform(action, item: menu.item, payload: .object(payload), anchor: menu.anchor) }
+    }
+
+    /// A press in a menu's window that is really on the bar under it.
+    private func forward(_ kind: BarEvent.Kind, at point: CGPoint,
+                         to hit: (bar: Bar, item: SceneItem, control: (path: [Int], node: SceneNode)?),
+                         delta: CGPoint = .zero) {
+        let frame = hit.bar.surface.frame
+        let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        let origin = hit.control?.node.frame ?? hit.item.frame
+        var event = BarEvent(kind: kind, item: hit.item.name, point: local,
+                             local: CGPoint(x: local.x - origin.minX, y: local.y - origin.minY), delta: delta,
+                             modifiers: UInt(NSEvent.modifierFlags.rawValue))
+        event.node = hit.control?.path
+        event.nodeID = hit.control?.node.id
+        handle(event, on: hit.bar.id)
+    }
+
+    /// A key while a menu is open: Escape closes it, the arrows move between its controls, and
+    /// Return chooses the one they are on.
+    private func menuKey(_ key: String) {
+        guard let menu = loop.menu else { return }
+        switch key {
+        case "escape":
+            loop.closeMenu()
+        case "up", "down":
+            loop.moveMenuHover(by: key == "down" ? 1 : -1)
+        case "return":
+            guard let path = menu.hovered,
+                  let node = menu.presentation?.scene.items.first?.content?.node(at: path) else { return }
+            choose(node, at: path, in: menu, confined: host.menuState(for: menu.item)?.confined ?? false)
+        default:
+            break
         }
     }
 
@@ -515,20 +744,26 @@ public final class BarController: NSObject, NSApplicationDelegate {
         case .scroll: text = config.actions.scroll
         default: text = nil
         }
-        return text.flatMap(Action.parse)
+        return text.flatMap { Action.parse($0) }
     }
 
-    private func perform(_ action: Action, item: String, event: BarEvent) async {
+    /// `anchor` is where a `menu` it opens hangs from; `waits` holds a command until it exits, for
+    /// a slider that should not start a process per pixel dragged.
+    private func perform(_ action: Action, item: String, payload: JSONValue, anchor: ItemRef?,
+                         waits: Bool = false) async {
         switch action {
         case .exec(let command):
+            var extra: [String: String] = [:]
+            if let value = payload["value"]?.doubleValue { extra["BARIO_VALUE"] = String(format: "%.3f", value) }
             // Detached: a shortcut must never make the bar wait on a process.
-            Task.detached {
-                _ = try? ExecModule.run(path: "/bin/sh", arguments: ["-c", command], item: item)
+            let run = Task.detached {
+                _ = try? ExecModule.run(path: "/bin/sh", arguments: ["-c", command], item: item, extra: extra)
             }
-        case .emit(let name, let payload):
+            if waits { await run.value }
+        case .emit(let name, let eventPayload):
             server?.broadcast(SocketEvent(kind: name, topic: "event:\(name)",
-                                          fields: ["name": .string(name), "payload": payload]))
-            await host.broadcast(ModuleEvent(name: name, payload: payload))
+                                          fields: ["name": .string(name), "payload": eventPayload]))
+            await host.broadcast(ModuleEvent(name: name, payload: eventPayload))
         case .set(let target, let value):
             let dirty = await host.store.merge(value, at: target)
             host.markDirty(dirty)
@@ -544,14 +779,45 @@ public final class BarController: NSObject, NSApplicationDelegate {
             chord.post()
         case .reload:
             reload()
-        case .module(let name, let payload):
-            // Not a verb bario knows: the module decides what it means.
-            var fields = payload.objectValue ?? [:]
-            for (key, value) in event.payload.objectValue ?? [:] where fields[key] == nil {
-                fields[key] = value
+        case .menu(let other):
+            let owner = other ?? item
+            if let anchor {
+                loop.toggleMenu(owner, from: anchor)
+            } else if let anchor = defaultAnchor(for: owner) {
+                loop.toggleMenu(owner, from: anchor)
             }
-            await host.deliver(ModuleEvent(name: name, payload: .object(fields)), to: item)
+        case .send(let target, let name, let args):
+            await host.deliver(ModuleEvent(name: name, payload: merged(args, with: payload)), to: target)
+        case .module(let name, let args):
+            // Not a verb bario knows: the module decides what it means.
+            await host.deliver(ModuleEvent(name: name, payload: merged(args, with: payload)), to: item)
         }
+    }
+
+    /// An action's own arguments, and beside them whatever the event says that they do not.
+    private func merged(_ args: JSONValue, with payload: JSONValue) -> JSONValue {
+        var fields = args.objectValue ?? [:]
+        for (key, value) in payload.objectValue ?? [:] where fields[key] == nil { fields[key] = value }
+        return .object(fields)
+    }
+
+    /// Where a menu opened from outside any bar hangs: its item on the bar under the pointer, or
+    /// on the first bar that shows it; a source's, or an item no bar shows, from the leftmost item
+    /// of the bar under the pointer.
+    private func defaultAnchor(for item: String) -> ItemRef? {
+        let mouse = NSEvent.mouseLocation
+        let bars = loop.bars.filter(\.isShowing).sorted { a, b in
+            a.surface.frame.minX < b.surface.frame.minX
+        }
+        let preferred = bars.first { $0.display.frame.contains(mouse) }
+        for bar in [preferred].compactMap({ $0 }) + bars {
+            if bar.presentation?.scene.allItems.contains(where: { $0.name == item }) == true {
+                return ItemRef(bar: bar.id, item: item)
+            }
+        }
+        guard let bar = preferred ?? bars.first,
+              let first = bar.presentation?.scene.items.first(where: { $0.kind != .spacer }) else { return nil }
+        return ItemRef(bar: bar.id, item: first.name)
     }
 
     // MARK: - The socket
@@ -568,6 +834,17 @@ public final class BarController: NSObject, NSApplicationDelegate {
             self.loop.liveStyle = self.loop.liveStyle.appending(delta)
         }
         service.onFrame = { [weak self] name, index in try self?.loop.surfaces.frame(name, index: index) }
+        service.onMenu = { [weak self] item in
+            guard let self else { return }
+            guard let item else { return self.loop.closeMenu() }
+            guard self.theme.config.item(named: item) != nil else {
+                throw ProtocolError("there is no item or source called '\(item)'")
+            }
+            guard let anchor = self.defaultAnchor(for: item) else {
+                throw ProtocolError("no bar is showing to hang \(item)'s menu from")
+            }
+            self.loop.toggleMenu(item, from: anchor)
+        }
         self.service = service
 
         // Native processes hand over their surfaces through a Mach port, since that is the

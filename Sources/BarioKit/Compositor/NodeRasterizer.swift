@@ -90,7 +90,7 @@ struct NodeRasterizer {
             if let list = node.displayList {
                 CanvasPainter(style: style, resolver: resolver).paint(list, in: node.frame, ctx: ctx)
             }
-        case .row, .column, .spacer, .meter, .raster:
+        case .row, .column, .spacer, .meter, .slider, .raster:
             break
         }
     }

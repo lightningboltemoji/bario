@@ -74,6 +74,36 @@ public final class ModuleHost {
         public var rendered = false
     }
 
+    /// An open menu, from the style stage's point of view (PLAN.md M2).
+    public struct MenuState: Sendable, Equatable {
+        public init(content: Node? = nil, rendered: Bool = false, error: String? = nil,
+                    confined: Bool = false) {
+            self.content = content
+            self.rendered = rendered
+            self.error = error
+            self.confined = confined
+        }
+
+        public var content: Node?
+        /// Whether it has rendered once, however that went. A menu shows nothing before.
+        public var rendered = false
+        public var error: String?
+        /// Its tree was written by a WASM module rather than by the config or bario, so its
+        /// controls' actions go back to that module (`Action.parse(_:confined:)`).
+        public var confined = false
+    }
+
+    /// An open menu's render: the item's state rendered again, under its own dependencies.
+    @MainActor final class MenuSlot {
+        var state: MenuState
+        var needsRender = true
+        var renderTask: Task<Void, Never>?
+        var renders = 0
+        var landed = 0
+
+        init(state: MenuState = MenuState()) { self.state = state }
+    }
+
     @MainActor final class Instance {
         let name: String
         let moduleName: String
@@ -96,6 +126,8 @@ public final class ModuleHost {
         var landed = 0
         var pollTask: Task<Void, Never>?
         var startTask: Task<Void, Never>?
+        /// The item's menu, while it is open.
+        var menu: MenuSlot?
 
         init(name: String, moduleName: String, module: any Module, interval: Interval?,
              fingerprint: JSONValue, permanentError: String? = nil, isSource: Bool = false) {
@@ -112,9 +144,13 @@ public final class ModuleHost {
         }
 
         var canRender: Bool { needsRender && !held && renderTask == nil }
+        var canRenderMenu: Bool { menu.map { $0.needsRender && $0.renderTask == nil } == true && !held }
     }
 
     private var instances: [String: Instance] = [:]
+    /// Each item's `menu` from the config, kept apart from its instance: a menu changing neither
+    /// reaches nor restarts the module.
+    private var menuConfigs: [String: MenuConfig] = [:]
     private var order: [String] = []
     private var loading: Task<Void, Never>?
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
@@ -125,6 +161,8 @@ public final class ModuleHost {
     /// A render finished and the item looks different: new content, classes, visibility, or
     /// staleness. The frame loop answers by invalidating style for that item.
     public var onRendered: (@MainActor (String) -> Void)?
+    /// An open menu's render finished and it looks different, or it rendered for the first time.
+    public var onMenuRendered: (@MainActor (String) -> Void)?
 
     public static let renderBudget = 0.050
     public static let pollBudget = 2.0
@@ -165,6 +203,10 @@ public final class ModuleHost {
         var fresh: [Instance] = []
 
         let entries = items.flatMap(\.flattened).map { ($0, false) } + sources.map { ($0, true) }
+        var menus: [String: MenuConfig] = [:]
+        for (item, _) in entries where menus[item.name] == nil { menus[item.name] = item.menu }
+        let menusChanged = menus != menuConfigs
+        menuConfigs = menus
         for (item, isSource) in entries {
             guard let moduleName = item.moduleName, next[item.name] == nil else { continue }
             nextOrder.append(item.name)
@@ -174,14 +216,17 @@ public final class ModuleHost {
                existing.isSource == isSource {
                 next[item.name] = existing
                 instances.removeValue(forKey: item.name)
+                // A menu written differently renders again, open as it is.
+                if menusChanged { existing.menu?.needsRender = true }
                 continue
             }
             let instance = make(item, moduleName: moduleName, fingerprint: item.options, isSource: isSource)
             // A restarted item keeps showing what it showed until its new module renders,
-            // rather than vanishing and coming back.
+            // rather than vanishing and coming back, and an open menu stays open.
             if let replaced = instances[item.name] {
                 instance.state.result = replaced.state.result
                 instance.state.rendered = replaced.state.rendered
+                instance.menu = replaced.menu.map { MenuSlot(state: $0.state) }
             }
             next[item.name] = instance
             fresh.append(instance)
@@ -238,7 +283,12 @@ public final class ModuleHost {
         instance.startTask?.cancel()
         instance.pollTask?.cancel()
         instance.pollTask = nil
+        instance.menu = nil
         await store.forget(instance.name)
+        // A replacement with its menu open has recorded its own reads under the same key by now.
+        if instances[instance.name]?.menu == nil {
+            await store.forget(ModuleHost.menuKey(instance.name))
+        }
         events.forget(instance.name)
         // A module's `stop` tidies only its own state, and waits on its actor, which a module
         // stuck in `start` never frees. So it is not waited on.
@@ -325,7 +375,21 @@ public final class ModuleHost {
         var due = false
         var released = false
         for name in names {
-            guard let instance = instances[name], !instance.isSource else { continue }
+            // A write to what an open menu read, under its own key.
+            if let item = ModuleHost.item(ofMenuKey: name) {
+                if let instance = instances[item], let menu = instance.menu {
+                    menu.needsRender = true
+                    if instance.canRenderMenu { due = true }
+                }
+                continue
+            }
+            guard let instance = instances[name] else { continue }
+            // Anything under the item's own key may be in its menu, a source's included.
+            if let menu = instance.menu {
+                menu.needsRender = true
+                if instance.canRenderMenu { due = true }
+            }
+            guard !instance.isSource else { continue }
             instance.needsRender = true
             // A write under the item's key is state to show.
             if instance.held {
@@ -339,16 +403,26 @@ public final class ModuleHost {
     }
 
     /// Whether anything is dirty, including renders that cannot start yet.
-    public var needsRender: Bool { instances.values.contains { $0.needsRender } }
+    public var needsRender: Bool {
+        instances.values.contains { $0.needsRender || $0.menu?.needsRender == true }
+    }
 
     /// Start a render for every item that is dirty, has state to show, and is not already
     /// rendering. Returns at once; each render reports back when it finishes.
     public func startRenders() {
         for name in order {
-            guard let instance = instances[name], instance.canRender else { continue }
-            instance.needsRender = false
-            instance.renderTask = Task { [weak self] in
-                await self?.render(instance)
+            guard let instance = instances[name] else { continue }
+            if instance.canRender {
+                instance.needsRender = false
+                instance.renderTask = Task { [weak self] in
+                    await self?.render(instance)
+                }
+            }
+            if instance.canRenderMenu, let menu = instance.menu {
+                menu.needsRender = false
+                menu.renderTask = Task { [weak self] in
+                    await self?.renderMenu(menu, of: instance)
+                }
             }
         }
     }
@@ -429,7 +503,8 @@ public final class ModuleHost {
         // A render can dirty another item; a few rounds settle any sane configuration.
         for _ in 0..<8 {
             startRenders()
-            guard instances.values.contains(where: { $0.renderTask != nil }) else { return }
+            guard instances.values.contains(where: { $0.renderTask != nil || $0.menu?.renderTask != nil })
+            else { return }
             await finishRenders()
         }
     }
@@ -437,6 +512,87 @@ public final class ModuleHost {
     /// Wait for the renders already running, without starting any.
     func finishRenders() async {
         for task in instances.values.compactMap(\.renderTask) { await task.value }
+        for task in instances.values.compactMap({ $0.menu?.renderTask }) { await task.value }
+    }
+
+    // MARK: - Menus
+
+    /// The key an open menu's reads are recorded under in the store, apart from its bubble's.
+    nonisolated static func menuKey(_ item: String) -> String { "\u{1F}menu:\(item)" }
+
+    nonisolated static func item(ofMenuKey key: String) -> String? {
+        key.hasPrefix("\u{1F}menu:") ? String(key.dropFirst(6)) : nil
+    }
+
+    /// Start rendering an item's menu, and keep it up to date until it closes. Its first render
+    /// says whether it has one: `menuState(for:)` is rendered with nil content if it has not.
+    public func openMenu(_ item: String) {
+        guard let instance = instances[item], instance.menu == nil else { return }
+        instance.menu = MenuSlot()
+        if instance.canRenderMenu { onNeedsRender?() }
+    }
+
+    /// Stop rendering an item's menu, and forget what it read.
+    public func closeMenu(_ item: String) {
+        guard let instance = instances[item], instance.menu != nil else { return }
+        instance.menu = nil
+        let store = self.store
+        Task { await store.forget(ModuleHost.menuKey(item)) }
+    }
+
+    /// Whether an item's content is a WASM module's own, whose controls' actions go back to it
+    /// rather than reaching bario's verbs (`Action.parse(_:confined:)`).
+    public func isConfined(_ item: String) -> Bool {
+        instances[item]?.moduleName == "wasm"
+    }
+
+    /// An open menu's last render, or nil if it is not open (or its item is gone).
+    public func menuState(for item: String) -> MenuState? {
+        instances[item]?.menu?.state
+    }
+
+    /// The config's menu, then a tree written under the item's key, then the module's own.
+    /// The first two are filled here and not by the module, which never sees its menu.
+    private func renderMenu(_ slot: MenuSlot, of instance: Instance) async {
+        let reader = await store.reader(for: instance.name)
+        let config = menuConfigs[instance.name]
+        let module = instance.module
+        let wasm = instance.moduleName == "wasm"
+        slot.renders += 1
+        let number = slot.renders
+        var next = slot.state
+        do {
+            let (content, confined) = try await withBudget(ModuleHost.renderBudget) {
+                () async throws -> (Node?, Bool) in
+                if let config { return (try config.render(reader), false) }
+                if let written = reader.value("menu"), !written.isNull {
+                    do {
+                        return (try JSONDecoder().decode(Node.self, from: written.encoded()), wasm)
+                    } catch let error as DecodingError {
+                        throw ModuleError("menu: \(error.contentMessage)")
+                    }
+                }
+                return (try await module.menu(reader), false)
+            }
+            next = MenuState(content: content, rendered: true, confined: confined)
+        } catch {
+            // Keep what it showed, and say why.
+            if slot.state.error == nil { warn("\(instance.name) menu: \(error)") }
+            next.rendered = true
+            next.error = "\(error)"
+        }
+        // What it read is what invalidates it from now on; a write since its snapshot means it
+        // is out of date already.
+        let stale = await store.recordReads(reader.paths, for: ModuleHost.menuKey(instance.name),
+                                            since: reader.version)
+        slot.renderTask = nil
+        guard instances[instance.name] === instance, instance.menu === slot, number > slot.landed else { return }
+        slot.landed = number
+        if stale { slot.needsRender = true }
+        let changed = next != slot.state
+        slot.state = next
+        if changed { onMenuRendered?(instance.name) }
+        if instance.canRenderMenu { onNeedsRender?() }
     }
 
     public func state(for item: String) -> ItemState? {
