@@ -22,6 +22,18 @@ struct ActionTests {
         #expect(Action.parse("exec") == nil)
     }
 
+    @Test("key takes one chord, and a chord it cannot read is no action at all")
+    func keyVerb() throws {
+        #expect(Action.parse("key fn+n") == .key(try KeyChord(parsing: "fn+n")))
+        #expect(Action.parse("key") == nil)
+        #expect(Action.parse("key fn+n cmd+q") == nil)
+        #expect(Action.parse("key hyper+n") == nil)
+        #expect(throws: Never.self) { try Action.validate("key fn+n") }
+        #expect(throws: Never.self) { try Action.validate("exec open -a Calendar") }
+        #expect(throws: KeyChordError.self) { try Action.validate("key") }
+        #expect(throws: KeyChordError.self) { try Action.validate("key fn+") }
+    }
+
     @Test("anything else is the module's business")
     func moduleActions() {
         #expect(Action.parse("toggle-mute") == .module("toggle-mute", .object([:])))
@@ -49,6 +61,80 @@ struct ActionTests {
         #expect(event.payload["x"]?.doubleValue == 4)
         #expect(event.socketEvent.topic == "scroll:volume")
         #expect(event.socketEvent.json["target"]?.stringValue == "volume")
+    }
+}
+
+@Suite("Key chords")
+struct KeyChordTests {
+    func message(_ text: String) -> String {
+        do {
+            _ = try KeyChord(parsing: text)
+            return "parsed, but should not have"
+        } catch {
+            return "\(error)"
+        }
+    }
+
+    @Test("modifiers first, in the order written, and the key last")
+    func parsing() throws {
+        let notifications = try KeyChord(parsing: "fn+n")
+        #expect(notifications.modifiers == [.fn])
+        #expect(notifications.key == 45)
+
+        let screenshot = try KeyChord(parsing: "Cmd+Shift+4")
+        #expect(screenshot.modifiers == [.cmd, .shift])
+        #expect(screenshot.key == 21)
+        #expect(screenshot.description == "cmd+shift+4")
+
+        #expect(try KeyChord(parsing: "globe+n").modifiers == [.fn])
+        #expect(try KeyChord(parsing: "option+command+escape").modifiers == [.opt, .cmd])
+        #expect(try KeyChord(parsing: "space").modifiers == [])
+        #expect(try KeyChord(parsing: "ctrl+left").key == 123)
+        #expect(try KeyChord(parsing: "f1").key == 122)
+        #expect(try KeyChord(parsing: "f12").key == 111)
+        #expect(try KeyChord(parsing: "f20").key == 90)
+        #expect(try KeyChord(parsing: "cmd+`").key == 50)
+    }
+
+    @Test("a chord that cannot be read says what is wrong with it")
+    func errors() {
+        #expect(message("").contains("like fn+n"))
+        #expect(message("fn+").contains("like fn+n"))
+        #expect(message("+n").contains("like fn+n"))
+        #expect(message("hyper+n").contains("\"hyper\" in \"hyper+n\" is not a modifier"))
+        #expect(message("cmd+cmd+q").contains("holds cmd twice"))
+        #expect(message("fn").contains("only modifiers"))
+        #expect(message("cmd+shift").contains("only modifiers"))
+        #expect(message("cmd+f21").contains("\"f21\" in \"cmd+f21\" is not a key"))
+    }
+
+    /// Only the modifier bits: CoreGraphics may add its own, such as non-coalesced.
+    func modifiers(_ event: CGEvent) -> CGEventFlags {
+        event.flags.intersection([.maskSecondaryFn, .maskControl, .maskAlternate, .maskShift,
+                                  .maskCommand])
+    }
+
+    @Test("sent as a keyboard sends it: modifiers down, the key, modifiers up in reverse")
+    func events() throws {
+        let fnN = try KeyChord(parsing: "fn+n").events()
+        #expect(fnN.map(\.type) == [.flagsChanged, .keyDown, .keyUp, .flagsChanged])
+        #expect(fnN.map { $0.getIntegerValueField(.keyboardEventKeycode) } == [63, 45, 45, 63])
+        #expect(fnN.map(modifiers) == [.maskSecondaryFn, .maskSecondaryFn, .maskSecondaryFn, []])
+
+        let shot = try KeyChord(parsing: "cmd+shift+4").events()
+        #expect(shot.map(\.type)
+                == [.flagsChanged, .flagsChanged, .keyDown, .keyUp, .flagsChanged, .flagsChanged])
+        #expect(shot.map { $0.getIntegerValueField(.keyboardEventKeycode) }
+                == [55, 56, 21, 21, 56, 55])
+        let both: CGEventFlags = [.maskCommand, .maskShift]
+        #expect(shot.map(modifiers) == [.maskCommand, both, both, both, .maskCommand, []])
+    }
+
+    @Test("a bare key is just down and up")
+    func bareKey() throws {
+        let events = try KeyChord(parsing: "escape").events()
+        #expect(events.map(\.type) == [.keyDown, .keyUp])
+        #expect(events.map(modifiers) == [[], []])
     }
 }
 

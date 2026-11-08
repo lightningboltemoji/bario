@@ -308,9 +308,9 @@ public enum ConfigLoader {
             case "when": item.when = try string(property)
             case "unless": item.unless = try string(property)
             case "interval": item.interval = try interval(property)
-            case "on-click": item.actions.click = try string(property)
-            case "on-right-click": item.actions.rightClick = try string(property)
-            case "on-scroll": item.actions.scroll = try string(property)
+            case "on-click": item.actions.click = try action(property)
+            case "on-right-click": item.actions.rightClick = try action(property)
+            case "on-scroll": item.actions.scroll = try action(property)
             default:
                 // Module options are the module's business, not ours: they stay in `options`
                 // and reach the module untouched. DESIGN.md §3.
@@ -408,6 +408,18 @@ public enum ConfigLoader {
                            at: property.position)
         }
         return value
+    }
+
+    /// A shortcut, checked here because a malformed one would otherwise do nothing, silently, on
+    /// every click.
+    private static func action(_ property: KDLProperty) throws -> String {
+        let text = try string(property)
+        do {
+            try Action.validate(text)
+        } catch {
+            throw KDLError("\(property.name): \(error)", at: property.position)
+        }
+        return text
     }
 
     private static func double(_ property: KDLProperty) throws -> Double {

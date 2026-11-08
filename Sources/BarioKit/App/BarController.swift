@@ -532,6 +532,16 @@ public final class BarController: NSObject, NSApplicationDelegate {
         case .set(let target, let value):
             let dirty = await host.store.merge(value, at: target)
             host.markDirty(dirty)
+        case .key(let chord):
+            // Without Accessibility permission the events vanish without an error, so ask for
+            // it (macOS prompts once) and say why nothing happened.
+            guard CGPreflightPostEventAccess() else {
+                _ = CGRequestPostEventAccess()
+                warn("\(item): key \(chord) needs Accessibility permission for bario "
+                     + "(System Settings › Privacy & Security › Accessibility)")
+                return
+            }
+            chord.post()
         case .reload:
             reload()
         case .module(let name, let payload):

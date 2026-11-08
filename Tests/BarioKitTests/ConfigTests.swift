@@ -225,6 +225,8 @@ struct ConfigTests {
         #expect(message("bar { item \"a\" module=\"exec\" interval=\"soonish\" }").contains("not a duration"))
         #expect(message("bar { group \"g\" { } }").contains("no items in it"))
         #expect(message("renderer \"ring\"").contains("needs path="))
+        #expect(message("bar { item \"a\" module=\"clock\" on-click=\"key fn+\" }").contains("on-click: key takes a chord"))
+        #expect(message("bar {\n  item \"a\" module=\"clock\" on-scroll=\"key cmd+wobble\"\n}").contains(":2:"))
         // The position is the point of all of this.
         #expect(message("bar {\n  item \"a\"\n}").contains(":2:"))
     }

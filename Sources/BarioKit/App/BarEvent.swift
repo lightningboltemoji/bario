@@ -56,6 +56,8 @@ public enum Action: Sendable, Equatable {
     case exec(String)
     case emit(String, JSONValue)
     case set(String, JSONValue)
+    /// A keyboard shortcut, sent as if typed: `key fn+n` opens Notification Center.
+    case key(KeyChord)
     case reload
     /// Delivered to the item's module as an event of this name.
     case module(String, JSONValue)
@@ -82,6 +84,9 @@ public enum Action: Sendable, Equatable {
             let raw = Action.tail(trimmed, after: [verb, target])
             guard !raw.isEmpty else { return nil }
             return .set(target, Action.value(raw))
+        case "key":
+            guard rest.count == 1, let chord = try? KeyChord(parsing: rest[0]) else { return nil }
+            return .key(chord)
         case "reload":
             return .reload
         default:
@@ -89,6 +94,18 @@ public enum Action: Sendable, Equatable {
                 : .object(["args": .array(rest.map(JSONValue.string))])
             return .module(verb, payload)
         }
+    }
+
+    /// What is wrong with a shortcut that would otherwise do nothing on every click, for the config
+    /// loader to report where it was written. Only `key` has anything to check: `exec` hands its
+    /// line to the shell, and a verb bario does not know is the module's.
+    public static func validate(_ text: String) throws {
+        let words = Action.split(text.trimmingCharacters(in: .whitespaces))
+        guard words.first == "key" else { return }
+        guard words.count == 2 else {
+            throw KeyChordError("key takes one chord, like key fn+n")
+        }
+        _ = try KeyChord(parsing: words[1])
     }
 
     /// Whatever is left of `text` after the given leading words, with its quoting intact.

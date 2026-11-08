@@ -826,6 +826,19 @@ Item events go to the module as `on-event` (`click`, `right-click`, `scroll`) an
 subscribers. Config shortcuts cover the common cases without a module:
 `on-click="exec 'open -a Activity\ Monitor'"`, `on-scroll="volume adjust"`.
 
+`key` sends a keyboard shortcut as if it were typed, for what macOS only lets a keyboard do:
+`on-click="key fn+n"` opens Notification Center. The modifiers come first (`fn`, `ctrl`, `opt`,
+`shift`, `cmd`) and the key last, named by its place on a US keyboard, since that is what a key
+code is. A chord bario cannot read is a config error. Sending one takes Accessibility permission,
+which bario asks for the first time it tries; until it is granted, the click logs why nothing
+happened.
+
+Notification Center is why `key` exists. It has no public way in: no URL scheme, App Intent or
+scripting dictionary, and its own toggle over XPC refuses clients without Apple's private
+entitlements. Pressing the menu bar clock through Accessibility opens it, but it closes again a
+third of a second later. fn+n is the system's own shortcut for it, and what it opens stays open
+(measured on macOS 27).
+
 Popovers (a calendar under the clock, a slider under volume) are a second window anchored
 to the item's frame. Deferred past v1, but the content model is the same tree, so nothing
 has to change to allow them.
