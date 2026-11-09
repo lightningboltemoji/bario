@@ -48,6 +48,9 @@ public struct KeyChord: Sendable, Equatable, CustomStringConvertible {
 
     public var description: String { text }
 
+    /// The system's own shortcut for Notification Center, which opens it or closes it.
+    public var togglesNotificationCenter: Bool { modifiers == [.fn] && key == KeyChord.keys["n"] }
+
     /// `fn+n`, `cmd+shift+4`, `ctrl+left`: modifiers first, the key last, joined by `+`.
     public init(parsing raw: String) throws {
         let text = raw.lowercased()

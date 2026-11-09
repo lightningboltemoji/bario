@@ -848,6 +848,12 @@ entitlements. Pressing the menu bar clock through Accessibility opens it, but it
 third of a second later. fn+n is the system's own shortcut for it, and what it opens stays open
 (measured on macOS 27).
 
+A click only opens it, though. Any press outside the panel already dismisses it, so sending fn+n
+for that press as well reverses the panel half way out: it jumps back and vanishes. `key fn+n`
+is left unsent while the panel is out, and the press closes it alone. The panel's window cannot
+say so, being on screen for a banner too; only the panel has the Edit Widgets button in its
+accessibility tree, which bario can read since `key` needs that permission anyway.
+
 ### Menus
 
 Clicking an item can drop a menu down from it: Wi-Fi's network and addresses, the outputs under

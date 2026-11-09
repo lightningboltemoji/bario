@@ -768,6 +768,10 @@ public final class BarController: NSObject, NSApplicationDelegate {
             let dirty = await host.store.merge(value, at: target)
             host.markDirty(dirty)
         case .key(let chord):
+            // The press that got here has already dismissed the panel, as any press outside it
+            // does. Its shortcut on top would throw it back open half way out, and it would jump
+            // and vanish, so the press is left to close it.
+            if chord.togglesNotificationCenter, NotificationCenterPanel.isOpen { return }
             // Without Accessibility permission the events vanish without an error, so ask for
             // it (macOS prompts once) and say why nothing happened.
             guard CGPreflightPostEventAccess() else {

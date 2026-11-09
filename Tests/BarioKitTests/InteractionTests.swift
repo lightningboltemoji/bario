@@ -96,6 +96,15 @@ struct KeyChordTests {
         #expect(try KeyChord(parsing: "cmd+`").key == 50)
     }
 
+    @Test("only fn+n is Notification Center's shortcut")
+    func notificationCenterShortcut() throws {
+        #expect(try KeyChord(parsing: "fn+n").togglesNotificationCenter)
+        #expect(try KeyChord(parsing: "globe+n").togglesNotificationCenter)
+        #expect(try !KeyChord(parsing: "n").togglesNotificationCenter)
+        #expect(try !KeyChord(parsing: "fn+m").togglesNotificationCenter)
+        #expect(try !KeyChord(parsing: "fn+shift+n").togglesNotificationCenter)
+    }
+
     @Test("a chord that cannot be read says what is wrong with it")
     func errors() {
         #expect(message("").contains("like fn+n"))
