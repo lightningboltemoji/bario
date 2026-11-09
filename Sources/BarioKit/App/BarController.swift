@@ -444,7 +444,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         self.lookAgain = false
         let mode = options.source
         let allowed = captureAllowed
-        Task { @MainActor in
+        Task { @MainActor [self] in
             var changed = false
             for (cover, info, spec) in pending {
                 let strip = await StripSource.strip(info: info, spec: spec, mode: mode, captureAllowed: allowed)

@@ -167,7 +167,7 @@ public final class SurfaceProducer {
     public init(name: String, width: Int, height: Int,
                 service: String = SurfaceListener.defaultService(), socketPath: String? = nil) throws {
         self.name = name
-        let properties: [IOSurfacePropertyKey: Any] = [
+        let properties: [IOSurfacePropertyKey: any Sendable] = [
             .width: width, .height: height, .bytesPerElement: 4,
             .pixelFormat: UInt32(kCVPixelFormatType_32BGRA),
         ]

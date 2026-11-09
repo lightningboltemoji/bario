@@ -95,7 +95,7 @@ struct SurfaceTests {
         #expect(commit().rasters == 0)
         #expect(layer.contents as AnyObject === blue)
         try surfaces.frame("gpu", index: 1)
-        commit()
+        _ = commit()
         #expect(layer.contents as AnyObject === blue, "naming the one showing keeps it")
     }
 

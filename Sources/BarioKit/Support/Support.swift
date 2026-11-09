@@ -235,11 +235,11 @@ public enum SingleInstance {
         guard fd >= 0 else { return nil }          // can't lock: don't stand in the way
 
         if flock(fd, LOCK_EX | LOCK_NB) != 0 {
-            var buf = [CChar](repeating: 0, count: 32)
+            var buf = [UInt8](repeating: 0, count: 32)
             let n = read(fd, &buf, 31)
             close(fd)
             guard n > 0 else { return 0 }
-            return pid_t(String(cString: buf).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            return pid_t(String(decoding: buf.prefix(n), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         }
 
         ftruncate(fd, 0)
