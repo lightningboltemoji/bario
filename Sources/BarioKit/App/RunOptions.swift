@@ -60,7 +60,7 @@ public struct RunOptions: Sendable {
       --scale <n>           points per pixel (default 2)
       --window <gap>        cast the shadow of a focused window this many points below the bar
       --menu <item>         show that item's menu open under the bar; glass is stood in for by
-                            the backdrop, blurred
+                            the backdrop, blurred; item/2/0 opens row 2's submenu, then row 0's
 
     Quit from the menu bar item, or with Ctrl-C.
     """

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The display's backlight and the keyboard's, for sliders in a menu (PLAN.md M15). Polled, as
+/// The display's backlight and the keyboard's, for sliders in a menu. Polled, as
 /// nothing announces the brightness keys or the ambient light sensor changing either; a change
 /// bario makes is read back at once.
 ///

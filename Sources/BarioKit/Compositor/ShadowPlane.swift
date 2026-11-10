@@ -9,7 +9,7 @@ import QuartzCore
 ///
 /// The plane hangs under whatever is showing the backdrop and is clipped by it, so a shadow
 /// only darkens desktop that is actually visible. Its layers take a caster's rectangle as it
-/// is, because bar coordinates go all the way down (PLAN.md D2) and that is the space a caster
+/// is, because bar coordinates go all the way down and that is the space a caster
 /// is already in.
 @MainActor
 final class ShadowPlane {
@@ -32,7 +32,7 @@ final class ShadowPlane {
             // by `shadowRadius` and the offset and no further — which is one σ, where the
             // shadow is still visible out to three. A caster sits entirely below the bar, so
             // culled by that estimate is exactly what every one of them would be. Bounds carry
-            // their origin (PLAN.md D2), so growing them leaves bar coordinates alone and the
+            // their origin, so growing them leaves bar coordinates alone and the
             // path lands where it did.
             let spread = shadow.reach + abs(shadow.drop) + 1
             layer.place(caster.rect.insetBy(dx: -spread, dy: -spread))

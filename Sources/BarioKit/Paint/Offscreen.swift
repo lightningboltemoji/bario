@@ -4,7 +4,7 @@ import Metal
 /// Renders a bar to a bitmap with no window and no menu bar in sight: the same layer tree the
 /// screen shows, composited by `CARenderer` into a Metal texture. This is how the compositor
 /// is verified in a session that cannot look at a screen, and it makes a visual regression a
-/// diff of two files. DESIGN.md §10, PLAN.md D13.
+/// diff of two files. DESIGN.md §10,
 @MainActor
 public enum Offscreen {
     private static let device = MTLCreateSystemDefaultDevice()

@@ -27,7 +27,7 @@ out: `{ "ops": [...] }`, or `{ "width": …, "height": … }` when measuring, or
 
 Two stages call it. Layout calls it with `measure: true` and the bar's content height, to learn
 the natural width. Commit calls it for the drawing, with a node-local frame — `x` and `y` are 0,
-`width` and `height` the node's size (PLAN.md D8) — and keeps what it returns per node
+`width` and `height` the node's size — and keeps what it returns per node
 (`Compositor.Drawing`), keyed by the payload, the node's raster rows, its size and the scale.
 Commit calls `draw` again only when that key changes or the renderer asked for a frame, so a
 bubble sliding past or the hole moving over it asks nothing of the renderer. *(Until

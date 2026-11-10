@@ -126,7 +126,7 @@ The initial set, chosen because each one replaces something the cover is hiding:
 
 | module | source | state it writes |
 |---|---|---|
-| `front-app` | `NSWorkspace.frontmostApplication` + activation notification | `name`, `bundle-id`, `icon` |
+| `front-app` | `NSWorkspace.frontmostApplication` + activation notification; its menu is the app's menu bar, through Accessibility (§8) | `name`, `bundle-id`, `icon` |
 | `clock` | timer aligned to the next second/minute | `now` |
 | `battery` | IOKit `IOPSCopyPowerSourcesInfo`, on change notification | `pct`, `charging`, `time-remaining` |
 | `wifi` | CoreWLAN | `ssid`, `rssi`, `on`; SSID needs Location permission on macOS 14+, degrade to `rssi` only |
@@ -946,6 +946,57 @@ another item whose click opens a menu switches to it. A click outside bario, a c
 away from the item, Escape, or the item leaving the bar closes the menu. The window reaches up
 over the bar's bottom edge for its shadow, so a press there is passed on to the bar.
 
+**Submenus.** Any node in a menu can carry `submenu { … }`, a menu of its own written as `menu`
+is, `each` and `if` included; in JSON, `"submenu": […]`. A node with one is a control whether or
+not it has an action, and its submenu is not laid out in its row:
+
+```kdl
+row { text "Other Networks"; spacer; icon "chevron.right" class="arrow"
+  submenu { each "others" { row on-click="join {ssid}" { text "{ssid}" } } }
+}
+```
+
+Hovering the row opens the submenu beside it, as a click does: its first row level with the row,
+right of its parent or left where the display has no room, the gap its `margin-left`. Another
+control in the parent closes it, but not on the way there: while the pointer moves inside the
+triangle from where it was to the submenu's near corners, the rows it crosses wait, and the one it
+stops on takes over a quarter of a second later. Open menus are a chain, a window each, and close
+together: a choice anywhere in it, Escape, a click outside every panel. Only the first window is
+ever key, so the keys reach one place, and the pointer is routed by where it is, deepest panel
+first, since a submenu's window reaches over its parent's edge for its shadow. ↑ and ↓ move in the
+deepest menu with a hover; → (or Return) opens the submenu of the row they are on and moves into
+it, and ← comes back out. A submenu is styled as `menu menu`, so every `menu` rule reaches it, and
+the row it hangs from wears `:open`. A menu taller than the room below the bar, at any depth, is
+cut to fit and scrolls with the wheel; the keys scroll the row they move to into view.
+
+**The front app's menus.** `front-app`'s default menu is the app's own menu bar: App (the app
+menu, under a name that does not repeat the bubble), File, Edit and the rest, each opening onto its
+items, in the bar's look. It is read through Accessibility each time it renders, which is when it
+opens and when what it read changes (`AXMenuBar`, its menus, their items; the whole tree but the
+Apple menu took 5 to 11 ms for Ghostty and Finder on macOS 27), with short timeouts and a deadline
+for the whole read, off the main thread. An item shows its title, its check in a `.mark` column
+(there only in a menu where something has one), its shortcut in `.shortcut` as macOS writes it,
+and `.arrow` for a submenu; a disabled one is `.disabled` and no control. Separators never double
+or end a menu. Choosing an item presses it (`AXPress`), through the module's `press` verb, off its
+actor, since an item that opens a modal answers only when the modal ends. The Apple menu is left
+out: it is the same in every app, and an Apple item with a menu of its own is the place for it.
+
+Option variants (Quit and Keep Windows under Quit) are ordinary items to Accessibility: nothing on
+macOS 27 marks them (`AXMenuItemPrimaryUIElement` is the item itself; closed menus have no
+visible children and every item at 0×0). So bario decides: an item directly after another, with
+the same key, the same modifiers and ⌥, and the same first five characters of title, is its
+Option variant, hidden until Option is held and then shown in its place as `.alternate`. ⌘H and
+⌥⌘H, Hide and Hide Others, is the one exception, since macOS shows both. Bario keeps the modifier
+keys at the root of the store as `modifiers` (`option`, `shift`, `control`, `command`), which is
+how the open menu hears Option and renders again, and how any template can say
+`if "/modifiers.option" { … }`. An item or source called `modifiers` is a config error.
+
+Without Accessibility permission the menu is one row saying so, which opens the setting, and
+macOS asks once. An app that does not answer in time gets a dimmed row saying so; one with no menu
+bar, or bario itself, gets no menu. A menu's render has 250 ms where a bubble's has 50: it renders
+when it opens and nothing waits on it but the menu. `bario --shot out.png --menu app/1` shows the
+bar with the app's menu open and row 1's submenu beside it.
+
 ## 9. Custom renderers
 
 `text`, `icon`, `meter` and `graph` are the built-in vocabulary, not the whole one. A bar
@@ -1460,7 +1511,7 @@ Each phase ends with something you can run and look at.
 6. **Custom renderers.** Renderer modules registering node types, `request_frame`, the
    `ring` renderer as the worked example, `raster` last.
 7. **The compositor.** Section 10's layer tree replaces the painter, in three steps, each of
-   which runs. PLAN.md has how.
+   which runs.
    1. a cover that hosts a layer tree, with the backdrop, item chrome and the hole as layers,
       each item's content still one raster, and `--shot` and the pixel tests on `CARenderer`.
       This alone makes a pointer move draw nothing;

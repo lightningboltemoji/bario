@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a cascade knows of the bar it styles, beyond the stylesheet: the appearance, the
-/// accent, and the wallpaper of the bar's display (PLAN.md W1). The cascade turns
+/// accent, and the wallpaper of the bar's display. The cascade turns
 /// `wallpaper()` and `scheme()` into concrete colours with it, so a new palette is a restyle
 /// like any other and eases through the stylesheet's own `transition`.
 public struct StyleEnvironment: Sendable, Hashable {
@@ -254,7 +254,7 @@ public struct Cascade: Sendable {
 }
 
 /// `wallpaper(<slot>[, <fallback>])` or `wallpaper(seed [<n>][, <fallback>])`, checked where it
-/// is written and substituted by the cascade (PLAN.md W2, W9, W10).
+/// is written and substituted by the cascade.
 struct WallpaperReference {
     enum Target: Equatable {
         case slot(Slot.Name)

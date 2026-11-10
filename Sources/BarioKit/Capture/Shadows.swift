@@ -62,7 +62,7 @@ public struct WindowShadow: Sendable, Hashable {
 }
 
 /// A window that casts into a bar: its silhouette in the bar's coordinates, and the shadow it
-/// casts. Bar coordinates all the way down (PLAN.md D2), so a caster's rectangle is already in
+/// casts. Bar coordinates all the way down, so a caster's rectangle is already in
 /// the space the layers live in — the origin is the bar's bottom left and y runs up, which puts
 /// every ordinary window at a negative `y`.
 public struct ShadowCaster: Sendable, Hashable {

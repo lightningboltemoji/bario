@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import BarioKit
 
-/// Schemes (PLAN.md step 4): `@scheme`, `scheme()`, and the themes they generate.
+/// Schemes: `@scheme`, `scheme()`, and the themes they generate.
 @Suite("Schemes")
 struct SchemeTests {
     static let seeds: [(String, RGBA)] = [
@@ -42,7 +42,7 @@ struct SchemeTests {
         return rgba
     }
 
-    // MARK: The plan's cases
+    // MARK: The cases it was designed against
 
     @Test("every on- role meets its contrast in every harmony and appearance, whatever the seed")
     func onRolesMeetContrast() {

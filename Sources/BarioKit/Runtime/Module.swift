@@ -18,7 +18,7 @@ public protocol Module: Actor {
 
     /// What drops down from the item when its config has no `menu` and nothing wrote one: a
     /// second render of the same state, asked for only while the menu is open. nil is no menu,
-    /// which is the default. PLAN.md M1, M2.
+    /// which is the default.
     func menu(_ state: StateReader) async throws -> Node?
 
     func stop() async

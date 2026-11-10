@@ -13,7 +13,7 @@ extension Node: Codable {
     }
 
     /// Keys that describe the node rather than name its kind: the stylesheet's hooks, and what
-    /// the pointer does to it (PLAN.md M5).
+    /// the pointer does to it.
     private static let reserved: Set<String> = Set(["id", "class"] + NodeActions.keys)
 
     public init(from decoder: Decoder) throws {
@@ -60,9 +60,20 @@ extension Node: Codable {
             let value = try c.decode(JSONValue.self, forKey: keepKey)
             keepOpen = value.boolValue ?? (value.stringValue.map { $0 == "true" } ?? false)
         }
+        // A list of nodes, or one; empty, as an `each` over nothing leaves it, is none.
+        var submenu: [Node]?
+        let submenuKey = Key(stringValue: "submenu")
+        if c.contains(submenuKey), try !c.decodeNil(forKey: submenuKey) {
+            if let nodes = try? c.decode([Node].self, forKey: submenuKey) {
+                submenu = nodes
+            } else {
+                submenu = [try c.decode(Node.self, forKey: submenuKey)]
+            }
+            if submenu?.isEmpty == true { submenu = nil }
+        }
         return NodeActions(click: try action("on-click"), rightClick: try action("on-right-click"),
                            scroll: try action("on-scroll"), change: try action("on-change"),
-                           keepOpen: keepOpen)
+                           keepOpen: keepOpen, submenu: submenu)
     }
 
     private static func decodeKind(named name: String,
@@ -226,6 +237,7 @@ extension Node: Codable {
             try c.encodeIfPresent(value, forKey: Key(stringValue: name))
         }
         if actions.keepOpen { try c.encode(true, forKey: Key(stringValue: "keep-open")) }
+        try c.encodeIfPresent(actions.submenu, forKey: Key(stringValue: "submenu"))
     }
 }
 

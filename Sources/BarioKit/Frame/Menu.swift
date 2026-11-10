@@ -1,6 +1,6 @@
 import QuartzCore
 
-/// Where an open menu's frames end up: a window of its own, or a recording in a test (PLAN.md M3).
+/// Where an open menu's frames end up: a window of its own, or a recording in a test.
 @MainActor
 public protocol MenuSurface: BarSurface {
     /// Move and size the window, in screen coordinates. Only a frame calls this.
@@ -10,13 +10,21 @@ public protocol MenuSurface: BarSurface {
 }
 
 /// One open menu's part of the pipeline: whose it is, what it hangs from, what each stage last
-/// made of it, and the pointer over it. PLAN.md M2, M3.
+/// made of it, and the pointer over it. A submenu is one too, hanging from a row of the menu
+/// before it in the chain.
 @MainActor
 public final class Menu {
-    /// Whose menu it is: the item, or source, whose state fills it.
+    /// Whose menu it is: the item, or source, whose state fills it. A submenu's is its root's.
     public let item: String
-    /// The item it hangs from, on the bar it hangs from.
+    /// The item it hangs from, on the bar it hangs from. A submenu's is its root's.
     public let anchor: ItemRef
+    /// For a submenu, the row it hangs from in its parent's tree, by index path; nil for the root.
+    public let row: [Int]?
+    /// That row as it was when the submenu opened, less its submenu: a new render that puts a
+    /// different row at the same path closes the submenu rather than showing the other's.
+    var rowNode: Node?
+    /// 0 for the root, 1 for a submenu of it, and so on.
+    public let depth: Int
     public let surface: any MenuSurface
     let compositor: Compositor
     /// No photograph: what is behind a menu is the live screen, which `glass` is made from.
@@ -43,8 +51,12 @@ public final class Menu {
     /// The arrow keys put the hover where it is, and it stays there until the pointer moves.
     var hoverFromKeys = false
     /// A slider being dragged, and the value it was dragged to: shown in place of the rendered
-    /// one until a render after the release has had its say (PLAN.md M7).
+    /// one until a render after the release has had its say.
     var dragged: (path: [Int], value: Double, released: Bool)?
+    /// How far its rows are scrolled up, when it is taller than its room,
+    /// and a control to scroll into view at its next layout.
+    public internal(set) var scroll: CGFloat = 0
+    var reveal: [Int]?
 
     public internal(set) var isVisible = false
     /// On its way out, easing to its `:leaving` style. It takes no pointer, and goes once it gets
@@ -53,10 +65,12 @@ public final class Menu {
     /// When it closed, so a menu with nothing to ease goes at once.
     var closedAt: CFTimeInterval?
 
-    init(item: String, anchor: ItemRef, surface: any MenuSurface) {
+    init(item: String, anchor: ItemRef, surface: any MenuSurface, row: [Int]? = nil, depth: Int = 0) {
         self.item = item
         self.anchor = anchor
         self.surface = surface
+        self.row = row
+        self.depth = depth
         compositor = Compositor(host: surface.hostLayer)
     }
 
@@ -109,7 +123,7 @@ public enum MenuTarget {
 }
 
 extension SceneNode {
-    /// The innermost control under a point, with its index path from this node (PLAN.md M5).
+    /// The innermost control under a point, with its index path from this node.
     func control(at point: CGPoint, path: [Int] = []) -> ([Int], SceneNode)? {
         guard frame.containsPointer(point) else { return nil }
         for (index, child) in children.enumerated().reversed() {

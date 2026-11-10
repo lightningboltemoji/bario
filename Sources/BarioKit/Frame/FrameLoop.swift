@@ -113,18 +113,37 @@ public final class FrameLoop {
 
     // MARK: - Menus
 
-    /// The menu that is open, if any (PLAN.md M3). One at a time, as the menu bar's own.
+    /// The menu that is open, if any. One at a time, as the menu bar's own.
     public private(set) var menu: Menu?
+    /// The submenus open below it, one per level, each hanging from a row of the one before
+    ///. They close with it.
+    public private(set) var submenus: [Menu] = []
+    /// The root and its submenus, outermost first.
+    public var openMenus: [Menu] { (menu.map { [$0] } ?? []) + submenus }
     /// Menus on their way out, easing to their `:leaving` style before their windows go.
     public private(set) var closingMenus: [Menu] = []
     /// A menu asked for and not rendered yet: it opens once its first render has something in
-    /// it, in place of the one that is open, and never if it has nothing (PLAN.md M2). One asked
+    /// it, in place of the one that is open, and never if it has nothing. One asked
     /// for by a click that turns out to have nothing closes the open menu, as a click outside it
     /// would; one the pointer moving onto an item asked for leaves it be.
     public private(set) var pendingMenu: (item: String, anchor: ItemRef, hovering: Bool)?
     /// Makes the window a menu is shown in, on a display. The controller's makes a panel; a
     /// test's records.
     public var makeMenuSurface: ((DisplayInfo) -> any MenuSurface)?
+    /// Makes a submenu's window, which never takes the keys from the root's. Without it, a
+    /// submenu's is made as a menu's.
+    public var makeSubmenuSurface: ((DisplayInfo) -> any MenuSurface)?
+    /// The pointer before its last move, which says where it is heading.
+    private var previousPointer: CGPoint?
+    /// It has moved since the open menus last looked at it.
+    private var pointerMovedSinceHover = false
+    /// Heading for an open submenu across its parent's other rows: they wait for the pointer to
+    /// stop before taking the hover, and the token is the wait that counts.
+    private var aimPending = false
+    private var aimToken = 0
+    /// How long a pointer that stopped on its way to a submenu waits before the row under it
+    /// takes over.
+    static let aimDelay = 0.25
 
     /// How long a new bar waits for its first frame before it is shown anyway.
     public var revealDeadline = 1.0
@@ -317,9 +336,9 @@ public final class FrameLoop {
 
     // MARK: - The wallpaper
 
-    /// A new measurement of one display's wallpaper (PLAN.md W1, W6). One identical to the
+    /// A new measurement of one display's wallpaper. One identical to the
     /// last is not new, and returns false. A new one restyles that bar and no other, and goes
-    /// into the store under `wallpaper` (W14).
+    /// into the store under `wallpaper`.
     @discardableResult
     public func setPalette(_ palette: Palette, for id: CGDirectDisplayID) -> Bool {
         guard let bar = bars.first(where: { $0.id == id }) else { return false }
@@ -332,7 +351,7 @@ public final class FrameLoop {
     }
 
     /// A look for one display's palette found nothing to measure. The last palette stays, and a
-    /// first frame stops waiting for one (W7).
+    /// first frame stops waiting for one.
     public func foundNoPalette(for id: CGDirectDisplayID) {
         guard let bar = bars.first(where: { $0.id == id }), !bar.paletteLooked else { return }
         bar.paletteLooked = true
@@ -378,7 +397,11 @@ public final class FrameLoop {
     // MARK: - The pointer
 
     public func pointerMoved(to point: CGPoint) {
-        if point != pointer { menu?.hoverFromKeys = false }
+        if point != pointer {
+            for menu in openMenus { menu.hoverFromKeys = false }
+            previousPointer = pointer
+            pointerMovedSinceHover = true
+        }
         pointer = point
         if let id = revealed, !bars.contains(where: { $0.id == id && isNear(point, bar: $0) }) {
             revealed = nil
@@ -415,7 +438,7 @@ public final class FrameLoop {
     /// Whether a bar is bario's right now rather than a lens onto the real menu bar: its hole
     /// shut, and the pointer its own while it is over it. Option held, or, on a bar whose
     /// Option reveals the real menu bar instead, Option not held; or one of its items has its
-    /// menu open, as the menu bar tracks while one of its menus is (PLAN.md M12).
+    /// menu open, as the menu bar tracks while one of its menus is.
     private func isShut(_ bar: Bar) -> Bool {
         optionHeld != (bar.config?.option == .reveal) || menu?.anchor.bar == bar.id
     }
@@ -463,7 +486,7 @@ public final class FrameLoop {
 
     // MARK: - Menus
 
-    /// Open `item`'s menu under `anchor`, or close it if it is the one open there (PLAN.md M11).
+    /// Open `item`'s menu under `anchor`, or close it if it is the one open there.
     public func toggleMenu(_ item: String, from anchor: ItemRef) {
         let anchor = anchor.bubble
         if let menu, menu.item == item, menu.anchor == anchor {
@@ -474,7 +497,7 @@ public final class FrameLoop {
     }
 
     /// Ask for `item`'s menu under `anchor`. It opens once it has rendered, in place of any menu
-    /// that is open, if it has anything in it (PLAN.md M2).
+    /// that is open, if it has anything in it.
     public func openMenu(_ item: String, from anchor: ItemRef, hovering: Bool = false) {
         let anchor = anchor.bubble
         if let menu, menu.item == item, menu.anchor == anchor {
@@ -500,8 +523,12 @@ public final class FrameLoop {
         retire(menu, rendering: false)
     }
 
+    /// The root goes, and every submenu with it.
     private func retire(_ menu: Menu, rendering: Bool) {
-        if self.menu === menu { self.menu = nil }
+        if self.menu === menu {
+            retireSubmenus(from: 0)
+            self.menu = nil
+        }
         menu.isClosing = true
         menu.hovered = nil
         menu.pressed = nil
@@ -515,6 +542,72 @@ public final class FrameLoop {
         invalidate(.present)
     }
 
+    /// Close the submenus from `index` in `submenus` down, deepest first; the one above them no
+    /// longer has a row `:open`.
+    private func retireSubmenus(from index: Int) {
+        guard index < submenus.count else { return }
+        for submenu in submenus[index...].reversed() {
+            submenu.isClosing = true
+            submenu.hovered = nil
+            submenu.pressed = nil
+            submenu.surface.setTakesPointer(false)
+            closingMenus.append(submenu)
+        }
+        submenus.removeSubrange(index...)
+        aimPending = false
+        if let parent = openMenus.last { menuChanged(parent) }
+        dirty.menu = true
+        requestFrame()
+    }
+
+    /// Close whatever is open below `menu`.
+    private func retireSubmenus(below menu: Menu) {
+        guard let index = openMenus.firstIndex(where: { $0 === menu }) else { return }
+        retireSubmenus(from: index)
+    }
+
+    /// The submenu open below `menu`, if any.
+    public func submenu(of menu: Menu) -> Menu? {
+        guard let index = openMenus.firstIndex(where: { $0 === menu }), index < submenus.count else { return nil }
+        return submenus[index]
+    }
+
+    /// Open the submenu `row` carries in `parent`, beside it, in place of whatever was open below
+    /// `parent`. Its content is already there, in its parent's render, so it
+    /// is laid out at the next frame.
+    public func openSubmenu(from parent: Menu, row: [Int]) {
+        guard !parent.isClosing, let root = menu, let index = openMenus.firstIndex(where: { $0 === parent })
+        else { return }
+        if index < submenus.count, submenus[index].row == row { return }
+        retireSubmenus(from: index)
+        guard let rowNode = content(of: parent)?.node(at: row), let nodes = rowNode.actions.submenu,
+              Node.menu(nodes) != nil,
+              let bar = bars.first(where: { $0.id == root.anchor.bar }),
+              let make = makeSubmenuSurface ?? makeMenuSurface else { return }
+        let submenu = Menu(item: root.item, anchor: root.anchor, surface: make(bar.display),
+                           row: row, depth: parent.depth + 1)
+        submenu.rowNode = rowNode.withoutSubmenu
+        submenus.append(submenu)
+        menuChanged(parent)
+        menuChanged(submenu)
+    }
+
+    /// What a menu in the chain shows: the root's render, and below it the submenu each one's row
+    /// carries in the one above, so a new render of the root reaches every level.
+    func content(of target: Menu) -> Node? {
+        guard let root = menu, let rendered = host.menuState(for: root.item)?.content else { return nil }
+        var content = root.content(rendered)
+        if target === root { return content }
+        for submenu in submenus {
+            guard let row = submenu.row, let rowNode = content.node(at: row),
+                  rowNode.withoutSubmenu == submenu.rowNode,
+                  let nodes = rowNode.actions.submenu, let next = Node.menu(nodes) else { return nil }
+            content = submenu.content(next)
+            if submenu === target { return content }
+        }
+        return nil
+    }
+
     private func cancelPendingMenu() {
         guard let pending = pendingMenu else { return }
         pendingMenu = nil
@@ -522,7 +615,7 @@ public final class FrameLoop {
     }
 
     /// Moving onto another item while a menu is open switches to that item's menu, if a click on
-    /// it would open one, as the menu bar's own titles do (PLAN.md M12).
+    /// it would open one, as the menu bar's own titles do.
     private func switchMenu(to ref: ItemRef) {
         guard let menu, ref.bar == menu.anchor.bar else { return }
         guard ref.item != menu.anchor.item, let item = menuItem(forClickOn: ref.item) else {
@@ -570,19 +663,102 @@ public final class FrameLoop {
         requestFrame(atRefresh: true)
     }
 
-    /// The control under the pointer in the open menu, which hovers.
-    private func updateMenuHover() {
-        guard let menu, !menu.hoverFromKeys else { return }
-        var next: [Int]?
-        if let pointer, case .control(let path, _) = menu.target(at: pointer) { next = path }
-        guard next != menu.hovered else { return }
-        menu.hovered = next
-        menuChanged(menu)
+    /// The open menu under a point, deepest first, and what in it is there. A submenu's window
+    /// reaches over its parent's edge for its shadow, so where the pointer is says which menu it
+    /// is in, not which window heard it. nil off every panel.
+    public func menuTarget(at point: CGPoint) -> (menu: Menu, target: MenuTarget)? {
+        for menu in openMenus.reversed() {
+            let target = menu.target(at: point)
+            if case .outside = target { continue }
+            return (menu, target)
+        }
+        return nil
     }
 
-    /// Move the open menu's hover to the next control, or the one before, as the arrow keys do.
+    /// The control under the pointer, in whichever open menu it is over, hovers; the others let
+    /// go of theirs, and a row whose submenu is open stays lit as `:open`. Hovering a row with a
+    /// submenu opens it, and another control closes it, unless the pointer is on its way to it
+    ///. Off every panel, what is open stays open.
+    private func updateMenuHover() {
+        let moved = pointerMovedSinceHover
+        pointerMovedSinceHover = false
+        let chain = openMenus
+        guard !chain.isEmpty, !chain.contains(where: \.hoverFromKeys) else { return }
+        let over = pointer.flatMap { point in
+            chain.lastIndex { if case .outside = $0.target(at: point) { false } else { true } }
+        }
+        for (index, menu) in chain.enumerated() where index != over && menu.hovered != nil {
+            menu.hovered = nil
+            menuChanged(menu)
+        }
+        guard let over, let point = pointer else { return }
+        let menu = chain[over]
+        var next: [Int]?
+        var opens = false
+        if case .control(let path, let node) = menu.target(at: point) {
+            next = path
+            opens = node.actions.submenu != nil
+        }
+        let child = over < submenus.count ? submenus[over] : nil
+        if let child, next != child.row, !child.isClosing {
+            if moved, isAiming(at: child, to: point) {
+                aimPending = true
+                scheduleAimCheck()
+                return
+            }
+            // Still waiting for a pointer that was on its way to stop.
+            if aimPending { return }
+        }
+        aimPending = false
+        if next != menu.hovered {
+            menu.hovered = next
+            menuChanged(menu)
+        }
+        if let next, opens {
+            openSubmenu(from: menu, row: next)
+        } else if next != nil, child != nil {
+            retireSubmenus(from: over)
+        }
+    }
+
+    /// Whether the pointer's last move kept it inside the triangle from where it was to the near
+    /// corners of `submenu`'s panel: on its way there, across whatever rows lie between.
+    private func isAiming(at submenu: Menu, to point: CGPoint) -> Bool {
+        guard let previous = previousPointer, previous != point, let panel = submenu.panelFrame else { return false }
+        let rightward = panel.midX > previous.x
+        let x = rightward ? panel.minX : panel.maxX
+        guard rightward ? point.x > previous.x : point.x < previous.x else { return false }
+        let a = previous, b = CGPoint(x: x, y: panel.maxY), c = CGPoint(x: x, y: panel.minY)
+        func side(_ p: CGPoint, _ q: CGPoint, _ r: CGPoint) -> CGFloat {
+            (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y)
+        }
+        let d1 = side(point, a, b), d2 = side(point, b, c), d3 = side(point, c, a)
+        let negative = d1 < 0 || d2 < 0 || d3 < 0
+        let positive = d1 > 0 || d2 > 0 || d3 > 0
+        return !(negative && positive)
+    }
+
+    /// A pointer that stops on its way to a submenu is not on its way any more.
+    private func scheduleAimCheck() {
+        aimToken += 1
+        let token = aimToken
+        scheduler.after(FrameLoop.aimDelay) { [weak self] in
+            guard let self, self.aimToken == token, self.aimPending else { return }
+            self.aimPending = false
+            self.pointerMovedSinceHover = false
+            self.updateMenuHover()
+        }
+    }
+
+    /// The menu the arrow keys act in: the deepest with a hover, or the root.
+    public var keyMenu: Menu? {
+        openMenus.last { $0.hovered != nil } ?? menu
+    }
+
+    /// Move the hover to the next control, or the one before, as the arrow keys do, in the menu
+    /// they act in. Whatever was open below it closes, and the control is scrolled into view.
     public func moveMenuHover(by step: Int) {
-        guard let menu, let content = menu.presentation?.scene.items.first?.content else { return }
+        guard let menu = keyMenu, let content = menu.presentation?.scene.items.first?.content else { return }
         var paths: [[Int]] = []
         func visit(_ node: SceneNode, _ path: [Int]) {
             if node.actions.isControl { paths.append(path) }
@@ -593,29 +769,71 @@ public final class FrameLoop {
         let current = menu.hovered.flatMap { paths.firstIndex(of: $0) }
         let next = current.map { ($0 + step + paths.count) % paths.count } ?? (step > 0 ? 0 : paths.count - 1)
         menu.hovered = paths[next]
+        menu.reveal = paths[next]
         menu.hoverFromKeys = true
+        if let child = submenu(of: menu), child.row != paths[next] { retireSubmenus(below: menu) }
         menuChanged(menu)
     }
 
-    /// The control a press went down on in the open menu, and nil when it comes up: `:active`.
-    public func pressMenu(_ path: [Int]?) {
-        guard let menu, menu.pressed != path else { return }
+    /// → or Return on a row with a submenu: open it, and put the hover on its first control.
+    /// Returns false when the hovered control has no submenu.
+    @discardableResult
+    public func openSubmenuFromKeys() -> Bool {
+        guard let menu = keyMenu, let path = menu.hovered,
+              let nodes = content(of: menu)?.node(at: path)?.actions.submenu,
+              let content = Node.menu(nodes) else { return false }
+        openSubmenu(from: menu, row: path)
+        guard let child = submenu(of: menu) else { return false }
+        menu.hoverFromKeys = true
+        child.hovered = content.firstControl()
+        child.reveal = child.hovered
+        child.hoverFromKeys = true
+        menuChanged(child)
+        return true
+    }
+
+    /// ←: close the deepest submenu with the keys in it, and put the hover back on its row.
+    /// Returns false in the root, which ← leaves alone.
+    @discardableResult
+    public func closeSubmenuFromKeys() -> Bool {
+        guard let menu = keyMenu, menu.depth > 0, let index = submenus.firstIndex(where: { $0 === menu })
+        else { return false }
+        let parent = openMenus[index]
+        retireSubmenus(from: index)
+        parent.hovered = menu.row
+        parent.hoverFromKeys = true
+        menuChanged(parent)
+        return true
+    }
+
+    /// The control a press went down on in a menu, the root by default, and nil when it comes
+    /// up: `:active`.
+    public func pressMenu(_ path: [Int]?, in target: Menu? = nil) {
+        guard let menu = target ?? menu, menu.pressed != path else { return }
         menu.pressed = path
         menuChanged(menu)
     }
 
-    /// A slider in the open menu dragged, or scrolled, to `value`. It shows that value until a
-    /// render after the release.
-    public func dragMenu(_ path: [Int], to value: Double) {
-        guard let menu else { return }
+    /// A slider in a menu, the root by default, dragged, or scrolled, to `value`. It shows that
+    /// value until a render after the release.
+    public func dragMenu(_ path: [Int], to value: Double, in target: Menu? = nil) {
+        guard let menu = target ?? menu else { return }
         menu.dragged = (path, min(1, max(0, value)), false)
         menuChanged(menu)
     }
 
     /// The drag let go. The slider keeps the dragged value until the next render lands.
-    public func releaseMenuDrag() {
-        guard let menu, let dragged = menu.dragged else { return }
+    public func releaseMenuDrag(in target: Menu? = nil) {
+        guard let menu = target ?? menu, let dragged = menu.dragged else { return }
         menu.dragged = (dragged.path, dragged.value, true)
+    }
+
+    /// The wheel over a menu taller than its room: its rows move up for a swipe up, as a page's
+    /// do. Kept in range when it is laid out.
+    public func scrollMenu(_ menu: Menu, by dy: Double) {
+        guard dy != 0 else { return }
+        menu.scroll -= CGFloat(dy)
+        menuChanged(menu)
     }
 
     private func menuChanged(_ menu: Menu) {
@@ -625,50 +843,101 @@ public final class FrameLoop {
     }
 
     /// Where the open menu hangs from and what it is, laid out again when something changed:
-    /// returns false when it can no longer be shown, because its item or its bar has gone, or
-    /// it has nothing in it.
-    private func layOut(_ menu: Menu, force: Bool, at now: CFTimeInterval) -> Bool {
+    /// `shown` is false when it can no longer be shown, because its item or its bar has gone, or
+    /// it has nothing in it; `laidOut` says whether it was laid out again, which its submenu
+    /// follows.
+    private func layOut(_ menu: Menu, force: Bool, at now: CFTimeInterval) -> (shown: Bool, laidOut: Bool) {
         guard !hidden,
               let bar = bars.first(where: { $0.id == menu.anchor.bar }), bar.isShowing,
               let barConfig = bar.config,
               let scene = bar.animator.target,
               let anchorItem = scene.allItems.first(where: { $0.name == menu.anchor.item && !$0.states.contains(.leaving) }),
-              let state = host.menuState(for: menu.item) else { return false }
-        guard let content = state.content else { return !state.rendered && menu.layout != nil }
+              let state = host.menuState(for: menu.item) else { return (false, false) }
+        guard let content = state.content else { return (!state.rendered && menu.layout != nil, false) }
         let frame = bar.surface.frame
         let anchor = anchorItem.frame.offsetBy(dx: frame.minX, dy: frame.minY)
-        guard force || menu.dirty || menu.layout == nil || menu.anchorFrame != anchor else { return true }
+        guard force || menu.dirty || menu.layout == nil || menu.anchorFrame != anchor else { return (true, false) }
 
-        // Styled as its bar is: the bar's palette, schemes and modes.
+        let styled = styleMenu(menu, content: menu.content(content), bar: bar, config: barConfig)
+        let layout = BarLayout(metrics: metrics, renderers: renderers, rasters: rasters, resolver: resolver)
+            .layout(menu: styled, anchor: anchor, top: frame.minY + scene.bar.minY,
+                    align: config.item(named: menu.item)?.menu?.align ?? .start, on: bar.display,
+                    scroll: menu.scroll, reveal: menu.reveal)
+        place(menu, styled: styled, layout: layout, anchor: anchor, at: now)
+        return (true, true)
+    }
+
+    /// A submenu beside its row in `parent`, laid out again when something changed or its parent
+    /// was: false when it can no longer be shown, because its row has gone or carries no submenu.
+    private func layOut(submenu: Menu, parent: Menu, force: Bool, at now: CFTimeInterval) -> (shown: Bool, laidOut: Bool) {
+        guard !submenu.isClosing, let row = submenu.row, let parentLayout = parent.layout,
+              let rowNode = parentLayout.item?.content?.node(at: row),
+              let bar = bars.first(where: { $0.id == submenu.anchor.bar }), let barConfig = bar.config,
+              let scene = bar.animator.target, let content = content(of: submenu) else { return (false, false) }
+        let origin = parentLayout.frame.origin
+        let anchor = rowNode.frame.offsetBy(dx: origin.x, dy: origin.y)
+        guard force || submenu.dirty || submenu.layout == nil || submenu.anchorFrame != anchor else { return (true, false) }
+
+        let styled = styleMenu(submenu, content: content, bar: bar, config: barConfig)
+        let layout = BarLayout(metrics: metrics, renderers: renderers, rasters: rasters, resolver: resolver)
+            .layout(submenu: styled, beside: parentLayout.panel.offsetBy(dx: origin.x, dy: origin.y), row: anchor,
+                    top: bar.surface.frame.minY + scene.bar.minY, on: bar.display,
+                    scroll: submenu.scroll, reveal: submenu.reveal)
+        place(submenu, styled: styled, layout: layout, anchor: anchor, at: now)
+        return (true, true)
+    }
+
+    /// Styled as its bar is: the bar's palette, schemes and modes; a submenu a `menu` deeper.
+    private func styleMenu(_ menu: Menu, content: Node, bar: Bar, config barConfig: BarConfig) -> StyledMenu {
         let sheet = stylesheet.appending(liveStyle)
         var cascade = Cascade(stylesheet: sheet, environment: StyleEnvironment(dark: dark, accent: resolver.accent))
         cascade.environment.palette = bar.palette ?? Palette.nothing(accent: resolver.accent)
         cascade.environment.schemes = bar.schemes(for: sheet, in: cascade.environment)
-        let styled = Styler(cascade: cascade).style(
-            menu: menu.content(content), of: menu.item, bar: barConfig, states: host.states,
-            interaction: Styler.NodeInteraction(hovered: menu.hovered, active: menu.pressed),
-            modes: bar.modes(modes))
-        let layout = BarLayout(metrics: metrics, renderers: renderers, rasters: rasters, resolver: resolver)
-            .layout(menu: styled, anchor: anchor, top: frame.minY + scene.bar.minY,
-                    align: config.item(named: menu.item)?.menu?.align ?? .start, on: bar.display)
+        return Styler(cascade: cascade).style(
+            menu: content, of: menu.item, bar: barConfig, states: host.states,
+            interaction: Styler.NodeInteraction(hovered: menu.hovered, active: menu.pressed,
+                                                open: submenu(of: menu)?.row),
+            modes: bar.modes(modes), depth: menu.depth)
+    }
 
+    /// What one layout leaves behind: the scene to ease to, and the window where it goes.
+    private func place(_ menu: Menu, styled: StyledMenu, layout: MenuScene, anchor: CGRect, at now: CFTimeInterval) {
         menu.styled = styled
         menu.layout = layout
         menu.anchorFrame = anchor
+        menu.scroll = layout.scroll
+        menu.reveal = nil
         menu.dirty = false
         menu.sceneChanged = true
         menu.animator.retarget(layout.scene, at: now, animated: menu.isVisible)
         if menu.surface.frame != layout.frame { menu.surface.place(layout.frame) }
-        return true
     }
 
-    /// Lay out the open menu if it needs it, then present and commit it and those on their way
-    /// out. Returns whether any is still moving.
+    /// Lay out the open menus that need it, the root first and each submenu after the one it
+    /// hangs from, then present and commit them and those on their way out. Returns whether any
+    /// is still moving.
     private func presentMenus(_ dirty: Dirty, at now: CFTimeInterval) -> (moving: Bool, committed: [CommitReport]) {
-        if let menu, !layOut(menu, force: dirty.menu, at: now) { closeMenu() }
+        if let menu {
+            let root = layOut(menu, force: dirty.menu, at: now)
+            if !root.shown {
+                closeMenu()
+            } else {
+                var parent = menu
+                var parentLaidOut = root.laidOut
+                for (index, submenu) in submenus.enumerated() {
+                    let laid = layOut(submenu: submenu, parent: parent, force: dirty.menu || parentLaidOut, at: now)
+                    guard laid.shown else {
+                        retireSubmenus(from: index)
+                        break
+                    }
+                    parent = submenu
+                    parentLaidOut = laid.laidOut
+                }
+            }
+        }
         var moving = false
         var committed: [CommitReport] = []
-        for menu in [menu].compactMap({ $0 }) + closingMenus {
+        for menu in openMenus + closingMenus {
             if let report = present(menu, at: now) { committed.append(report) }
             if menu.moving { moving = true }
         }
@@ -849,7 +1118,7 @@ public final class FrameLoop {
 
         // The first frame worth showing: every item has rendered once, however that went,
         // and there is a photograph to show them on, and a palette to colour them with if
-        // anything asks for one (PLAN.md W7). Or the deadline, with what there is.
+        // anything asks for one. Or the deadline, with what there is.
         if !bar.isReady, bar.deadlinePassed
             || (bar.backdrop.image != nil && hasRendered(bar) && (bar.paletteLooked || !wantsPalette)) {
             bar.isReady = true
@@ -873,8 +1142,8 @@ public final class FrameLoop {
                                         isMoving: bar.animator.isMoving(at: now))
 
         // The scene only differs from the one committed last if it was laid out again, was
-        // commit-dirty, was still moving then, or has just started coming or going (PLAN.md
-        // D3); the hole is compared directly.
+        // commit-dirty, was still moving then, or has just started coming or going; the hole
+        // is compared directly.
         let sceneChanged = sceneChanged || bar.moving || turned
         let changed = sceneChanged || !(bar.presentation.map { $0.looksLike(presentation) } ?? false)
         bar.moving = bar.animator.isMoving(at: now) || bar.lens.isMoving(at: now)

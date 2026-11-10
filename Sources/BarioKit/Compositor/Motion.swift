@@ -1,6 +1,6 @@
 import QuartzCore
 
-/// `transform` and `animation` as layer properties (DESIGN.md §9, PLAN.md step 3b). A transform
+/// `transform` and `animation` as layer properties (DESIGN.md §9). A transform
 /// turns and scales about the centre of the layer's box, which is where every compositor layer
 /// has its anchor. An animation is Core Animation's to run: bario adds it once and sleeps while
 /// it plays.
@@ -32,7 +32,7 @@ final class Motion {
                 let key = "bario.\(animation.name).\(track.keyPath)"
                 wanted.insert(key)
                 // Added once, and replaced only when its definition changes, so no commit
-                // restarts a spinner (PLAN.md D12). One that went missing while it should still
+                // restarts a spinner. One that went missing while it should still
                 // be running, with its layer moved to another parent, is added again.
                 if let previous = added[key], previous.animation == animation,
                    layer.animation(forKey: key) != nil || previous.ends <= now {

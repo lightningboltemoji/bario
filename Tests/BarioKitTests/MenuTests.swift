@@ -2,7 +2,7 @@ import AppKit
 import Testing
 @testable import BarioKit
 
-/// Menus, from the content model up (PLAN.md M1–M15): templates, the config, actions, style,
+/// Menus, from the content model up: templates, the config, actions, style,
 /// layout, and the frame loop opening, presenting and closing them.
 @Suite("Menu content")
 struct MenuContentTests {

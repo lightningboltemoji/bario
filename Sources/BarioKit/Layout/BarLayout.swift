@@ -373,7 +373,7 @@ public struct BarLayout: Sendable {
 
 extension SceneNode {
     /// What takes a content row's free space: a spacer, and a slider, which is as long as the
-    /// row lets it be (PLAN.md M7).
+    /// row lets it be.
     var isFlexible: Bool {
         switch kind {
         case .spacer(let spacer): return (spacer.grow ?? 1) > 0

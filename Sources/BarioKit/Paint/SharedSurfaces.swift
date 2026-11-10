@@ -5,7 +5,7 @@ import IOSurface
 /// DESIGN.md §9.3.
 ///
 /// A pair, because a layer shows new pixels in a surface only when its contents are set to a
-/// surface it is not already showing (measured; PLAN.md step 3c): new pixels in the surface a
+/// surface it is not already showing (measured): new pixels in the surface a
 /// layer holds never reach the screen. So a producer draws into the surface not showing, and
 /// `frame` makes it the one that is.
 @MainActor

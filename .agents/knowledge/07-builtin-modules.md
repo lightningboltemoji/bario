@@ -5,7 +5,7 @@ because it replaces something the cover is hiding.
 
 | module | source | state it writes |
 |---|---|---|
-| `front-app` | `NSWorkspace.frontmostApplication` + the activation notification | `name`, `bundle-id`, `icon` |
+| `front-app` | `NSWorkspace.frontmostApplication` + the activation notification; its menu is the app's menu bar (`24-menus.md`) | `name`, `bundle-id`, `icon` |
 | `battery` | IOKit `IOPSCopyPowerSourcesInfo`, with a change notification | `pct`, `charging`, `plugged`, `time-remaining`, `icon` |
 | `wifi` | CoreWLAN | `ssid`, `rssi`, `on`, `bars`, `icon` |
 | `volume` | CoreAudio's default output device, with a property listener | `level`, `muted`, `device`, `transport`, `headphones`, `icon`, `level-icon` |

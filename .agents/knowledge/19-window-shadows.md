@@ -107,7 +107,7 @@ backdrop invalidated.
   *bounds* miss the clip, growing them by `shadowRadius` and the offset and no further — one σ,
   where the shadow is visible out to three. Every caster sits entirely below the bar, so on that
   estimate every one of them is culled and nothing is drawn at all. The bounds are grown by
-  `3σ + |drop|`; bounds carry their origin (PLAN.md D2) so the path stays where it was.
+  `3σ + |drop|`; bounds carry their origin so the path stays where it was.
 - **The plane hangs under whatever is showing the backdrop**, as sublayers of the `Chrome` fill.
   The fill already clips to its outline and masks its bounds, so the bar's own chrome and a
   `background: backdrop` bubble both get a correctly-cut shadow with no special case.

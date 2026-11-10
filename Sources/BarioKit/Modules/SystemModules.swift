@@ -31,12 +31,18 @@ struct FormatRenderer: Sendable {
     }
 }
 
-/// The frontmost application, which is exactly what the cover hides first.
+/// The frontmost application, which is exactly what the cover hides first. Its menu is the
+/// app's menu bar, read through Accessibility each time it renders.
 public actor FrontAppModule: Module {
     private let context: ModuleContext
     private let renderer: FormatRenderer
     private let maxLength: Int?
     private var observer: NSObjectProtocol?
+    /// The last read of the app's menu bar, whose elements `press` presses, and whose app it was.
+    private var lastRead: AppMenuReader.Read?
+    private var lastPID: pid_t?
+    /// macOS is asked to show the Accessibility prompt once, not at every opening.
+    private var askedForAccess = false
 
     public init(context: ModuleContext) {
         self.context = context
@@ -70,6 +76,52 @@ public actor FrontAppModule: Module {
 
     public func render(_ state: StateReader) async throws -> RenderResult {
         RenderResult(content: try renderer.render(state))
+    }
+
+    /// The app's menu bar: App, File, Edit and the rest, each opening onto its items, with Option
+    /// variants shown while Option is held. Nothing for an app with no menu bar, or for bario.
+    public func menu(_ state: StateReader) async throws -> Node? {
+        let option = state.value("/\(ModifierKeys.storeKey).option")?.boolValue == true
+        let name = state.value("name")?.stringValue ?? ""
+        let pid = await MainActor.run { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+        guard let pid, pid != getpid() else { return nil }
+        guard AppMenuReader.isTrusted(prompting: !askedForAccess) else {
+            askedForAccess = true
+            return AppMenus.needsAccess(app: name)
+        }
+        switch AppMenuReader.read(pid: pid) {
+        case .success(let read):
+            lastRead = read
+            lastPID = pid
+            return AppMenus.menu(read.menus, option: option)
+        case .failure(.notResponding):
+            return AppMenus.notResponding(app: name)
+        case .failure(.noMenuBar):
+            return nil
+        }
+    }
+
+    /// `press <path>`, from a row of the menu: the item the last read found there, pressed off
+    /// this actor, since an item that opens a modal holds the call until the modal ends. One gone
+    /// stale is found again by its titles.
+    public func onEvent(_ event: ModuleEvent) async -> JSONValue? {
+        guard event.name == AppMenus.pressVerb,
+              let argument = event.payload["args"]?.arrayValue?.first?.stringValue,
+              let path = AppMenus.path(argument),
+              let read = lastRead, let pid = lastPID, let element = read.elements[path] else { return nil }
+        let pressable = PressableElement(element: element)
+        let titles = read.titles[path] ?? []
+        Task.detached {
+            let result = AppMenuReader.press(pressable.element)
+            guard result == .invalidUIElement, let fresh = AppMenuReader.find(titles, pid: pid) else {
+                if result != .success, result != .cannotComplete {
+                    warn("front-app: pressing \(titles.joined(separator: " › ")) failed (AXError \(result.rawValue))")
+                }
+                return
+            }
+            _ = AppMenuReader.press(fresh)
+        }
+        return nil
     }
 
     static func patch(for app: NSRunningApplication?, limit: Int?) -> JSONValue {

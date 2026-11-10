@@ -24,7 +24,7 @@ public struct CommitReport: Sendable, Equatable, CustomStringConvertible {
 }
 
 /// One bar's layer tree, and commit: the last stage of a frame, which brings the tree up to
-/// date with a presentation. DESIGN.md §10, PLAN.md.
+/// date with a presentation. DESIGN.md §10.
 ///
 /// ```
 /// host layer (the surface's)
@@ -114,7 +114,7 @@ public final class Compositor {
     }
 
     /// Bring the tree up to `presentation`. `sceneChanged` says whether the scene may differ
-    /// from the last one committed (PLAN.md D3); when it does not, only the hole and the reveal
+    /// from the last one committed; when it does not, only the hole and the reveal
     /// are set, and no raster key is computed.
     @discardableResult
     public func commit(_ presentation: Presentation, inputs: Inputs, sceneChanged: Bool) -> CommitReport {
@@ -562,7 +562,7 @@ public final class Compositor {
 }
 
 extension NodeRasterizer {
-    /// How far past its frame a leaf's drawing can reach (PLAN.md D5): glyphs, strokes and
+    /// How far past its frame a leaf's drawing can reach: glyphs, strokes and
     /// symbols overhang, and canvases and rasters are clipped to their frames already.
     static func overhang(of node: SceneNode) -> CGFloat {
         switch node.kind {

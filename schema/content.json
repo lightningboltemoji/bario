@@ -29,6 +29,13 @@
           "type": "boolean",
           "default": false,
           "description": "Clicking this node, or anything inside it, leaves its menu open."
+        },
+        "submenu": {
+          "description": "In a menu, a menu of its own, opened beside this node when it is hovered or clicked: one node, or several, which are a column. A node with one is a control. Not laid out where it is.",
+          "oneOf": [
+            { "$ref": "#/$defs/node" },
+            { "type": "array", "items": { "$ref": "#/$defs/node" } }
+          ]
         }
       }
     },

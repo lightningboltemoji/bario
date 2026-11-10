@@ -1,7 +1,7 @@
 import AppKit
 
 /// Where a bar's frames end up: a window on a display, or a recording in a test. A surface only
-/// hosts the bar's layer tree; the bar's compositor owns it (PLAN.md D1).
+/// hosts the bar's layer tree; the bar's compositor owns it.
 @MainActor
 public protocol BarSurface: AnyObject {
     /// The bar's rectangle in screen coordinates, which the pointer and the hole are measured
@@ -30,14 +30,14 @@ public final class Bar {
     /// The window shadows falling into the bar, which the photograph can never hold: they are
     /// cast onto it instead. A field that moved invalidates commit.
     public internal(set) var shadows = ShadowField.empty
-    /// This display's wallpaper, as last measured (PLAN.md W1). A new one restyles the bar. It
+    /// This display's wallpaper, as last measured. A new one restyles the bar. It
     /// outlives a reload of the stylesheet or the config, and the next measurement is made
-    /// against it (W11).
+    /// against it.
     public internal(set) var palette: Palette?
     /// Whether a palette has been looked for, found or not: what a first frame coloured from
-    /// the wallpaper waits for (W7).
+    /// the wallpaper waits for.
     var paletteLooked = false
-    /// The schemes made for this bar's last styling, by what they were made from (W12).
+    /// The schemes made for this bar's last styling, by what they were made from.
     private(set) var schemeCache: [Scheme.Key: Scheme] = [:]
 
     public internal(set) var display: DisplayInfo
@@ -152,7 +152,7 @@ public final class Bar {
 
 /// An item on one particular bar. Two displays can show items of the same name, and hovering
 /// one must not light up the other. `node` is the control inside it, by index path in its
-/// content, when the pointer is over one (PLAN.md M5).
+/// content, when the pointer is over one.
 public struct ItemRef: Hashable, Sendable {
     public var bar: CGDirectDisplayID
     public var item: String

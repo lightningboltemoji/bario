@@ -19,10 +19,10 @@ import Foundation
 ///
 /// Among a container's children, `each "outputs" { … }` repeats what is inside it for every
 /// element of the list at that path, reading slots from the element first, and `if "ssid" { … }`
-/// (or `if "!ssid"`) keeps what is inside it while the value is truthy (PLAN.md M8). A slot whose
-/// name starts with `/` reads from the root of the store rather than the item's state (M9), and
+/// (or `if "!ssid"`) keeps what is inside it while the value is truthy. A slot whose
+/// name starts with `/` reads from the root of the store rather than the item's state, and
 /// one filled into an `on-…` action is single-quoted, so a value is one argument whatever is in
-/// it (M10).
+/// it.
 public struct ContentTemplate: Sendable, Hashable {
     indirect enum Piece: Sendable, Hashable {
         case literal(JSONValue)

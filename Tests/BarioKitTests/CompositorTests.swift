@@ -3,7 +3,7 @@ import Testing
 @testable import BarioKit
 
 /// The compositor on detached layer trees: what a commit makes, keeps, removes and draws.
-/// PLAN.md step 1.
+///
 @Suite("Compositor")
 @MainActor
 struct CompositorTests {

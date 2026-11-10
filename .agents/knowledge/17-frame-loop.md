@@ -83,7 +83,7 @@ layer tree and never draws; `BarCover` is the window-backed `BarSurface`.
   still; a bar hidden by a full screen app does not come back mid-transition.
 - **Commit only what changed.** A bar is committed if it was laid out, is commit-dirty, was
   moving at the last frame, or its hole or reveal differ; only the first three commit the scene
-  (PLAN.md D3), and a hole alone sets the mask. Pointer moves far from every bar do not even
+, and a hole alone sets the mask. Pointer moves far from every bar do not even
   schedule a frame. *(This rule was "repaint only what changed" while the painter drew the bar
   whole; see [18-compositor.md](18-compositor.md).)*
 - **An item on its way out is presented, never laid out and never hit.** Ghosts live in the

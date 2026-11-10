@@ -36,14 +36,17 @@ public struct Styler: Sendable {
         }
     }
 
-    /// The control the pointer is over and the one being pressed, by index path in a tree.
+    /// The control the pointer is over and the one being pressed, by index path in a tree; and
+    /// the one whose submenu is open.
     public struct NodeInteraction: Sendable, Hashable {
         public var hovered: [Int]?
         public var active: [Int]?
+        public var open: [Int]?
 
-        public init(hovered: [Int]? = nil, active: [Int]? = nil) {
+        public init(hovered: [Int]? = nil, active: [Int]? = nil, open: [Int]? = nil) {
             self.hovered = hovered
             self.active = active
+            self.open = open
         }
     }
 
@@ -192,7 +195,7 @@ public struct Styler: Sendable {
 
     /// `structural` is where the node sits among its siblings, so `.stacked text:last-child`
     /// reaches the second line of a column as `group item:last-child` reaches an item. A control
-    /// under the pointer or the press is `:hover` or `:active` (PLAN.md M5), found by `index`,
+    /// under the pointer or the press is `:hover` or `:active`, found by `index`,
     /// its path in the tree.
     private func styleNode(_ node: Node, parentPath: [StyleNode], parentStyle: Style,
                            structural: Set<StyleState> = [], index: [Int] = [],
@@ -201,6 +204,7 @@ public struct Styler: Sendable {
         if node.actions.isControl {
             if interaction.hovered == index { states.insert(.hover) }
             if interaction.active == index { states.insert(.active) }
+            if interaction.open == index, node.actions.submenu != nil { states.insert(.open) }
         }
         let path = parentPath + [StyleNode(type: node.typeName, id: node.id,
                                            classes: Set(node.classes), states: states)]
@@ -226,11 +230,14 @@ public struct Styler: Sendable {
 
     // MARK: - Menus
 
-    /// An item's open menu (PLAN.md M4). It is selected under its item, as
+    /// An item's open menu. It is selected under its item, as
     /// `bar › group › item#name.classes › menu`, so `#wifi menu` and `#battery.charging menu`
     /// reach it; but it inherits from the bar, so a bubble's colour and sizes stay in the bubble.
+    /// A submenu `depth` levels down is one more `menu` for each, so every `menu` rule reaches it
+    /// and `menu menu` reaches only submenus.
     public func style(menu content: Node, of item: String, bar: BarConfig, states: [String: ModuleHost.ItemState],
-                      interaction: NodeInteraction = NodeInteraction(), modes: Set<String> = []) -> StyledMenu {
+                      interaction: NodeInteraction = NodeInteraction(), modes: Set<String> = [],
+                      depth: Int = 0) -> StyledMenu {
         let barNode = StyleNode(type: "bar", id: nil, classes: modes, states: [])
         let barStyle = cascade.style(for: [barNode]).style
         var path = [barNode]
@@ -246,7 +253,9 @@ public struct Styler: Sendable {
             path.append(StyleNode(type: "item", id: item, classes: Set(states[item]?.result.classes ?? []),
                                   states: [.open]))
         }
-        path.append(StyleNode(type: "menu", id: nil, classes: [], states: []))
+        for _ in 0...max(0, depth) {
+            path.append(StyleNode(type: "menu", id: nil, classes: [], states: []))
+        }
         let style = cascade.style(for: path, inheriting: barStyle).style
         return StyledMenu(item: item, style: style,
                           starting: cascade.startingStyle(for: path, inheriting: barStyle),

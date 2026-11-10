@@ -279,7 +279,7 @@ public final class StateReader: @unchecked Sendable {
     }
 
     /// A path inside this item's subtree, or with a leading `/`, anywhere in the store
-    /// (PLAN.md M9): `{/volume.fraction}` in a control centre's menu.
+    ///: `{/volume.fraction}` in a control centre's menu.
     public func value(_ path: String) -> JSONValue? {
         if path.hasPrefix("/") { return global(String(path.dropFirst())) }
         let absolute = path.isEmpty ? item : "\(item).\(path)"

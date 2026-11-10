@@ -222,7 +222,7 @@ public struct ItemConfig: Sendable, Equatable {
     /// A content tree with slots in it, filled from the item's state on every render; what a
     /// `content` block is when any string in it names a slot.
     public var template: ContentTemplate?
-    /// What drops down when the item is clicked (PLAN.md M1).
+    /// What drops down when the item is clicked.
     public var menu: MenuConfig?
     public var align: Align?
     /// The whole config node as JSON — what the module receives from `init(config)`. Not the
@@ -245,7 +245,7 @@ public struct ItemConfig: Sendable, Equatable {
 }
 
 /// An item's `menu { … }`: a content tree filled from the item's state while the menu is open,
-/// as `content` is filled for its bubble. PLAN.md M1, M14.
+/// as `content` is filled for its bubble.
 public struct MenuConfig: Sendable, Equatable {
     public var content: Node?
     public var template: ContentTemplate?

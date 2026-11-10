@@ -3,7 +3,7 @@ import Foundation
 /// A pseudo-class, i.e. a state the scene tree can be in.
 public enum StyleState: String, Sendable, Hashable, CaseIterable {
     case hover, active, overflow, stale, error
-    /// An item whose menu is showing, hanging from it (PLAN.md M12).
+    /// An item whose menu is showing, hanging from it.
     case open
     /// An item on its way out: the style it transitions to after it leaves the layout.
     case leaving

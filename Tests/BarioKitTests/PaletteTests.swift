@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import BarioKit
 
-/// Extraction (PLAN.md step 2), on images the tests draw rather than wallpapers in the repo.
+/// Extraction, on images the tests draw rather than wallpapers in the repo.
 @Suite("Palette")
 struct PaletteTests {
     /// Vertical stripes, each so many pixels wide, in sRGB or another space.
@@ -46,7 +46,7 @@ struct PaletteTests {
         }
     }
 
-    // MARK: The plan's cases
+    // MARK: The prototype's cases
 
     @Test("a solid colour is one cluster, the seed is its hue, and the slots it does not fit are made up")
     func solid() {
@@ -197,7 +197,7 @@ struct PaletteTests {
         #expect(vibrant(Palette.extract(clear, previous: before)) == blue, "not a near-tie, so it moves")
     }
 
-    // MARK: Beyond the plan's list
+    // MARK: Beyond the prototype's
 
     @Test("a Display P3 image is measured beyond sRGB, and shown inside it")
     func displayP3() {

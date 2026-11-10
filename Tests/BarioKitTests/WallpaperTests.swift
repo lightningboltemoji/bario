@@ -2,7 +2,7 @@ import AppKit
 import Testing
 @testable import BarioKit
 
-/// Palettes as a style input (PLAN.md step 3): `wallpaper()` substituted by the cascade, and the
+/// Palettes as a style input: `wallpaper()` substituted by the cascade, and the
 /// frame loop restyling, waiting and publishing for them.
 @Suite("wallpaper() in the stylesheet")
 struct WallpaperStyleTests {

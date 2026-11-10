@@ -74,7 +74,7 @@ public final class ModuleHost {
         public var rendered = false
     }
 
-    /// An open menu, from the style stage's point of view (PLAN.md M2).
+    /// An open menu, from the style stage's point of view.
     public struct MenuState: Sendable, Equatable {
         public init(content: Node? = nil, rendered: Bool = false, error: String? = nil,
                     confined: Bool = false) {
@@ -165,6 +165,9 @@ public final class ModuleHost {
     public var onMenuRendered: (@MainActor (String) -> Void)?
 
     public static let renderBudget = 0.050
+    /// A menu's: it renders when it opens and when what it read changes, and nothing waits on it
+    /// but the menu, which may be reading another app's menu bar.
+    public static let menuRenderBudget = 0.250
     public static let pollBudget = 2.0
     /// How long a new module's first render waits for state before rendering without it.
     public let firstStateDeadline: Double
@@ -562,7 +565,7 @@ public final class ModuleHost {
         let number = slot.renders
         var next = slot.state
         do {
-            let (content, confined) = try await withBudget(ModuleHost.renderBudget) {
+            let (content, confined) = try await withBudget(ModuleHost.menuRenderBudget) {
                 () async throws -> (Node?, Bool) in
                 if let config { return (try config.render(reader), false) }
                 if let written = reader.value("menu"), !written.isNull {

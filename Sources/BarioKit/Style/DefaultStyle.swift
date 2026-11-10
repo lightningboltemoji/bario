@@ -111,6 +111,20 @@ menu .glyph { width: 18pt; }
 menu .check { opacity: 0; icon-weight: semibold; icon-size: 11pt; }
 menu .selected .check { opacity: 1; }
 
+/* Submenus: every menu rule reaches them, and `menu menu` only them. One hangs beside the row it
+   opened from, a little apart from its parent, and fades in where it is rather than sliding. The
+   row stays lit while its submenu is open. */
+menu menu { margin: 0 0 0 4pt; }
+@starting-style { menu menu { transform: translateY(0); } }
+menu row:open { background: var(--bubble-hover); }
+menu .arrow { icon-size: 9pt; icon-weight: semibold; opacity: 0.6; }
+
+/* An app's menus (the front-app item's): a check column where a menu has checks, the shortcut
+   dimmed at the end, and an item the app has turned off dimmed further, and still. */
+menu .mark { width: 13pt; }
+menu .shortcut { opacity: 0.6; }
+menu .disabled { opacity: 0.4; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bubble: rgba(0, 0, 0, 0.30);

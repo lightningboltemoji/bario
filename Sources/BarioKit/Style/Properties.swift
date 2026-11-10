@@ -20,13 +20,13 @@ public indirect enum Color: Sendable, Hashable {
     case current
     case none
     /// `oklch(from accent l c calc(h + 180))` and its kin, whose origin only commit knows.
-    /// With a known origin the parser computes it and it is `.rgba` (PLAN.md W3).
+    /// With a known origin the parser computes it and it is `.rgba`.
     case relative(RelativeColor)
     /// `color-mix()` with an input only commit knows.
     case mixed(ColorMix)
     /// `contrast-color()`: white or black, whichever contrasts more with it.
     case contrast(Color)
-    /// `on(<colour>, <ratio>)`: a readable partner for it, of its own hue (PLAN.md W16).
+    /// `on(<colour>, <ratio>)`: a readable partner for it, of its own hue.
     case on(Color, ratio: Double)
 
     public static let clear = Color.rgba(RGBA(r: 0, g: 0, b: 0, a: 0))
@@ -175,7 +175,7 @@ public enum Background: Sendable, Hashable {
     case gradient(Gradient)
     /// The probe's photograph. DESIGN.md §7.
     case backdrop(Backdrop)
-    /// The system's Liquid Glass (PLAN.md M13).
+    /// The system's Liquid Glass.
     case glass(Glass)
 }
 

@@ -59,7 +59,7 @@ struct NodeRasterizer {
 
     // MARK: - Leaves
 
-    /// Text or a monochrome symbol as coverage alone (PLAN.md D6): what a tint shows through.
+    /// Text or a monochrome symbol as coverage alone: what a tint shows through.
     /// Text is drawn in the ink its colour calls for, because font smoothing draws light ink
     /// heavier than dark.
     func drawCoverage(_ node: SceneNode, style: Style, in ctx: CGContext) {

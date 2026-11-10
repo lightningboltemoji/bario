@@ -13,7 +13,7 @@ public struct BarEvent: Sendable {
 
     public var kind: Kind
     public var item: String?
-    /// The control in the item under the pointer, by index path in its content (PLAN.md M5).
+    /// The control in the item under the pointer, by index path in its content.
     public var node: [Int]?
     /// That control's `id`, which is how a socket subscriber tells controls apart.
     public var nodeID: String?
@@ -65,7 +65,7 @@ public enum Action: Sendable, Equatable {
     /// A keyboard shortcut, sent as if typed: `key fn+n` opens Notification Center.
     case key(KeyChord)
     case reload
-    /// Open a menu, or close it if it is open: the item's own, or the named item's (PLAN.md M11).
+    /// Open a menu, or close it if it is open: the item's own, or the named item's.
     case menu(String?)
     /// A verb for another item's or a source's module, with its arguments, as that item's own
     /// shortcut would deliver it: `send volume set-level`.

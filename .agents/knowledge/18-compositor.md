@@ -1,7 +1,6 @@
 # 18 — The compositor
 
-DESIGN.md §9 and §10, and PLAN.md, which has the steps and the numbered decisions (D1–D16)
-this note refers to. The painter drew the whole bar on every frame that touched it; this
+DESIGN.md §9 and §10. The painter drew the whole bar on every frame that touched it; this
 replaces it with a tree of Core Animation layers per bar, brought up to date by a last stage
 of the frame, **commit**, which rasterizes only what changed.
 
@@ -14,7 +13,7 @@ FrameLoop.frame()
              └─ changes a CALayer tree hung from bar.surface.hostLayer
 ```
 
-`Bar` owns the compositor; a surface only hosts a layer (D1). `BarView` is layer-hosting and
+`Bar` owns the compositor; a surface only hosts a layer. `BarView` is layer-hosting and
 never draws. `Offscreen` renders the same tree with `CARenderer`, so `--shot`, the pixel tests
 and the screen share one renderer.
 
@@ -31,7 +30,7 @@ and the screen share one renderer.
 
 ## Measured before building (September 2026, macOS 27)
 
-A throwaway program checked every orientation the plan was unsure of, with `CARenderer` into
+A throwaway program checked every orientation that was in doubt, with `CARenderer` into
 a Metal texture:
 
 - **`CARenderer` needs its tree attached before the transaction flushes.** A tree committed
@@ -132,8 +131,7 @@ bar's plane is otherwise cut where it passes behind the backdrop layer at z = 0
 ## Shared surfaces (step 3c)
 
 A native process draws with Metal into a pair of IOSurfaces and bario shows the one it drew
-last as a node's layer contents: no raster, no copy. PLAN.md has the spike and the file-by-file
-account; DESIGN.md §9.3 and §13 have the why.
+last as a node's layer contents: no raster, no copy. DESIGN.md §9.3 and §13 have the why.
 
 - **A pair, measured.** New pixels in a surface a layer already shows never reach the screen,
   even with `contents` set to it again; a surface it is not showing does. So `frame` names the
@@ -177,11 +175,11 @@ at scale 2 they were half size, which the compositor does not reproduce.
   layer that animates implicitly slides where it should snap and nothing else notices.
 - **A property is set only when it differs** from what the layer already holds, compared on
   the layer's model value.
-- **Layers work in bar coordinates** (D2): a container's `bounds` is its scene rectangle with
+- **Layers work in bar coordinates**: a container's `bounds` is its scene rectangle with
   its origin, `position` its centre, so every frame from the scene is used as it is.
 - **The raster key is the only thing that decides a redraw**, with one exception that is about
   where pixels sit rather than what they show: a raster that came to rest off the pixel grid is
-  drawn again on it (PLAN.md D15). A stale pixel is an input missing from the key; add it
+  drawn again on it. A stale pixel is an input missing from the key; add it
   there, never a flag set by whoever changed something.
 - **Content moving is not content changing.** A layout transition moves node layers each frame;
   their frames relative to the node are unchanged, so nothing is drawn until it stops.

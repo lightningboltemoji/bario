@@ -71,7 +71,7 @@ public final class RendererHost: @unchecked Sendable {
 
     /// The drawing for a node of `size`, and whether the renderer asked, while drawing it, to
     /// be drawn again in the next frame. The frame it is given is node-local, at 0, 0
-    /// (PLAN.md D8): ops are node-local already, and a drawing that depended on where its
+    ///: ops are node-local already, and a drawing that depended on where its
     /// bubble sits would have to be drawn again on every frame of a layout transition.
     public func draw(_ nodeType: String, payload: JSONValue, style: Style,
                      resolver: ColorResolver, size: CGSize) -> (drawing: RendererDrawing?, wantsFrame: Bool) {

@@ -1,6 +1,6 @@
 import AppKit
 
-/// How a rounded rectangle becomes layer properties (PLAN.md D7). Core Animation takes one
+/// How a rounded rectangle becomes layer properties. Core Animation takes one
 /// corner radius per layer and a set of corners to apply it to, which covers every radius
 /// but differing non-zero ones; those need a shape.
 enum Outline: Equatable {
@@ -60,7 +60,7 @@ enum Outline: Equatable {
     }
 }
 
-/// A `Style`'s box as layers (PLAN.md D7), each made only when the style needs it:
+/// A `Style`'s box as layers, each made only when the style needs it:
 ///
 /// - **shadow**: `shadowPath` and the shadow properties, no contents, masked to outside the
 ///   shape so a translucent bubble does not show its own shadow through itself, as CSS draws

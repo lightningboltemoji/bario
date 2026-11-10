@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The measuring half of extraction (PLAN.md W8): an image's pixels in Oklab, gathered into a
+/// The measuring half of extraction: an image's pixels in Oklab, gathered into a
 /// histogram, and weighted k-means over the histogram's bins. Deterministic throughout, so the
 /// same image always gives the same palette.
 struct Quantizer {
@@ -29,7 +29,7 @@ struct Quantizer {
     }
 
     /// Read through extended linear sRGB, so a Display P3 capture's colours outside sRGB are
-    /// measured as they are (PLAN.md W4).
+    /// measured as they are.
     init(image: CGImage) {
         let width = max(1, min(image.width, Quantizer.width))
         let height = max(1, Int((Double(image.height) * Double(width) / Double(max(1, image.width))).rounded()))

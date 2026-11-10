@@ -142,3 +142,26 @@ public struct KeyChordError: Error, CustomStringConvertible, Equatable {
     public var description: String
     public init(_ description: String) { self.description = description }
 }
+
+/// The modifier keys held, as bario keeps them at the root of the store, so a template can say
+/// `if "/modifiers.option" { … }` and an open menu that read them renders again when they change
+///.
+public struct ModifierKeys: Sendable, Equatable {
+    public static let storeKey = "modifiers"
+
+    public var option = false
+    public var shift = false
+    public var control = false
+    public var command = false
+
+    public init(option: Bool = false, shift: Bool = false, control: Bool = false, command: Bool = false) {
+        self.option = option
+        self.shift = shift
+        self.control = control
+        self.command = command
+    }
+
+    public var json: JSONValue {
+        .object(["option": .bool(option), "shift": .bool(shift), "control": .bool(control), "command": .bool(command)])
+    }
+}

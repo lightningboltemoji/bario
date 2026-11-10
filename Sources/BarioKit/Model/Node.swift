@@ -7,7 +7,7 @@ public struct Node: Sendable, Hashable {
     public var id: String?
     public var classes: [String]
     /// What the pointer does to it. A node with any is a control: it is hit, it hovers, and its
-    /// action runs as its item's would (PLAN.md M5).
+    /// action runs as its item's would.
     public var actions: NodeActions
 
     public init(_ kind: NodeKind, id: String? = nil, classes: [String] = [],
@@ -34,7 +34,7 @@ public indirect enum NodeKind: Sendable, Hashable {
     case icon(IconSpec)
     case meter(Meter)
     /// A meter you can drag, which sends its item `on-change` with the value it was dragged to
-    /// (PLAN.md M7).
+    ///.
     case slider(Meter)
     case graph(Graph)
     case row(Container)
@@ -73,23 +73,62 @@ public struct NodeActions: Sendable, Hashable {
     public var scroll: String?
     /// A slider's: sent with the value it was dragged or scrolled to.
     public var change: String?
-    /// Clicking it, or anything inside it, leaves its menu open (PLAN.md M6).
+    /// Clicking it, or anything inside it, leaves its menu open.
     public var keepOpen: Bool
+    /// A menu of its own, opened beside it when it is hovered or clicked in a menu: several
+    /// nodes are a column, as in `menu`. Not laid out where it is.
+    public var submenu: [Node]?
 
     public init(click: String? = nil, rightClick: String? = nil, scroll: String? = nil,
-                change: String? = nil, keepOpen: Bool = false) {
+                change: String? = nil, keepOpen: Bool = false, submenu: [Node]? = nil) {
         self.click = click
         self.rightClick = rightClick
         self.scroll = scroll
         self.change = change
         self.keepOpen = keepOpen
+        self.submenu = submenu
     }
 
     /// Whether the pointer has anything to do here.
-    public var isControl: Bool { click != nil || rightClick != nil || scroll != nil || change != nil }
+    public var isControl: Bool {
+        click != nil || rightClick != nil || scroll != nil || change != nil || submenu != nil
+    }
 
     /// The JSON keys, which sit on the node beside `id` and `class`.
-    static let keys = ["on-click", "on-right-click", "on-scroll", "on-change", "keep-open"]
+    static let keys = ["on-click", "on-right-click", "on-scroll", "on-change", "keep-open", "submenu"]
+}
+
+extension Node {
+    /// What a menu is made of, as one tree: one node is itself, and several are a column, since
+    /// a menu is a list. nil for none.
+    public static func menu(_ nodes: [Node]) -> Node? {
+        guard let first = nodes.first else { return nil }
+        return nodes.count == 1 ? first : .column(nodes)
+    }
+
+    /// The node at an index path from this one.
+    public func node(at path: [Int]) -> Node? {
+        guard let first = path.first else { return self }
+        guard children.indices.contains(first) else { return nil }
+        return children[first].node(at: Array(path.dropFirst()))
+    }
+
+    /// The node as its row shows it, without what it opens: what says a submenu is still the
+    /// one it was after a new render.
+    var withoutSubmenu: Node {
+        var node = self
+        node.actions.submenu = nil
+        return node
+    }
+
+    /// The first control in the tree, depth first, by its index path.
+    public func firstControl(path: [Int] = []) -> [Int]? {
+        if actions.isControl { return path }
+        for (index, child) in children.enumerated() {
+            if let found = child.firstControl(path: path + [index]) { return found }
+        }
+        return nil
+    }
 }
 
 // MARK: - Payloads

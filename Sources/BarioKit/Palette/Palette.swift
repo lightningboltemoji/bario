@@ -1,9 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// One display's wallpaper, measured (PLAN.md W8–W11): the colours it is made of, the slots
+/// One display's wallpaper, measured: the colours it is made of, the slots
 /// a stylesheet names, and the seeds a scheme grows from. Slots and seeds promise nothing about
-/// contrast with each other (W16); when two come out alike, that is true of the image.
+/// contrast with each other; when two come out alike, that is true of the image.
 public struct Palette: Sendable, Hashable {
     /// The k-means clusters, largest first.
     public var clusters: [Cluster]
@@ -16,11 +16,11 @@ public struct Palette: Sendable, Hashable {
 
     /// macOS's default blue, for a palette measured with no accent at hand.
     public static let defaultAccent = RGBA(r: 0, g: 0.48, b: 1)
-    /// The store's top-level key that bario writes every display's palette under (W14).
+    /// The store's top-level key that bario writes every display's palette under.
     public static let storeKey = "wallpaper"
 
     /// Measure an image. `previous` is the last palette of the same display, which a slot keeps
-    /// its cluster from through a near-tie (W11). `accent` is what a vibrant slot made up for an
+    /// its cluster from through a near-tie. `accent` is what a vibrant slot made up for an
     /// image with no seed takes its hue from.
     public static func extract(_ image: CGImage, previous: Palette? = nil,
                                accent: RGBA = Palette.defaultAccent) -> Palette {
@@ -114,7 +114,7 @@ public struct Slot: Sendable, Hashable {
 // MARK: - Choosing slots
 
 extension Slot {
-    /// What a slot asks for (W9). Starting numbers, tuned on the prototype's corpus, and free
+    /// What a slot asks for. Starting numbers, tuned on the prototype's corpus, and free
     /// to move.
     struct Spec {
         var l: Double
@@ -143,12 +143,12 @@ extension Slot {
     ]
 
     /// How far a variant stays from its base, in L: enough to tell two fills apart, about
-    /// 1.6–1.9:1, and not enough for text (W9, W16).
+    /// 1.6–1.9:1, and not enough for text.
     static let gap = 0.15
     /// Clusters smaller than this share of the image are noise to a slot.
     static let least = 0.002
     /// A made-up vibrant base's relative chroma follows its source's, held to this: at least
-    /// what a vibrant slot accepts, and at most the plan's 85%. At a flat 85%, a pale image
+    /// what a vibrant slot accepts, and at most 85%. At a flat 85%, a pale image
     /// with a faint seed got a vibrant slot far louder than anything in the picture.
     static let madeUpChroma = 0.45...0.85
 
@@ -178,7 +178,7 @@ extension Slot {
 
             if let best = scored.max(by: { $0.score < $1.score }) {
                 var pick = best.index
-                // A near-tie goes the way it went last time (W11).
+                // A near-tie goes the way it went last time.
                 if let last = previous?.slots[name], last.found {
                     let near = scored.filter { clusters[$0.index].color.distance(to: last.color) <= 0.06
                                                && $0.score >= best.score * 0.95 }
@@ -210,7 +210,7 @@ extension Slot {
             + 0.25 * population.squareRoot()
     }
 
-    /// A slot nothing in the image fits (W9). A vibrant base takes the strongest seed's hue, or
+    /// A slot nothing in the image fits. A vibrant base takes the strongest seed's hue, or
     /// the accent's without one, at its own lightness and that colour's relative chroma, kept
     /// between what a vibrant slot accepts and 85% of the most sRGB holds.
     /// A muted base is the cluster nearest its lightness, moved there and kept muted. A variant
@@ -243,7 +243,7 @@ extension Slot {
 
 // MARK: - Seeds
 
-/// One of the image's main hues (W10): a peak in the histogram of hue, weighted towards
+/// One of the image's main hues: a peak in the histogram of hue, weighted towards
 /// colour that covers ground, so a broad wash outweighs a small vivid patch.
 public struct Seed: Sendable, Hashable {
     /// The image's colour around this hue, weighted by C².
@@ -314,7 +314,7 @@ public struct Seed: Sendable, Hashable {
 // MARK: - In the store
 
 extension Palette {
-    /// One display's entry under the store's `wallpaper` key (W14): measurements, rounded so
+    /// One display's entry under the store's `wallpaper` key: measurements, rounded so
     /// that a palette that has not changed is a write that changes nothing. Colours are each
     /// given as the sRGB hex a stylesheet gets, and the OKLCH that was measured.
     public func json(display: String, id: CGDirectDisplayID, primary: Bool) -> JSONValue {

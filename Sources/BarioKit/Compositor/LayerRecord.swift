@@ -1,6 +1,6 @@
 import QuartzCore
 
-/// A layer's identity from one scene to the next (PLAN.md D4). The same identity in the next
+/// A layer's identity from one scene to the next. The same identity in the next
 /// scene is the same layer, updated in place, so neither a re-render nor a transition throws
 /// pixels away.
 public enum LayerID: Hashable, Sendable, CustomStringConvertible {
@@ -104,7 +104,7 @@ func assign<Object: AnyObject, Value: Equatable>(_ object: Object,
 }
 
 extension CALayer {
-    /// Bar coordinates all the way down (PLAN.md D2): `bounds` is the scene rectangle with its
+    /// Bar coordinates all the way down: `bounds` is the scene rectangle with its
     /// origin, `position` its centre, so a sublayer takes a scene frame as it is.
     func place(_ rect: CGRect) {
         let center = CGPoint(x: rect.midX, y: rect.midY)

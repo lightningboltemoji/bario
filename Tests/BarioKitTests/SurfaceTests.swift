@@ -5,7 +5,7 @@ import IOSurface
 import Testing
 @testable import BarioKit
 
-/// Shared surfaces (DESIGN.md §9.3, PLAN.md step 3c): a pair handed over under a name, `frame`
+/// Shared surfaces (DESIGN.md §9.3): a pair handed over under a name, `frame`
 /// naming the one just drawn, and a layer that shows it with nothing drawn or copied.
 @Suite("Shared surfaces")
 @MainActor

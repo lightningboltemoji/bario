@@ -3,7 +3,7 @@ import Testing
 @testable import BarioKit
 
 /// Oklab, gamut mapping, contrast, and the CSS Color 4 and 5 functions built on them
-/// (PLAN.md step 1).
+///.
 @Suite("Colour")
 struct ColorTests {
     func color(_ value: String) throws -> Color {

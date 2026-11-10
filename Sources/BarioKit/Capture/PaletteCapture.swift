@@ -3,7 +3,7 @@ import Foundation
 import ImageIO
 import ScreenCaptureKit
 
-/// The image a palette is measured from (PLAN.md W5): a small photograph of the display's
+/// The image a palette is measured from: a small photograph of the display's
 /// wallpaper window and nothing else, or the wallpaper file where that cannot be had. The
 /// strip's capture takes every window below normal level, and a palette must not: a calendar
 /// widget is a palette's worth of grey.

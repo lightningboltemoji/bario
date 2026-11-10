@@ -4,7 +4,7 @@ import Foundation
 // in. Oklab is Björn Ottosson's, who put it in the public domain ("feel free to use it any way
 // you please"); the matrices below are his published ones. Colours come in and go out as sRGB,
 // as every other colour in bario does: whatever lands outside sRGB is brought back in by
-// lowering its chroma at the same lightness and hue (PLAN.md W4).
+// lowering its chroma at the same lightness and hue.
 
 /// A colour in Oklab: lightness from 0 to 1, then green to red and blue to yellow, each about
 /// ±0.4 for what a display can show. Named as CSS names the channels.
@@ -94,7 +94,7 @@ public struct OKLCH: Sendable, Hashable {
     public var inSRGB: Bool { OKLCH.fits(lab.linear) }
 
     /// The colour in sRGB. Lightness is clamped to 0…1; inside that, chroma comes down,
-    /// bisected, until the colour fits, so lightness and hue are kept (PLAN.md W4).
+    /// bisected, until the colour fits, so lightness and hue are kept.
     public func rgba(alpha: Double = 1) -> RGBA {
         let alpha = CGFloat(min(1, max(0, alpha.isNaN ? 0 : alpha)))
         guard l < 1 else { return RGBA(r: 1, g: 1, b: 1, a: alpha) }
@@ -183,7 +183,7 @@ extension OKLCH {
     /// This colour if it contrasts with `background` by `ratio`; otherwise the nearest colour of
     /// the same chroma and hue towards white (`lighter`) or black that does, or that extreme
     /// itself when even it falls short. The solver behind `on()` and a scheme's `on-` roles
-    /// (PLAN.md W12, W16): it starts where it is told and moves only as far as the ratio needs,
+    ///: it starts where it is told and moves only as far as the ratio needs,
     /// so a pair that already reads keeps the crispness it started with.
     public func readable(against background: RGBA, ratio: Double, lighter: Bool) -> RGBA {
         let start = rgba()

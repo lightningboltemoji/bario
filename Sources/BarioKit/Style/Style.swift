@@ -325,7 +325,7 @@ extension Background {
         case (.backdrop, .backdrop):
             // Every distinct blur and saturation is a Core Image pass and a cached image, so an
             // eased one would fill the cache a frame at a time. They snap at the midpoint
-            // (PLAN.md D10), as backgrounds of different kinds do.
+            //, as backgrounds of different kinds do.
             return t < 0.5 ? a : b
         case (.gradient(let x), .gradient(let y)) where x.stops.count == y.stops.count:
             var out = y

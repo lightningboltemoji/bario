@@ -45,10 +45,13 @@ public final class BarController: NSObject, NSApplicationDelegate {
     private var hupSource: DispatchSourceSignal?
     private var quitSources: [DispatchSourceSignal] = []
     private var menuBarItem: MenuBarItem?
-    /// The press in an open menu, on a control or a slider being dragged.
-    private var menuPress: (path: [Int], dragging: Bool)?
+    /// The press in an open menu, on a control or a slider being dragged, and which menu of the
+    /// chain it is in.
+    private var menuPress: (menu: Menu, path: [Int], dragging: Bool)?
+    /// The modifier keys as last written to the store.
+    private var modifiers: ModifierKeys?
     /// A slider's newest value not yet sent, and whether one is on its way: one `on-change` in
-    /// flight at a time, the newest value next (PLAN.md M7).
+    /// flight at a time, the newest value next.
     private var pendingChange: (action: Action, item: String, value: Double, confined: Bool)?
     private var changing = false
 
@@ -86,16 +89,16 @@ public final class BarController: NSObject, NSApplicationDelegate {
         Task { await host.load(items, sources: sources) }
 
         loop.makeMenuSurface = { [weak self] display in
-            let panel = MenuPanel(screen: NSScreen.screens.first { $0.displayID == display.displayID })
-            panel.view.onPointer = { [weak self] in self?.pointerMoved() }
-            panel.view.onMouse = { [weak self] mouse, point in self?.menuMouse(mouse, at: point) }
-            panel.view.onKey = { [weak self] key in self?.menuKey(key) }
+            let panel = self?.menuPanel(on: display, takesKeys: true) ?? MenuPanel(screen: nil)
             // Another app came forward. Not when another menu took over: that one is open now.
             panel.onResignKey = { [weak self, weak panel] in
                 guard let self, let panel, self.loop.menu?.surface === panel else { return }
                 self.loop.closeMenu()
             }
             return panel
+        }
+        loop.makeSubmenuSurface = { [weak self] display in
+            self?.menuPanel(on: display, takesKeys: false) ?? MenuPanel(screen: nil, takesKeys: false)
         }
 
         syncDisplays()
@@ -342,8 +345,22 @@ public final class BarController: NSObject, NSApplicationDelegate {
         // Option. Key events only reach a global monitor with Accessibility permission, so the
         // modifier poll below is what makes this work without it.
         if let monitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
-            MainActor.assumeIsolated { self?.loop.optionHeld = event.modifierFlags.contains(.option) }
+            MainActor.assumeIsolated {
+                self?.loop.optionHeld = event.modifierFlags.contains(.option)
+                self?.noteModifiers(event.modifierFlags)
+            }
         }) { monitors.append(monitor) }
+    }
+
+    /// The modifier keys held, into the store when they change, for a template that asks: an open
+    /// menu showing an app's Option variants renders again.
+    private func noteModifiers(_ flags: NSEvent.ModifierFlags) {
+        let next = ModifierKeys(option: flags.contains(.option), shift: flags.contains(.shift),
+                                control: flags.contains(.control), command: flags.contains(.command))
+        guard next != modifiers else { return }
+        modifiers = next
+        let store = host.store
+        Task { await store.replace(next.json, at: ModifierKeys.storeKey) }
     }
 
     /// Whether a cover takes the pointer's events is the frame loop's decision: only while
@@ -352,6 +369,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
         let mouse = NSEvent.mouseLocation
         loop.pointerMoved(to: mouse)
         loop.optionHeld = NSEvent.modifierFlags.contains(.option)
+        noteModifiers(NSEvent.modifierFlags)
 
         // Pressing or releasing Option with the pointer resting on a bar moves nothing, and
         // without Accessibility permission sends nothing either. So while the pointer is on a
@@ -361,6 +379,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
             let poll = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.loop.optionHeld = NSEvent.modifierFlags.contains(.option)
+                    self?.noteModifiers(NSEvent.modifierFlags)
                 }
             }
             RunLoop.main.add(poll, forMode: .common)
@@ -423,7 +442,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     /// Unlocking captures again.
     ///
     /// Each display's palette is measured in the same round, after its strip: for an event,
-    /// and whenever the strip came back new (PLAN.md W6).
+    /// and whenever the strip came back new.
     private func captureBackdrops(event: Bool = true) {
         if event { lookAgain = true }
         guard !captureInFlight else {
@@ -491,7 +510,7 @@ public final class BarController: NSObject, NSApplicationDelegate {
     }
 
     /// One display's wallpaper, measured into a palette off the main actor, against the last
-    /// one (PLAN.md W5, W11). A full screen Space has no wallpaper window, so its display keeps
+    /// one. A full screen Space has no wallpaper window, so its display keeps
     /// the palette it had.
     private func measurePalette(of id: CGDirectDisplayID, info: DisplayInfo, spec: WallpaperSpec,
                                 mode: SourceMode, captureAllowed: Bool) async {
@@ -514,8 +533,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
 
     /// An item's events go to three places at once, which is what keeps the tiers equivalent:
     /// the module, socket subscribers, and the item's own shortcut. DESIGN.md §8. A control
-    /// inside the item takes the event instead of the item's shortcut (PLAN.md M5), and a
-    /// click with no shortcut at all opens the item's menu, if it has one (M11).
+    /// inside the item takes the event instead of the item's shortcut, and a
+    /// click with no shortcut at all opens the item's menu, if it has one.
     private func handle(_ event: BarEvent, on display: CGDirectDisplayID) {
         server?.broadcast(event.socketEvent)
         guard let name = event.item else {
@@ -604,90 +623,111 @@ public final class BarController: NSObject, NSApplicationDelegate {
 
     // MARK: - Menus
 
+    /// A menu's window, for the root (which takes the keys) or a submenu (which never does).
+    private func menuPanel(on display: DisplayInfo, takesKeys: Bool) -> MenuPanel {
+        let panel = MenuPanel(screen: NSScreen.screens.first { $0.displayID == display.displayID },
+                              takesKeys: takesKeys)
+        panel.view.onPointer = { [weak self] in self?.pointerMoved() }
+        panel.view.onMouse = { [weak self] mouse, point in self?.menuMouse(mouse, at: point) }
+        panel.view.onKey = { [weak self] key in self?.menuKey(key) }
+        panel.view.onModifiers = { [weak self] flags in self?.noteModifiers(flags) }
+        return panel
+    }
+
     /// The pointer in an open menu's window. A control is used when the press comes up on it,
     /// as a menu item is chosen, and the menu closes unless it says `keep-open`; a slider moves
-    /// from the press on and never closes it (PLAN.md M6, M7). A press off the panel is outside
-    /// the menu, or, where the window reaches up over its bar, on the bar.
+    /// from the press on and never closes it. A row with a submenu and nothing
+    /// else to do opens it. The menu a press is in is the one under it, deepest first, whichever
+    /// window heard it. A press off every panel is outside the menu, or,
+    /// where the window reaches up over its bar, on the bar.
     private func menuMouse(_ mouse: MenuView.Mouse, at point: CGPoint) {
-        guard let menu = loop.menu else { return }
-        let confined = host.menuState(for: menu.item)?.confined ?? false
-        let target = menu.target(at: point)
+        guard let root = loop.menu else { return }
+        let confined = host.menuState(for: root.item)?.confined ?? false
+        let hit = loop.menuTarget(at: point)
         switch mouse {
         case .down:
             menuPress = nil
-            switch target {
-            case .control(let path, let node):
-                loop.pressMenu(path)
-                let slides = { if case .slider = node.kind { return node.actions.change != nil } else { return false } }()
-                menuPress = (path, slides)
-                if slides { slide(menu, path: path, to: point, confined: confined) }
-            case .panel:
-                break
-            case .outside:
-                if let hit = loop.target(at: point), hit.bar.isInteractive {
-                    forward(.click, at: point, to: hit)
+            guard let (menu, target) = hit else {
+                if let bar = loop.target(at: point), bar.bar.isInteractive {
+                    forward(.click, at: point, to: bar)
                 } else {
                     loop.closeMenu()
                 }
+                return
+            }
+            if case .control(let path, let node) = target {
+                loop.pressMenu(path, in: menu)
+                let slides = { if case .slider = node.kind { return node.actions.change != nil } else { return false } }()
+                menuPress = (menu, path, slides)
+                if slides { slide(menu, path: path, to: point, confined: confined) }
             }
         case .drag:
-            if let press = menuPress, press.dragging { slide(menu, path: press.path, to: point, confined: confined) }
+            if let press = menuPress, press.dragging { slide(press.menu, path: press.path, to: point, confined: confined) }
         case .up:
-            loop.pressMenu(nil)
-            defer { menuPress = nil }
-            if menuPress?.dragging == true {
-                loop.releaseMenuDrag()
-            } else if menuPress != nil, case .control(let path, let node) = target {
-                choose(node, at: path, in: menu, confined: confined)
+            guard let press = menuPress else { return }
+            menuPress = nil
+            loop.pressMenu(nil, in: press.menu)
+            if press.dragging {
+                loop.releaseMenuDrag(in: press.menu)
+            } else if let (menu, target) = hit, case .control(let path, let node) = target {
+                if node.actions.submenu != nil, node.actions.click == nil {
+                    loop.openSubmenu(from: menu, row: path)
+                } else {
+                    choose(node, at: path, in: menu, confined: confined)
+                }
             }
         case .rightDown:
-            if case .control(_, let node) = target, let text = node.actions.rightClick,
+            if let (menu, target) = hit, case .control(_, let node) = target, let text = node.actions.rightClick,
                let action = Action.parse(text, confined: confined) {
                 Task { @MainActor in
                     await self.perform(action, item: menu.item, payload: .object(["item": .string(menu.item)]),
                                        anchor: menu.anchor)
                 }
-            } else if case .outside = target, let hit = loop.target(at: point) {
-                forward(.rightClick, at: point, to: hit)
+            } else if hit == nil, let bar = loop.target(at: point) {
+                forward(.rightClick, at: point, to: bar)
             }
         case .scroll(let dx, let dy):
-            switch target {
-            case .control(let path, let node):
-                if case .slider(let meter) = node.kind, node.actions.change != nil, node.actions.scroll == nil {
-                    let value = min(1, max(0, meter.value + (dy != 0 ? dy : -dx) * 0.005))
-                    loop.dragMenu(path, to: value)
-                    loop.releaseMenuDrag()
-                    if let text = node.actions.change, let action = Action.parse(text, confined: confined) {
-                        send(action, item: menu.item, value: value, confined: confined)
-                    }
-                } else if let text = node.actions.scroll, let action = Action.parse(text, confined: confined) {
-                    Task { @MainActor in
-                        await self.perform(action, item: menu.item,
-                                           payload: .object(["item": .string(menu.item), "dx": .number(dx), "dy": .number(dy)]),
-                                           anchor: menu.anchor)
-                    }
+            guard let (menu, target) = hit else {
+                if let bar = loop.target(at: point) {
+                    forward(.scroll, at: point, to: bar, delta: CGPoint(x: dx, y: dy))
                 }
-            case .outside:
-                if let hit = loop.target(at: point) {
-                    forward(.scroll, at: point, to: hit, delta: CGPoint(x: dx, y: dy))
+                return
+            }
+            guard case .control(let path, let node) = target else {
+                loop.scrollMenu(menu, by: dy)
+                return
+            }
+            if case .slider(let meter) = node.kind, node.actions.change != nil, node.actions.scroll == nil {
+                let value = min(1, max(0, meter.value + (dy != 0 ? dy : -dx) * 0.005))
+                loop.dragMenu(path, to: value, in: menu)
+                loop.releaseMenuDrag(in: menu)
+                if let text = node.actions.change, let action = Action.parse(text, confined: confined) {
+                    send(action, item: menu.item, value: value, confined: confined)
                 }
-            case .panel:
-                break
+            } else if let text = node.actions.scroll, let action = Action.parse(text, confined: confined) {
+                Task { @MainActor in
+                    await self.perform(action, item: menu.item,
+                                       payload: .object(["item": .string(menu.item), "dx": .number(dx), "dy": .number(dy)]),
+                                       anchor: menu.anchor)
+                }
+            } else {
+                // The rows of a menu taller than its room, from anywhere over them.
+                loop.scrollMenu(menu, by: dy)
             }
         }
     }
 
-    /// A slider in the open menu, dragged to a point.
+    /// A slider in an open menu, dragged to a point.
     private func slide(_ menu: Menu, path: [Int], to point: CGPoint, confined: Bool) {
         guard let value = menu.value(of: path, at: point),
               let node = menu.presentation?.scene.items.first?.content?.node(at: path),
               let text = node.actions.change, let action = Action.parse(text, confined: confined) else { return }
-        loop.dragMenu(path, to: value)
+        loop.dragMenu(path, to: value, in: menu)
         send(action, item: menu.item, value: value, confined: confined)
     }
 
-    /// A control in a menu chosen: its action, as its item's own, and the menu closes unless the
-    /// control or something around it says `keep-open`.
+    /// A control in a menu chosen: its action, as its item's own, and the menu closes, with every
+    /// submenu, unless the control or something around it says `keep-open`.
     private func choose(_ node: SceneNode, at path: [Int], in menu: Menu, confined: Bool) {
         guard let text = node.actions.click, let action = Action.parse(text, confined: confined) else { return }
         let keep = menu.presentation?.scene.items.first?.content?.keepsOpen(at: path) ?? false
@@ -715,19 +755,28 @@ public final class BarController: NSObject, NSApplicationDelegate {
         handle(event, on: hit.bar.id)
     }
 
-    /// A key while a menu is open: Escape closes it, the arrows move between its controls, and
-    /// Return chooses the one they are on.
+    /// A key while a menu is open: Escape closes it, ↑ and ↓ move between the controls of the menu
+    /// the keys are in, → opens the submenu of the one they are on and ← goes back out of it, and
+    /// Return chooses it, or opens its submenu.
     private func menuKey(_ key: String) {
-        guard let menu = loop.menu else { return }
+        guard loop.menu != nil else { return }
         switch key {
         case "escape":
             loop.closeMenu()
         case "up", "down":
             loop.moveMenuHover(by: key == "down" ? 1 : -1)
+        case "right":
+            loop.openSubmenuFromKeys()
+        case "left":
+            loop.closeSubmenuFromKeys()
         case "return":
-            guard let path = menu.hovered,
+            guard let menu = loop.keyMenu, let path = menu.hovered,
                   let node = menu.presentation?.scene.items.first?.content?.node(at: path) else { return }
-            choose(node, at: path, in: menu, confined: host.menuState(for: menu.item)?.confined ?? false)
+            if node.actions.submenu != nil, node.actions.click == nil {
+                loop.openSubmenuFromKeys()
+            } else {
+                choose(node, at: path, in: menu, confined: host.menuState(for: menu.item)?.confined ?? false)
+            }
         default:
             break
         }

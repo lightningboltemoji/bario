@@ -151,7 +151,7 @@ public final class BarioService {
     public var onStyle: ((String) throws -> Void)?
     /// A producer has drawn into one of a shared surface's pair (DESIGN.md §9.3).
     public var onFrame: ((String, Int?) throws -> Void)?
-    /// An item's menu toggled, or with nil, whatever menu is open closed (PLAN.md M11).
+    /// An item's menu toggled, or with nil, whatever menu is open closed.
     public var onMenu: ((String?) throws -> Void)?
     /// How an event reaches the subscribers of a connection.
     public var publish: ((SocketEvent) -> Void)?

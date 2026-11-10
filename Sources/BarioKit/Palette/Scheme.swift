@@ -1,6 +1,6 @@
 import Foundation
 
-/// `@scheme [--name] { seed; harmony; chroma; contrast }`, as written (PLAN.md W12). The unnamed
+/// `@scheme [--name] { seed; harmony; chroma; contrast }`, as written. The unnamed
 /// scheme is what `scheme(<role>)` uses, and exists with the defaults whether or not a rule
 /// says so; `scheme(--name <role>)` names another.
 public struct SchemeRule: Sendable, Hashable {
@@ -29,7 +29,7 @@ public struct SchemeRule: Sendable, Hashable {
     static let descriptors = ["seed", "harmony", "chroma", "contrast"]
 
     /// The key a scheme is made from and cached by: the seed as this bar's environment resolves
-    /// it, with `wallpaper()`, `accent` and `system()` all known (PLAN.md W3), and the rest.
+    /// it, with `wallpaper()`, `accent` and `system()` all known, and the rest.
     func key(in environment: StyleEnvironment) -> Scheme.Key {
         let cascade = Cascade(stylesheet: Stylesheet(), environment: environment)
         let seed = (try? cascade.resolve(self.seed, in: [:], at: position))
@@ -70,7 +70,7 @@ public enum Harmony: Sendable, Hashable {
     }
 }
 
-/// A theme generated from one seed colour (PLAN.md W12): four hues with chromas, primary at the
+/// A theme generated from one seed colour: four hues with chromas, primary at the
 /// seed's hue, secondary and tertiary where the harmony puts them, and neutral at the seed's hue
 /// with almost no chroma, each at fixed lightnesses for the appearance. Every `on-` role starts
 /// at its own lightness and moves further only if it falls short of the contrast against its
@@ -186,7 +186,7 @@ public struct Scheme: Sendable, Hashable {
 }
 
 /// `scheme(<role>)` or `scheme(--name <role>)`, checked where it is written and substituted by
-/// the cascade (PLAN.md W2, W12).
+/// the cascade.
 struct SchemeReference {
     /// Nil for the unnamed scheme.
     var name: String?

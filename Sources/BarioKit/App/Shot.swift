@@ -89,9 +89,18 @@ public enum Shot {
     /// `--shot --menu <item>`: the bar with that item's menu open under it, over the backdrop
     /// stretched down the picture. Glass cannot be rendered offscreen, so a menu's backdrop here
     /// is the picture behind it, which is what the bar's own glass stand-in blurs.
+    ///
+    /// `--menu app/2/0` opens submenus too: row 2's in the menu, then row 0's in that one, each
+    /// beside its row as the frame loop places them.
     @MainActor
-    static func menuShot(_ item: String, bar: BarConfig, display: DisplayInfo, theme: Theme,
+    static func menuShot(_ spec: String, bar: BarConfig, display: DisplayInfo, theme: Theme,
                          backdrop: BackdropImage, palette: Palette?, options: RunOptions) async throws -> CGImage {
+        let pieces = spec.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        let item = pieces[0]
+        let rows = pieces.dropFirst().compactMap { Int($0) }
+        guard rows.count == pieces.count - 1 else {
+            throw OptionError("--menu takes an item, then the rows whose submenus to open, like --menu app/2/0")
+        }
         guard theme.config.item(named: item) != nil else {
             throw OptionError("there is no item or source called '\(item)'")
         }
@@ -106,24 +115,44 @@ public enum Shot {
         let menuState = host.menuState(for: item)
         await host.shutdown()
         if let error = menuState?.error { throw OptionError("\(item)'s menu: \(error)") }
-        guard let content = menuState?.content else { throw OptionError("\(item) has no menu") }
+        guard var content = menuState?.content else { throw OptionError("\(item) has no menu") }
 
         let environment = StyleEnvironment(dark: dark, accent: RGBA(NSColor.controlAccentColor), palette: palette)
         let resolver = ColorResolver.system(dark: dark)
         let builder = SceneBuilder(cascade: Cascade(stylesheet: theme.stylesheet, environment: environment),
                                    resolver: resolver)
         let barScene = builder.build(bar: bar, display: display, items: bar.items, states: states, modes: options.modes)
-        let styled = builder.styler.style(menu: content, of: item, bar: bar, states: states, modes: options.modes)
+        let open = { (depth: Int) in Styler.NodeInteraction(open: depth < rows.count ? [rows[depth]] : nil) }
+        let styled = builder.styler.style(menu: content, of: item, bar: bar, states: states,
+                                          interaction: open(0), modes: options.modes)
 
         // The display's top edge is at 900; the cover hangs from it.
         let cover = CGRect(x: 0, y: 900 - display.stripHeight, width: display.frame.width, height: display.stripHeight)
+        let top = cover.minY + barScene.bar.minY
         let anchorItem = barScene.allItems.first { $0.name == item } ?? barScene.items.first { $0.kind != .spacer }
         let anchor = (anchorItem?.frame ?? .zero).offsetBy(dx: cover.minX, dy: cover.minY)
-        let menu = builder.layout.layout(menu: styled, anchor: anchor, top: cover.minY + barScene.bar.minY,
-                                         align: theme.config.item(named: item)?.menu?.align ?? .start, on: display)
+        var menus = [builder.layout.layout(menu: styled, anchor: anchor, top: top,
+                                           align: theme.config.item(named: item)?.menu?.align ?? .start, on: display)]
+        for (depth, row) in rows.enumerated() {
+            let parent = menus[menus.count - 1]
+            guard let nodes = content.node(at: [row])?.actions.submenu, let submenu = Node.menu(nodes),
+                  let rowFrame = parent.item?.content?.node(at: [row])?.frame else {
+                throw OptionError("row \(row) of \(pieces[...depth].joined(separator: "/")) has no submenu")
+            }
+            let origin = parent.frame.origin
+            let styledSubmenu = builder.styler.style(menu: submenu, of: item, bar: bar, states: states,
+                                                     interaction: open(depth + 1), modes: options.modes,
+                                                     depth: depth + 1)
+            menus.append(builder.layout.layout(submenu: styledSubmenu,
+                                               beside: parent.panel.offsetBy(dx: origin.x, dy: origin.y),
+                                               row: rowFrame.offsetBy(dx: origin.x, dy: origin.y),
+                                               top: top, on: display))
+            content = submenu
+        }
 
-        // One picture: the backdrop down to the bottom of the menu, the bar on top, the menu on it.
-        let height = 900 - menu.frame.minY
+        // One picture: the backdrop down to the bottom of the lowest menu, the bar on top, the
+        // menus on it, each over the one it opened from.
+        let height = 900 - (menus.map(\.frame.minY).min() ?? 0)
         let size = CGSize(width: display.frame.width, height: height)
         // A picture behind it all, or the checkerboard again at the size of the whole shot.
         let wall = options.shotBackdrop == nil
@@ -145,11 +174,14 @@ public enum Shot {
             ctx.draw(image, in: CGRect(x: 0, y: height - display.stripHeight, width: size.width,
                                        height: display.stripHeight))
         }
-        let window = menu.frame.offsetBy(dx: 0, dy: height - 900)
-        let behind = BackdropImage()
-        behind.set(crop(wall, to: CGRect(x: window.minX, y: height - window.maxY, width: window.width,
-                                         height: window.height), of: canvas.size))
-        if let image = Offscreen.render(menu.scene, backdrop: behind, resolver: resolver, scale: scale) {
+        for menu in menus {
+            let window = menu.frame.offsetBy(dx: 0, dy: height - 900)
+            let behind = BackdropImage()
+            behind.set(crop(wall, to: CGRect(x: window.minX, y: height - window.maxY, width: window.width,
+                                             height: window.height), of: canvas.size))
+            guard let image = Offscreen.render(menu.scene, backdrop: behind, resolver: resolver, scale: scale) else {
+                throw OptionError("could not render the menu")
+            }
             ctx.draw(image, in: window)
         }
         guard let image = ctx.makeImage() else { throw OptionError("could not render the menu") }

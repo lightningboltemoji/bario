@@ -1,7 +1,6 @@
 # 22 — Colours from the wallpaper
 
-PLAN.md's "colours from the wallpaper", written step by step as each starts. The plan's decisions
-are numbered W1–W16 and cited as such in the code. Three tools, each useful alone:
+Colours from the wallpaper (DESIGN.md §7). Three tools, each useful alone:
 
 - **measure**: `wallpaper(vibrant)` and its siblings, colours really in each display's wallpaper;
 - **generate**: `@scheme` and `scheme(primary)`, a theme generated from one seed colour;
@@ -23,7 +22,7 @@ numbers, and matching their colours is a non-goal.
 | `Properties.swift` | `Color`'s four new symbolic cases: `.relative`, `.mixed`, `.contrast`, `.on` |
 | `CSS.swift` | `CSSComponent.delim` (`+ - *`) and `.color` (a computed colour), and bare `( … )` |
 
-### Oklab, sRGB out (W4)
+### Oklab, sRGB out
 
 `RGBA` stays sRGB. Every function converts to Oklab or OKLCH, works there, and comes back
 through `OKLCH.rgba()`, which clamps lightness to 0…1 and, inside that, bisects chroma down
@@ -56,7 +55,7 @@ translucent colour ends up over is not known.
   100% is that much more transparent. OKLCH takes the shorter arc, and a grey takes the other
   colour's hue, so `color-mix(in oklch, x 70%, transparent)` is x at 70% alpha.
 - `contrast-color(<colour>)`: white or black, whichever has the higher ratio; white on a tie.
-- `on(<colour>[, <ratio>])`, bario's (W16): the colour's hue and half its chroma, on whichever
+- `on(<colour>[, <ratio>])`, bario's: the colour's hue and half its chroma, on whichever
   side white or black contrasts more, starting at L 0.97 or 0.25 and moving towards the extreme
   only as far as the ratio (default 4.5, from 1 to 21) needs. 4.5:1 is always reachable; above
   about 4.58:1 against a mid-luminance colour it returns the extreme, as close as it can get.
@@ -66,7 +65,7 @@ The tokenizer's `.delim` is a `*` anywhere, or a `+` or `-` with no digit after 
 no letter either, which would start an identifier). So `calc(h + 50)` has a delimiter and
 `calc(h +50)` is "needs an operator before '50'". A bare `(` is a function with no name.
 
-### Folding (W3)
+### Folding
 
 A colour function computes to `.rgba` where it is parsed when all its inputs are known: at parse
 time for literals, and in the cascade once `var()` has been substituted (and, from step 3,
@@ -93,7 +92,7 @@ A `.color(RGBA)` component has no syntax of its own; only substitution makes one
 `Capture/PaletteCapture.swift` has `thumbnail(of:)`, ImageIO's thumbnail of a wallpaper file at
 320 pixels, which `bario palette <image>` and (step 3) the file fallback use.
 
-### Measuring (W4, W8)
+### Measuring
 
 `Quantizer(image:)` draws the image into a float context in extended linear sRGB, at most 320
 pixels wide, so a P3 capture's colours outside sRGB come through as they are and a file of any
@@ -107,9 +106,9 @@ the same image gives the same palette, bit for bit.
 A cluster's `relativeChroma` is its chroma over `OKLCH.maxChroma` at its lightness and hue; a
 colour beyond sRGB has more than 1, and slots count it as 1.
 
-### Slots (W9)
+### Slots
 
-`Slot.specs` is W9's table. A slot scores each eligible cluster 0.40 × closeness in L + 0.35 ×
+`Slot.specs` is the table of slots. A slot scores each eligible cluster 0.40 × closeness in L + 0.35 ×
 closeness in relative chroma + 0.25 × √(population ÷ the largest), where closeness is 1 at the
 target and 0 at the far end of the slot's range. That normalisation is ours; the prototype's
 exact formula was not kept. Eligible: inside both ranges, at least the least chroma, at least
@@ -121,12 +120,12 @@ the same cluster.
 Made up, when nothing is eligible:
 
 - **a vibrant base** takes seed 1's hue, or the accent's without a seed, at its own L, with its
-  source's relative chroma held to 0.45…0.85. This is the step 2 tuning the plan asked for. At a
+  source's relative chroma held to 0.45…0.85, tuned on the corpus. At a
   flat 85%, pale images got vibrant slots far louder than anything in them: Desert-3 (beige,
   seed C 0.05) a magenta at C 0.25, and the royce-fonseca photographs (seed C 0.014) a cyan
   `vibrant-light` at C 0.12. Following the seed but never below what a vibrant slot accepts
   gives C 0.13 and 0.065. The accent is vivid, so the no-seed case still comes out at 85%:
-  `#448bee` for the default blue, the plan's W14 example.
+  `#448bee` for the default blue.
 - **a muted base** is the cluster nearest its lightness, moved to the slot's L with its relative
   chroma kept, capped at muted's 0.45 so that a vivid image's made-up muted slot is still muted.
   A grey stays grey.
@@ -135,7 +134,7 @@ Made up, when nothing is eligible:
 `Palette.with(accent:)` re-chooses slots against another accent from the same clusters, with the
 palette itself as `previous`; only a made-up vibrant of a seedless image changes.
 
-### Seeds (W10)
+### Seeds
 
 `Seed.find(in:)` works on the grid cells, not the clusters. Each cell adds its share of the image
 × clamp((C − 0.015) ÷ 0.085, 0, 1.5) to a 72-bin hue histogram, smoothed by a σ = 10° (two bins)
@@ -144,17 +143,17 @@ highest and at least 30° from those already taken, up to four. A seed's colour 
 cells within 15° of its peak, weighted by population × C², and its `mass` is the peak's smoothed
 height over all the colour. Fewer than 0.4% of pixels with C > 0.015 means no seeds.
 
-### Hysteresis (W11)
+### Hysteresis
 
 `extract(_:previous:)`: a slot whose last pick was found keeps the eligible cluster nearest that
 last colour, if one is within ΔE 0.06 of it and scores within 5% of the best. Seeds have no
-hysteresis, as planned: seed 1's hue held within 5° under the prototype's perturbations. Their
+hysteresis, on purpose: seed 1's hue held within 5° under the prototype's perturbations. Their
 ranking can still swap between two near-equal peaks of a changing wallpaper, which would move
 `wallpaper(seed)` and every scheme on it, easing. Worth watching once schemes exist.
 
 ### On the corpus
 
-`bario palette ~/Pictures/wallpaper/*` reproduces the plan's observations: the Manhattan
+`bario palette ~/Pictures/wallpaper/*` reproduces the prototype's observations: the Manhattan
 twilight's vibrant is the warm city lights and its seed the blue sky; Sonoma's seed is its green
 and its vibrant the blue-violet, with the coral a third seed; Neo Citrus keeps its teal as seed
 2; the misty, nearly grey photograph has no seed, its vibrant slots come from the accent and its
@@ -173,7 +172,7 @@ muted slots are its own greys.
 | `App/Shot.swift` | `--shot`'s palette from its backdrop picture |
 | `App/CLI.swift` | `bario palette [image…]` |
 
-### The capture (W5, W6)
+### The capture
 
 `PaletteCapture.captured(info:)` filters ScreenCaptureKit's windows to the one owned by
 `com.apple.WindowManager` and titled "Wallpaper" that overlaps the display most (confirmed on
@@ -191,7 +190,7 @@ the bar's last palette and the current accent, and `FrameLoop.setPalette` takes 
 image at all is `foundNoPalette`. An accent change calls `accentChanged`, which re-chooses with
 `Palette.with(accent:)`; only a seedless palette's made-up vibrant slots move.
 
-### The environment (W1, W2)
+### The environment
 
 `Cascade` has a `StyleEnvironment` instead of a bare `dark` (which remains as a computed
 property, and `Cascade(stylesheet:dark:)` as an initialiser). `FrameLoop.styleAndLayout` makes one
@@ -215,14 +214,14 @@ A display list cannot name `wallpaper()` itself: `CanvasPainter.parseColor` refu
 the visible mistake). The raster key holds a canvas's custom properties and not the palette, so a
 direct reference would never redraw; through `var()` it redraws exactly when its colour changes.
 
-### The first frame (W7)
+### The first frame
 
 `isReady` also needs `paletteLooked`, but only while `wantsPalette`: the stylesheet, a socket
 delta or an item's inline `style` mentions `wallpaper()` or `scheme()`. A bar coloured from
 nothing in the wallpaper has no reason to wait, so it does not; that is also why the frame loop's
 existing tests needed no palettes. The deadline still shows whatever there is.
 
-### The store (W14)
+### The store
 
 `publishPalettes` writes `{"displays": […], "primary": …}` under `wallpaper` with
 `StateStore.replace`, every time a palette changes or a measured bar goes, chained so writes land
@@ -241,7 +240,7 @@ thumbnailed as a wallpaper file would be, or the checkerboard. `Shot.scene` take
 Running the debug build over the real desktop for a few seconds: the window was found and
 photographed, the store held the entry, and `bario palette` printed it. The desktop's misty,
 all but grey wallpaper has no seed, so its vibrant slots are the accent's `#448bee` and its
-`dominant` `#e2e2e2`, within a level of the prototype's numbers in PLAN.md's W14 example.
+`dominant` `#e2e2e2`, within a level of the prototype's numbers.
 
 ## Step 4: schemes
 
@@ -252,7 +251,7 @@ all but grey wallpaper has no seed, so its vibrant slots are the accent's `#448b
 | `Style/Cascade.swift` | `scheme()` substituted; `StyleEnvironment.schemes`; `Cascade.scheme(named:at:)` |
 | `Frame/Bar.swift` | `schemes(for:in:)` and its cache |
 
-### The rule (W12)
+### The rule
 
 `@scheme [--name] { seed; harmony; chroma; contrast }`, defaults `wallpaper(seed)`, `tonal`, `1`,
 `4.5`. The block is read with `declarationBlock(validate: false)` and each descriptor checked by
@@ -274,7 +273,7 @@ cascade diagnostic.
 
 ### The scheme
 
-`SchemeRule.key(in:)` resolves the seed as commit would (W3's exception): `wallpaper()`
+`SchemeRule.key(in:)` resolves the seed as commit would, the one fold that does: `wallpaper()`
 substituted through a stylesheet-less `Cascade.resolve`, the result parsed, and resolved with a
 `ColorResolver` of the environment's appearance and accent, so `accent` and `system()` are known.
 Alpha is dropped. The `Scheme.Key` is that seed with the harmony, chroma, contrast and appearance.
@@ -283,7 +282,7 @@ Alpha is dropped. The `Scheme.Key` is that seed with the harmony, chroma, contra
 `chroma: seed`. Secondary takes 0.8 of it on a hue of its own, 0.35 on the seed's; tertiary 0.75;
 neutral 0.012 at the seed's hue; `monochrome` has none anywhere. `Harmony.turns` gives the
 secondary's and tertiary's turns from the seed, nil for the seed's own hue; two angles are as
-written, and a turn of a whole circle counts as the seed's hue. Roles are W12's lightnesses for
+written, and a turn of a whole circle counts as the seed's hue. Roles are the rule's lightnesses for
 light or dark, gamut-mapped by chroma.
 
 Every `on-` role is `OKLCH.readable(against:ratio:lighter:)` from its own lightness and its

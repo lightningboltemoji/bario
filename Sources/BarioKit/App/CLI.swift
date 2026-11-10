@@ -163,7 +163,7 @@ public enum CLI {
         return failed ? 1 : 0
     }
 
-    /// A palette as the store has it (PLAN.md W14), as text with truecolour swatches: the slots,
+    /// A palette as the store has it, as text with truecolour swatches: the slots,
     /// the seeds and every cluster, with their numbers. `NO_COLOR` leaves the swatches out.
     static func describePalette(_ entry: JSONValue, title: String,
                                 swatches: Bool = ProcessInfo.processInfo.environment["NO_COLOR"] == nil) -> String {

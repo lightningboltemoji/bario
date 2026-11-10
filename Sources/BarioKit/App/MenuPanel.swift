@@ -1,9 +1,9 @@
 import AppKit
 
-/// One open menu's window (PLAN.md M3): a panel that never activates bario, at pop-up-menu level
+/// One open menu's window: a panel that never activates bario, at pop-up-menu level
 /// over the bars, a little larger than the menu's panel so its shadow is not cut. It hosts the
 /// menu's layer tree, and under it, while the panel's background is `glass`, the system's Liquid
-/// Glass following the panel's box, radius and opacity (M13).
+/// Glass following the panel's box, radius and opacity.
 @MainActor
 public final class MenuPanel: MenuSurface {
     public let window: NSPanel
@@ -11,23 +11,31 @@ public final class MenuPanel: MenuSurface {
     private let container: NSView
     private var glass: NSGlassEffectView?
     private var shown = false
+    /// A root menu's window is key while it is open; a submenu's never is, so the keys reach one
+    /// place and a click in a submenu does not take key status from the root, which would close
+    /// it.
+    private let takesKeys: Bool
 
     /// The window stopped being key: another app came forward, or another menu opened.
     public var onResignKey: (@MainActor () -> Void)?
     private var resignObserver: NSObjectProtocol?
 
-    public init(screen: NSScreen?) {
+    public init(screen: NSScreen?, takesKeys: Bool = true) {
         let frame = CGRect(x: 0, y: 0, width: 10, height: 10)
         container = NSView(frame: frame)
         container.wantsLayer = true
         view = MenuView(frame: frame)
         view.autoresizingMask = [.width, .height]
         container.addSubview(view)
+        self.takesKeys = takesKeys
 
         // Key while it is open, so Escape and the arrow keys reach it, but never active: the app
         // you were in keeps its menu bar, as it does under the system's own menus.
-        let panel = KeyPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
-                             backing: .buffered, defer: false, screen: screen)
+        let panel: NSPanel = takesKeys
+            ? KeyPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+                       backing: .buffered, defer: false, screen: screen)
+            : NeverKeyPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false, screen: screen)
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.isOpaque = false
@@ -74,6 +82,7 @@ public final class MenuPanel: MenuSurface {
         // showing nothing until the end of the turn.
         CATransaction.flush()
         window.orderFrontRegardless()
+        guard takesKeys else { return }
         window.makeKey()
         // The view hears the keys, not the window, which would beep at them.
         window.makeFirstResponder(view)
@@ -132,6 +141,12 @@ private final class KeyPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// A submenu's: it takes clicks, and leaves the keys with its root's window.
+private final class NeverKeyPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 /// The view that hosts one menu's layer tree, and hears the pointer and the keys over it. It
 /// never draws; what it hears goes to the controller in screen coordinates, since a menu's
 /// window reaches over the bar it hangs from and a click there may be the bar's.
@@ -147,8 +162,10 @@ public final class MenuView: NSView {
     public var onMouse: (@MainActor (Mouse, CGPoint) -> Void)?
     /// The pointer moved over the menu.
     public var onPointer: (@MainActor () -> Void)?
-    /// A key that means something to a menu: `escape`, `up`, `down`, `return`.
+    /// A key that means something to a menu: `escape`, `up`, `down`, `left`, `right`, `return`.
     public var onKey: (@MainActor (String) -> Void)?
+    /// The modifier keys changed while the menu had the keys.
+    public var onModifiers: (@MainActor (NSEvent.ModifierFlags) -> Void)?
 
     public override init(frame: NSRect) {
         super.init(frame: frame)
@@ -208,9 +225,16 @@ public final class MenuView: NSView {
         case 53: onKey?("escape")
         case 126: onKey?("up")
         case 125: onKey?("down")
+        case 123: onKey?("left")
+        case 124: onKey?("right")
         case 36, 76, 49: onKey?("return")
         default: super.keyDown(with: event)
         }
+    }
+
+    public override func flagsChanged(with event: NSEvent) {
+        onModifiers?(event.modifierFlags)
+        super.flagsChanged(with: event)
     }
 
     public override func cancelOperation(_ sender: Any?) { onKey?("escape") }

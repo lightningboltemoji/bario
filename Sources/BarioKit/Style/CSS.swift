@@ -53,7 +53,7 @@ public indirect enum CSSComponent: Sendable, Hashable {
     /// after them, or they start a number.
     case delim(Character)
     /// A colour already computed, which no stylesheet can write: what `wallpaper()` and
-    /// `scheme()` become when the cascade substitutes them (PLAN.md W2).
+    /// `scheme()` become when the cascade substitutes them.
     case color(RGBA)
 
     public var identValue: String? { if case .ident(let s) = self { return s } else { return nil } }
@@ -106,7 +106,7 @@ extension Array where Element == CSSComponent {
     }
 
     /// Whether the cascade has something to substitute here before a property parser can read
-    /// it: a `var()`, or a `wallpaper()` or `scheme()`, which become colours (PLAN.md W2).
+    /// it: a `var()`, or a `wallpaper()` or `scheme()`, which become colours.
     public var needsSubstitution: Bool { mentions(CSSComponent.substituted) }
 
     /// Whether a function of one of these names appears anywhere, however deep.
@@ -207,7 +207,7 @@ public struct Stylesheet: Sendable, Hashable {
     }
 
     /// Whether anything here is coloured from the wallpaper, so a bar's first frame has a
-    /// palette to wait for (PLAN.md W7). A first frame never shows a menu, so a rule that styles
+    /// palette to wait for. A first frame never shows a menu, so a rule that styles
     /// only menus and what is in them has nothing to wait for: the built-in look's menus are
     /// coloured from the wallpaper, and a bar that is not should not wait on them.
     public var usesWallpaper: Bool {
@@ -359,7 +359,7 @@ struct CSSParser {
     }
 
     /// `@scheme --pop { seed: accent; harmony: 50deg 180deg; }`: a theme generated from one seed
-    /// colour, which `scheme(--pop primary)` names (PLAN.md W12). Its descriptors are checked
+    /// colour, which `scheme(--pop primary)` names. Its descriptors are checked
     /// here, so a mistake in one is an error on its line.
     mutating func scheme(at start: CSSPosition) throws -> SchemeRule {
         try skipTrivia()
@@ -626,7 +626,7 @@ struct CSSParser {
         return declaration
     }
 
-    /// A slot or role that does not exist is an error where it is written (PLAN.md W2).
+    /// A slot or role that does not exist is an error where it is written.
     static func checkSubstitutions(_ value: [CSSComponent], at position: CSSPosition) throws {
         for component in value {
             guard case .function(let name, let args) = component else { continue }

@@ -2,12 +2,12 @@ import AppKit
 
 /// What a node becomes in the layer tree. A node whose role changes (text that is now a meter,
 /// a symbol that stopped being monochrome) gets a new record rather than a reconfigured one
-/// (PLAN.md D4).
+///.
 enum LeafRole: Equatable {
     /// A row or column: its children are layers of their own.
     case container
     /// Text and monochrome symbols: coverage alone, masking a layer whose colour is the tint,
-    /// so a colour change draws nothing (PLAN.md D6).
+    /// so a colour change draws nothing.
     case coverage
     /// Everything with colours of its own: symbols in other renderings, graphs, canvases,
     /// renderers' drawings.

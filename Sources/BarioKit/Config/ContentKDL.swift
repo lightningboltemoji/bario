@@ -49,14 +49,40 @@ extension KDLNode {
     }
 
     /// Properties that belong to every node rather than to its payload: the stylesheet's hooks
-    /// and what the pointer does to it (PLAN.md M5).
+    /// and what the pointer does to it.
     private static let nodeKeys: Set<String> = Set(["id", "class"] + NodeActions.keys)
 
     private func contentJSON() throws -> JSONValue {
+        // A submenu is a block among the node's children, not one of them.
+        let submenus = children.filter { $0.name == "submenu" }
+        guard submenus.isEmpty else {
+            guard submenus.count == 1, let submenu = submenus.first else {
+                throw KDLError("a node has one submenu", at: submenus[1].position)
+            }
+            guard submenu.arguments.isEmpty, submenu.properties.isEmpty else {
+                throw KDLError("submenu takes only nodes inside it, as menu does", at: submenu.position)
+            }
+            guard !submenu.children.isEmpty else {
+                throw KDLError("submenu has nothing in it; give it rows, e.g. submenu { row { text \"More\" } }",
+                               at: submenu.position)
+            }
+            guard !["each", "if", "separator"].contains(name) else {
+                throw KDLError("submenu goes inside a node, like a row; not inside \(name)", at: submenu.position)
+            }
+            var node = self
+            node.children.removeAll { $0.name == "submenu" }
+            var object = try node.contentJSON().objectValue ?? [:]
+            object["submenu"] = .array(try submenu.childrenJSON())
+            return .object(object)
+        }
+
         var object: [String: JSONValue] = [:]
         var fields = properties
         for property in fields where KDLNode.nodeKeys.contains(property.name) {
-            if property.name == "keep-open" {
+            if property.name == "submenu" {
+                throw KDLError("submenu is a block of nodes inside the node, e.g. "
+                               + "row { text \"More\"; submenu { row { text \"…\" } } }", at: property.position)
+            } else if property.name == "keep-open" {
                 guard property.value.boolValue != nil else {
                     throw KDLError("keep-open is #true or #false", at: property.position)
                 }
@@ -86,7 +112,7 @@ extension KDLNode {
             payload["children"] = .array(try childrenJSON())
             object[name] = .object(payload)
         case "each", "if":
-            // Template words, not nodes (PLAN.md M8): they stand among a row's or column's
+            // Template words, not nodes: they stand among a row's or column's
             // children for however many nodes they come to.
             let example = name == "each" ? "each \"outputs\" { row { text \"{name}\" } }"
                                          : "if \"ssid\" { text \"{ssid}\" }"
@@ -100,7 +126,7 @@ extension KDLNode {
             }
             return .object([name: .object(["path": .string(path), "children": .array(try childrenJSON())])])
         case "separator":
-            // A line between groups of rows: a spacer the stylesheet draws (PLAN.md M7).
+            // A line between groups of rows: a spacer the stylesheet draws.
             guard arguments.isEmpty, fields.isEmpty, children.isEmpty else {
                 throw KDLError("separator takes only id= and class=", at: position)
             }
@@ -148,7 +174,7 @@ extension KDLNode {
         }
     }
 
-    /// A menu's tree (PLAN.md M1): one node, or several, which are a column, since a menu is a
+    /// A menu's tree: one node, or several, which are a column, since a menu is a
     /// list. `each` and `if` stand for several.
     public static func menuContent(_ nodes: [KDLNode], at position: KDLPosition) throws
         -> (content: Node?, template: ContentTemplate?) {

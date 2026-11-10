@@ -6,7 +6,7 @@ import Foundation
 // `.rgba` where it is parsed: at parse time for literals, and in the cascade once var() has
 // been substituted. One with an input only commit knows, `accent`, `currentColor` or
 // `system()`, stays symbolic and ColorResolver computes it, as it computes `accent`
-// (PLAN.md W3, W13, W16).
+//.
 
 // MARK: - Relative colours
 
