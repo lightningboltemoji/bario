@@ -12,6 +12,7 @@ because it replaces something the cover is hiding.
 | `net` | `getifaddrs` counters on an interval | `rx`, `tx`, `rx-total`, `tx-total`, and rolling history for `graph` |
 | `cpu` | `host_statistics` tick deltas | `load`, `user`, `system`, history |
 | `mem` | `host_statistics64`, `kern.memorystatus_level` | `used`, `total`, `pressure`, `pressure-pct`, history |
+| `menu-extras` | every app's `AXExtrasMenuBar`, and the "Menubar" window photographed; read as its menu opens (`24-menus.md`) | `items`, `lines`, `count` |
 
 `net`, `cpu` and `mem` grew time windows, content templates and presets in
 [20-stats-widgets.md](20-stats-widgets.md), which also has their full list of keys.

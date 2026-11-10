@@ -100,6 +100,8 @@ public final class ModuleHost {
         var renderTask: Task<Void, Never>?
         var renders = 0
         var landed = 0
+        /// The module's `menuWillOpen`, which the first render waits for.
+        var prepareTask: Task<Void, Never>?
 
         init(state: MenuState = MenuState()) { self.state = state }
     }
@@ -144,7 +146,9 @@ public final class ModuleHost {
         }
 
         var canRender: Bool { needsRender && !held && renderTask == nil }
-        var canRenderMenu: Bool { menu.map { $0.needsRender && $0.renderTask == nil } == true && !held }
+        var canRenderMenu: Bool {
+            menu.map { $0.needsRender && $0.renderTask == nil && $0.prepareTask == nil } == true && !held
+        }
     }
 
     private var instances: [String: Instance] = [:]
@@ -515,6 +519,7 @@ public final class ModuleHost {
     /// Wait for the renders already running, without starting any.
     func finishRenders() async {
         for task in instances.values.compactMap(\.renderTask) { await task.value }
+        for task in instances.values.compactMap({ $0.menu?.prepareTask }) { await task.value }
         for task in instances.values.compactMap({ $0.menu?.renderTask }) { await task.value }
     }
 
@@ -531,8 +536,30 @@ public final class ModuleHost {
     /// says whether it has one: `menuState(for:)` is rendered with nil content if it has not.
     public func openMenu(_ item: String) {
         guard let instance = instances[item], instance.menu == nil else { return }
-        instance.menu = MenuSlot()
+        let slot = MenuSlot()
+        instance.menu = slot
+        if instance.module.preparesMenu { prepare(slot, of: instance) }
         if instance.canRenderMenu { onNeedsRender?() }
+    }
+
+    /// Ask the module for what its menu should read fresh, and hold the first render for it,
+    /// but not past the budget: an answer that comes later is merged when it comes.
+    private func prepare(_ slot: MenuSlot, of instance: Instance) {
+        let module = instance.module
+        let store = self.store
+        let item = instance.name
+        slot.prepareTask = Task { [weak self] in
+            let patch = try? await withBudget(ModuleHost.menuRenderBudget, late: { outcome in
+                guard case .success(let patch?) = outcome else { return }
+                Task { await store.merge(patch, at: item) }
+            }) {
+                await module.menuWillOpen()
+            }
+            if let patch = patch ?? nil { await store.merge(patch, at: item) }
+            slot.prepareTask = nil
+            guard let self, instance.menu === slot, instance.canRenderMenu else { return }
+            self.onNeedsRender?()
+        }
     }
 
     /// Stop rendering an item's menu, and forget what it read.

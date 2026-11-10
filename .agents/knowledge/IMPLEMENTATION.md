@@ -22,7 +22,7 @@ this file; the plan lives in [00-roadmap.md](00-roadmap.md); the intent lives in
 | `Config/` | a KDL 2.0 reader, and the typed `Config` it builds |
 | `Style/` | the CSS subset: parser, selectors, typed properties, cascade, the style stage (`Styler`), the default look; Oklab and the CSS Color 4 and 5 functions |
 | `Runtime/` | the `StateStore` actor, the `Module` protocol, format strings, content templates, the `EventBus`, `ModuleHost` |
-| `Modules/` | the built-in modules: `text` `clock` `data` `front-app` `battery` `wifi` `volume` `net` `cpu` `mem` `power` `brightness` `exec` (`wasm` lives in `Wasm/`); the default menus of `wifi`, `volume`, `battery` and `brightness`, in KDL |
+| `Modules/` | the built-in modules: `text` `clock` `data` `front-app` `battery` `wifi` `volume` `net` `cpu` `mem` `power` `brightness` `menu-extras` `exec` (`wasm` lives in `Wasm/`); the default menus of `wifi`, `volume`, `battery`, `brightness` and `menu-extras`, in KDL |
 | `Layout/` | `Metrics`, the flex solver, the `Scene`, the layout stage (`BarLayout`), and `SceneBuilder` (style + layout in one call) |
 | `Paint/` | colour resolution, rounded rects, the backdrop cache, display lists and the canvas painter, rasters, offscreen rendering on `CARenderer` |
 | `Compositor/` | each bar's layer tree and the commit stage: chrome as layers, raster keys, the node rasterizer, the hole as a mask, the window-shadow plane — see [18-compositor.md](18-compositor.md) |

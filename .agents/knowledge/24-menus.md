@@ -30,6 +30,9 @@ click on an item whose on-click is `menu` (or `bario menu <item>`)
 | `Support/AppMenus.swift` | an app's menu bar as a bario menu, pure: `AppMenuItem`, `MenuShortcut` (AX's character, glyph and modifier bits), Option variants, separators, the tree with `press <path>` rows |
 | `Support/AppMenuReader.swift` | the Accessibility side: reading `AXMenuBar` with timeouts and a deadline, `press`, finding a stale item again by its titles |
 | `Modules/SystemModules.swift` | `FrontAppModule.menu` (reads, keeps the read for `press`) and `onEvent("press")` |
+| `Support/MenuExtras.swift` | the menu bar's other items, pure: `MenuExtra`, names, `hide`, the state with its `lines`, cutting pictures from a `MenuBarPicture` |
+| `Support/MenuExtrasReader.swift` | their Accessibility side and the photograph: `AXExtrasMenuBar` of every app at once, bario's own on the main thread, `press`, the "Menubar" window, PNGs |
+| `Modules/MenuExtrasModule.swift` | `menuWillOpen` (reads, photographs, writes the pictures under `~/Library/Caches/bario/menu-extras/<item>`), `press` |
 
 ## Rules that are easy to break
 
@@ -71,6 +74,10 @@ click on an item whose on-click is `menu` (or `bario menu <item>`)
 - **A rule only menus wear does not make a first frame wait.** `Stylesheet.usesWallpaper` skips
   a rule whose every selector has `menu` in it (`Selector.isInMenu`), so the built-in menus'
   `wallpaper(dominant, …)` does not hold every bar's first frame for a palette.
+- **A module can read fresh as its menu opens.** `preparesMenu` (nonisolated, false by default)
+  makes `ModuleHost.openMenu` ask `menuWillOpen` and merge its patch before the first render,
+  which waits for it (`MenuSlot.prepareTask`, `canRenderMenu`) up to the menu budget; a later
+  answer is merged when it comes. Only modules that say so pay the hop.
 - **A menu goes when its anchor does**: the anchor must be in its bar's target scene, not leaving,
   and the bar showing. `layOut` returning false is what closes it.
 
@@ -115,6 +122,27 @@ the same read, so they agree. Pressing is detached from the actor with a 1 s wai
   open menu's key view (`MenuView.flagsChanged`).
 - **No AX in tests.** Everything an app's menus become is in `AppMenus`, pure, and tested from
   `AppMenuItem`s; the reader and pressing are not covered.
+
+## The menu bar's other items
+
+`menu-extras` lists every app's status item and the system's own, read through Accessibility as
+its menu opens (`menuWillOpen`), with pictures cut from the window server's "Menubar" window. See
+DESIGN.md §8. Measured on macOS 27:
+
+- **Asking every app is cheap once.** ~130 ms the first time (the messages to each app are set up
+  then), ~3 ms after; the start's poll pays the first. The photograph is ~30 ms with its listing.
+- **No item has a window.** All of them are drawn into one window per display, layer 24, titled
+  "Menubar", owned by the window server; `SCContentFilter(desktopIndependentWindow:)` photographs
+  it under the cover, transparent around black (or white) pictures.
+- **A picture's file is named for its bytes.** `CoreTextMetrics` caches an icon's size by path,
+  so a changed picture needs a new path; files no item shows go at the next read.
+- **bario's own item is the main thread's.** Accessibility asked of this process calls straight
+  into AppKit on the asking thread, and pressing from another traps
+  (`BSServiceMainRunLoopQueue assertBarrierOnQueue`). It is read in `ownItems` and pressed with
+  `DispatchQueue.main.async`; its NSMenu then tracks on the main thread, the bar standing still
+  until it closes, and, opened without activating bario, it does not hear Escape.
+- **Not covered by tests:** reading, photographing and pressing. The names, `hide`, the lines,
+  the cuts and the template test are, from `MenuExtra`s and synthetic pictures.
 
 ## Glass
 

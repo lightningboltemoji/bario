@@ -125,6 +125,14 @@ menu .mark { width: 13pt; }
 menu .shortcut { opacity: 0.6; }
 menu .disabled { opacity: 0.4; }
 
+/* The menu bar's other items (menu-extras'): a grid of their pictures, line by line, each a cell
+   that lights under the pointer as a row does. A picture in one colour is drawn in the menu's;
+   one with colours of its own, or an app's icon, in its own. */
+menu .extras { padding: 0; gap: 0; }
+menu .extra { padding: 5pt 7pt; }
+menu .extra-icon { icon-size: 15pt; }
+menu .extra-icon.colour, menu .extra-icon.app { icon-rendering: multicolor; }
+
 @media (prefers-color-scheme: dark) {
   :root {
     --bubble: rgba(0, 0, 0, 0.30);

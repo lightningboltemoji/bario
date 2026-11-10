@@ -21,6 +21,16 @@ public protocol Module: Actor {
     /// which is the default.
     func menu(_ state: StateReader) async throws -> Node?
 
+    /// Whether the item's menu waits for `menuWillOpen` before its first render. Only a module
+    /// that says so is asked, so every other menu opens without the extra hop.
+    nonisolated var preparesMenu: Bool { get }
+
+    /// State read fresh as the item's menu opens, for what is only worth reading while someone
+    /// is looking: merged under the item's key before the menu's first render, which waits for
+    /// it up to `ModuleHost.menuRenderBudget`. One that arrives later still lands, and the open
+    /// menu renders again.
+    func menuWillOpen() async -> JSONValue?
+
     func stop() async
 }
 
@@ -29,6 +39,8 @@ extension Module {
     public func poll() async -> PollResult { PollResult() }
     public func onEvent(_ event: ModuleEvent) async -> JSONValue? { nil }
     public func menu(_ state: StateReader) async throws -> Node? { nil }
+    public nonisolated var preparesMenu: Bool { false }
+    public func menuWillOpen() async -> JSONValue? { nil }
     public func stop() async {}
 }
 
@@ -168,6 +180,7 @@ public enum ModuleRegistry {
             "mem": { try MemModule(context: $0) },
             "power": { try PowerModule(context: $0) },
             "brightness": { BrightnessModule(context: $0) },
+            "menu-extras": { MenuExtrasModule(context: $0) },
             "exec": { try ExecModule(context: $0) },
             "wasm": { try WasmModule(context: $0) },
         ]

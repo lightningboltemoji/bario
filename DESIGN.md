@@ -135,6 +135,7 @@ The initial set, chosen because each one replaces something the cover is hiding:
 | `cpu` / `mem` | `host_statistics` on an interval | `load`, `used`, history |
 | `power` | the SMC's `PSTR` key on an interval, the battery's capacity from the IORegistry | `draw`, `level`, `time-remaining`, windows, history |
 | `brightness` | DisplayServices and CoreBrightness, private, looked up at run time; polled | `display`, `keyboard` (0…1), `has-display`, `has-keyboard`; `set-display`, `set-keyboard` |
+| `menu-extras` | every app's `AXExtrasMenuBar`, and the menu bar window photographed for their pictures; read as its menu opens (§8) | `items`, `lines`, `count`; `press`; `hide`, `line-width` |
 | `text` | none | static content from config |
 | `data` | nothing of its own | renders whatever was pushed under its key (Tier 2) |
 
@@ -880,7 +881,7 @@ item "wifi" module="wifi" format="{icon}" on-click="menu" {
 
 Without one in the config, a tree written under the item's key as `menu` is shown (an `exec`
 line, `bario set`, a WASM module's `set`), and without that, the module's own default:
-`front-app`, `wifi`, `volume`, `battery` and `brightness` bring one, the last four written in KDL
+`front-app`, `wifi`, `volume`, `battery`, `brightness` and `menu-extras` bring one, all but the first written in KDL
 in their source so that copying it is how to change it. Nothing opens a menu unless something
 says so: a click does what its item's `on-click` says and nothing more, so the item above opens
 its menu because it says `on-click="menu"`, and a `wifi` item without that shows the module's
@@ -1001,6 +1002,22 @@ macOS asks once. An app that does not answer in time gets a dimmed row saying so
 bar, or bario itself, gets no menu. A menu's render has 250 ms where a bubble's has 50: it renders
 when it opens and nothing waits on it but the menu. `bario --shot out.png --menu app/1` shows the
 bar with the app's menu open and row 1's submenu beside it.
+
+**The menu bar's other items.** The cover hides every app's status item and the system's own
+(Wi‑Fi, Battery, Control Center, Clock). `menu-extras` brings them back as a grid of their
+pictures, for a menu: each app's items are its `AXExtrasMenuBar`'s children (the system's,
+`MenuBarAgent`'s, each inside an `AXHostingView` group), and their pictures are cut from the one
+window the window server draws every item into on macOS 27 (layer 24, "Menubar"; no item has a
+window of its own any more), which ScreenCaptureKit photographs under the cover. Every cut shares
+the band all items draw in, so they keep their sizes relative to each other; one in a single
+colour is drawn as a mask in the menu's own (`.template`), one with colours of its own as it is.
+The items are in the menu bar's order, and in `lines` as many as fit `line-width` points of the
+menu bar. Choosing one presses the real item (`AXPress`), whose own menu or window opens where
+macOS puts it. The module reads only as its menu opens: a module whose `preparesMenu` is true
+has `menuWillOpen` asked before the menu's first render, which waits for it up to the menu
+budget, so a closed menu costs nothing and an open one never shows what was there before.
+bario's own item is read and pressed on the main thread, since Accessibility asked of one's own
+process is a call into AppKit, not a message; its menu then runs there, and the bar waits for it.
 
 ## 9. Custom renderers
 
