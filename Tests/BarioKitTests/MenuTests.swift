@@ -446,22 +446,27 @@ struct MenuFrameTests {
         #expect(h.loop.bars[0].presentation?.scene.items.first?.style.opacity == 1)
     }
 
-    @Test("moving onto another item with a menu switches to it")
+    @Test("moving onto another item whose click opens a menu switches to it")
     func switches() async throws {
         let (h, made) = try await started("""
-        item "a" module="menu-test"
-        item "b" module="menu-test"
+        item "a" module="menu-test" on-click="menu"
+        item "b" module="menu-test" on-click="menu"
         item "c" module="menu-test" on-click="reload"
+        item "d" module="menu-test"
         """)
         await h.host.store.merge(.object(["label": "b's"]), at: "b")
         h.loop.openMenu("a", from: ItemRef(bar: 1, item: "a"))
         await h.settle()
         let items = try #require(h.loop.bars[0].presentation?.scene.items)
-        let b = items[1].frame, c = items[2].frame
+        let b = items[1].frame, c = items[2].frame, d = items[3].frame
 
         h.loop.pointerMoved(to: CGPoint(x: c.midX, y: 876 + c.midY))
         await h.settle()
         #expect(h.loop.menu?.item == "a", "c's click does something else, so it has no menu to switch to")
+
+        h.loop.pointerMoved(to: CGPoint(x: d.midX, y: 876 + d.midY))
+        await h.settle()
+        #expect(h.loop.menu?.item == "a", "d has a menu, but its click does not say to open it")
 
         h.loop.pointerMoved(to: CGPoint(x: b.midX, y: 876 + b.midY))
         await h.settle()
@@ -472,7 +477,7 @@ struct MenuFrameTests {
 
     @Test("a click on an item with no menu closes the open one, and moving onto it does not")
     func emptyClick() async throws {
-        let (h, _) = try await started(#"item "a" module="menu-test"; item "b" module="menu-test""#)
+        let (h, _) = try await started(#"item "a" module="menu-test" on-click="menu"; item "b" module="menu-test" on-click="menu""#)
         await h.host.store.merge(.object(["none": true]), at: "b")
         h.loop.openMenu("a", from: ItemRef(bar: 1, item: "a"))
         await h.settle()
@@ -483,6 +488,18 @@ struct MenuFrameTests {
         h.loop.toggleMenu("b", from: ItemRef(bar: 1, item: "b"))
         await h.settle()
         #expect(h.loop.menu == nil)
+    }
+
+    @Test("a click opens a menu only where on-click says menu")
+    func explicitClick() async throws {
+        let (h, _) = try await started("""
+        item "a" module="menu-test" on-click="menu"
+        item "b" module="menu-test"
+        item "c" module="menu-test" on-click="menu a"
+        """)
+        #expect(h.loop.menuItem(forClickOn: "a") == "a")
+        #expect(h.loop.menuItem(forClickOn: "b") == nil, "a menu nothing asks for opens on no click")
+        #expect(h.loop.menuItem(forClickOn: "c") == "a")
     }
 
     @Test("an item that leaves the bar closes its menu")

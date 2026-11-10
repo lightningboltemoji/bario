@@ -7,7 +7,7 @@ through the same frame as the bars.
 ## The shape
 
 ```
-click on an item with no on-click (or `menu`)
+click on an item whose on-click is `menu` (or `bario menu <item>`)
   └─ FrameLoop.toggleMenu → pendingMenu, ModuleHost.openMenu
        └─ host renders the menu (config › written `menu` › Module.menu), reads under "\u{1F}menu:<item>"
             └─ onMenuRendered → nil content: nothing opens │ content: Menu made, makeMenuSurface()
@@ -32,6 +32,12 @@ click on an item with no on-click (or `menu`)
 | `Modules/SystemModules.swift` | `FrontAppModule.menu` (reads, keeps the read for `press`) and `onEvent("press")` |
 
 ## Rules that are easy to break
+
+- **Only `menu` opens a menu.** A click does what its item's `on-click` says; one with none opens
+  nothing, whatever menu the item has (`FrameLoop.menuItem(forClickOn:)`, `BarController.handle`).
+  Moving onto another item while a menu is open switches only to items whose click is `menu`. The
+  controller runs a `menu` click at once, before the module hears the click, so a busy module
+  cannot hold the menu up. Modules and socket subscribers still hear every click.
 
 - **A closed menu costs nothing.** Its reads are recorded under `ModuleHost.menuKey(item)`, never the
   item's own, and forgotten when it closes. A write under the item's key dirties an open menu too

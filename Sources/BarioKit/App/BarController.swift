@@ -533,8 +533,8 @@ public final class BarController: NSObject, NSApplicationDelegate {
 
     /// An item's events go to three places at once, which is what keeps the tiers equivalent:
     /// the module, socket subscribers, and the item's own shortcut. DESIGN.md §8. A control
-    /// inside the item takes the event instead of the item's shortcut, and a
-    /// click with no shortcut at all opens the item's menu, if it has one.
+    /// inside the item takes the event instead of the item's shortcut. A click does what its
+    /// shortcut says and nothing more: an item's menu opens only for `on-click="menu"`.
     private func handle(_ event: BarEvent, on display: CGDirectDisplayID) {
         server?.broadcast(event.socketEvent)
         guard let name = event.item else {
@@ -550,17 +550,20 @@ public final class BarController: NSObject, NSApplicationDelegate {
             return
         }
         let action = self.action(for: name, kind: event.kind)
-        if event.kind == .click {
-            if action == nil {
-                loop.toggleMenu(name, from: anchor)
-            } else if !isMenuToggle(theme.config.item(named: name)?.actions.click) {
-                loop.closeMenu()
-            }
+        let opensMenu = { if case .menu? = action { true } else { false } }()
+        // Anything else clicked is as good as outside the open menu.
+        if event.kind == .click, !opensMenu { loop.closeMenu() }
+        // A menu opens as the press lands, not once the module has heard about it: a module busy
+        // polling would hold it.
+        if opensMenu, let action {
+            Task { @MainActor in await self.perform(action, item: name, payload: event.payload, anchor: anchor) }
         }
         Task { @MainActor in
             await self.host.deliver(ModuleEvent(name: event.kind.rawValue, payload: event.payload),
                                     to: name)
-            if let action { await self.perform(action, item: name, payload: event.payload, anchor: anchor) }
+            if let action, !opensMenu {
+                await self.perform(action, item: name, payload: event.payload, anchor: anchor)
+            }
         }
     }
 

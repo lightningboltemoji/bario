@@ -866,7 +866,7 @@ templated like `content` and filled from the item's state. Several nodes inside 
 since a menu is a list:
 
 ```kdl
-item "wifi" module="wifi" format="{icon}" {
+item "wifi" module="wifi" format="{icon}" on-click="menu" {
   menu align="end" {
     row class="title" { text "Wi-Fi"; spacer; text "{ssid}" class="value" }
     row { text "IP address"; spacer; text "{ip}" class="value" }
@@ -880,8 +880,12 @@ item "wifi" module="wifi" format="{icon}" {
 
 Without one in the config, a tree written under the item's key as `menu` is shown (an `exec`
 line, `bario set`, a WASM module's `set`), and without that, the module's own default:
-`wifi`, `volume`, `battery` and `brightness` bring one, written in KDL in their source so that
-copying it is how to change it. A menu renders only while it is open, with its reads tracked
+`front-app`, `wifi`, `volume`, `battery` and `brightness` bring one, the last four written in KDL
+in their source so that copying it is how to change it. Nothing opens a menu unless something
+says so: a click does what its item's `on-click` says and nothing more, so the item above opens
+its menu because it says `on-click="menu"`, and a `wifi` item without that shows the module's
+menu to no one. (An earlier version opened the menu for any click on an item with no `on-click`.
+It made a click do something no line of the config said.) A menu renders only while it is open, with its reads tracked
 apart from its bubble's, so it can show rates and addresses the bubble never does without the
 bubble restyling every second. It opens after its first render, as a bar comes on screen after
 its first frame, and a render with nothing in it opens nothing.
@@ -933,8 +937,8 @@ slider shows where it was dragged to until a render after the release says other
 glyphs lines up.
 
 Two verbs join the action language. `menu [item]` opens a menu, or closes it if it is open:
-the item's own by default, and what a click on an item with no `on-click` does. `menu wifi` on
-another item hangs Wi-Fi's menu from that item, and `bario menu wifi` opens it from the socket.
+the item's own by default, and the only way a click opens one. `menu wifi` on another item
+hangs Wi-Fi's menu from that item, and `bario menu wifi` opens it from the socket.
 `send <item> <verb> [args…]` delivers a verb to another item's or a source's module, so a control
 centre's slider can say `send volume set-level`. In content a WASM module wrote, every verb but
 `menu` goes back to that module as an event of that name: bario's own verbs would let it out of
@@ -969,7 +973,8 @@ it, and ← comes back out. A submenu is styled as `menu menu`, so every `menu` 
 the row it hangs from wears `:open`. A menu taller than the room below the bar, at any depth, is
 cut to fit and scrolls with the wheel; the keys scroll the row they move to into view.
 
-**The front app's menus.** `front-app`'s default menu is the app's own menu bar: App (the app
+**The front app's menus.** `front-app`'s default menu, shown by `on-click="menu"` as any module's
+is, is the app's own menu bar: App (the app
 menu, under a name that does not repeat the bubble), File, Edit and the rest, each opening onto its
 items, in the bar's look. It is read through Accessibility each time it renders, which is when it
 opens and when what it read changes (`AXMenuBar`, its menus, their items; the whole tree but the
@@ -1429,7 +1434,7 @@ fallback if the KDL parser situation in Swift turns out worse than expected.
 bar {
   hole radius=40 feather=0 proximity=80 click="reveal"
 
-  item "app" module="front-app" priority=10 format="{name}"
+  item "app" module="front-app" priority=10 format="{name}" on-click="menu"
   item "spaces" module="exec" interval="watch" {
     command "aerospace" "list-workspaces" "--monitor" "focused" "--format" "%{workspace}"
   }
@@ -1438,8 +1443,8 @@ bar {
   spacer
   item "clock" module="clock" format="EEE d MMM  HH:mm" priority=10
   group "status" {
-    item "wifi" module="wifi" format="{icon}"
-    item "battery" module="battery" format="{icon} {pct}%" {
+    item "wifi" module="wifi" format="{icon}" on-click="menu"
+    item "battery" module="battery" format="{icon} {pct}%" on-click="menu" {
       low 20
     }
     item "volume" module="volume" format="{icon}" on-scroll="adjust" on-click="toggle-mute"

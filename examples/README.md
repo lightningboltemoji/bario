@@ -314,8 +314,9 @@ from its `--backdrop`, so `bario --style examples/themes/slots.css --shot out.pn
 
 ## menus
 
-What drops down from an item when it is clicked (DESIGN.md §8). `wifi`, `volume`, `battery` and
-`brightness` bring their own; `bario --shot out.png --menu wifi` shows one without a running bar.
+What drops down from an item when it is clicked (DESIGN.md §8), if its `on-click` is `menu`.
+`front-app`, `wifi`, `volume`, `battery` and `brightness` bring their own; `bario --shot out.png
+--menu wifi` shows one without a running bar.
 This one is a control centre under the Apple logo: brightness and sound as sliders, reading other
 items' state with `/` and moving it with `send`, a keep-awake switch, and the Apple menu's
 commands.
@@ -324,7 +325,7 @@ commands.
 source "brightness" module="brightness"
 
 bar {
-  item "apple" module="exec" interval="watch" running=#false on-right-click="toggle" {
+  item "apple" module="exec" interval="watch" running=#false on-click="menu" on-right-click="toggle" {
     command "exec caffeinate -d -w $PPID"
     content { icon "apple.logo" }
     menu {

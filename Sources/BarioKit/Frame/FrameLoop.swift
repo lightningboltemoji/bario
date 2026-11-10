@@ -625,13 +625,12 @@ public final class FrameLoop {
         openMenu(item, from: ref, hovering: true)
     }
 
-    /// Whose menu a click on an item opens: its own when it has no `on-click`, or the one a
-    /// `menu` shortcut names. nil when its click does something else.
+    /// Whose menu a click on an item opens: the one its `on-click="menu"` names, its own when it
+    /// names none. nil when its click does something else, or nothing.
     public func menuItem(forClickOn name: String) -> String? {
-        guard let config = config.item(named: name) else { return nil }
-        guard let click = config.actions.click else { return name }
-        if case .menu(let other)? = Action.parse(click) { return other ?? name }
-        return nil
+        guard let click = config.item(named: name)?.actions.click,
+              case .menu(let other)? = Action.parse(click) else { return nil }
+        return other ?? name
     }
 
     /// An open or asked-for menu rendered. A first render with something in it opens the menu;

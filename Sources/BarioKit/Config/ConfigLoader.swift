@@ -499,15 +499,17 @@ public let defaultConfigKDL = """
 bar {
   hole radius=40 feather=0 proximity=80 click="reveal"
 
-  item "app" module="front-app" priority=10 format="{name}" max-length=28
+  // A click on these shows their module's own menu: the app's menu bar, the network, the
+  // outputs, the charge.
+  item "app" module="front-app" priority=10 format="{name}" max-length=28 on-click="menu"
   spacer
   notch
   spacer
   item "clock" module="clock" format="EEE d MMM  HH:mm" priority=10
   group "status" {
-    item "wifi" module="wifi" format="{icon}"
-    item "volume" module="volume" format="{icon}"
-    item "battery" module="battery" format="{icon} {pct}%" {
+    item "wifi" module="wifi" format="{icon}" on-click="menu"
+    item "volume" module="volume" format="{icon}" on-click="menu"
+    item "battery" module="battery" format="{icon} {pct}%" on-click="menu" {
       low 20
     }
   }
