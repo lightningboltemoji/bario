@@ -239,6 +239,18 @@ struct PaletteTests {
         #expect(text.contains("\u{1B}[48;2;"))
         #expect(!CLI.describePalette(json, title: "x", swatches: false).contains("\u{1B}"))
     }
+
+    @Test("the wallpaper's window is WindowManager's on macOS 27 and the Dock's on 26, and no one else's")
+    func wallpaperWindow() {
+        #expect(PaletteCapture.isWallpaper(owner: "com.apple.WindowManager", title: "Wallpaper"))
+        #expect(PaletteCapture.isWallpaper(owner: "com.apple.dock", title: "Wallpaper-"))
+        #expect(PaletteCapture.isWallpaper(owner: "com.apple.dock", title: "Wallpaper-2"))
+        #expect(!PaletteCapture.isWallpaper(owner: "com.apple.WindowManager", title: "Wallpaper-"))
+        #expect(!PaletteCapture.isWallpaper(owner: "com.apple.dock", title: "Wallpaper"))
+        #expect(!PaletteCapture.isWallpaper(owner: "com.apple.dock", title: "Dock"))
+        #expect(!PaletteCapture.isWallpaper(owner: "com.apple.finder", title: "Wallpaper"))
+        #expect(!PaletteCapture.isWallpaper(owner: nil, title: "Wallpaper"))
+    }
 }
 
 private extension JSONValue {

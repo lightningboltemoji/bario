@@ -115,6 +115,10 @@ enum MenuExtrasReader {
         var origin = CGPoint.zero, size = CGSize.zero
         if let value = axValue(3, .cgPoint) { AXValueGetValue(value, .cgPoint, &origin) }
         if let value = axValue(4, .cgSize) { AXValueGetValue(value, .cgSize, &size) }
+        // Control Center on macOS 26.6 lists items it does not show, with nothing to say what
+        // they are, at no size below the bottom of the screen. Not in the menu bar, so not in
+        // the menu.
+        guard size.width > 0, size.height > 0 else { return nil }
         return MenuExtra(pid: app.pid, index: index, frame: CGRect(origin: origin, size: size),
                          title: text(0), description: text(1), help: text(2), identifier: text(5),
                          bundleID: app.bundleID, appName: app.name, appPath: app.bundlePath)
@@ -133,24 +137,38 @@ enum MenuExtrasReader {
 
     // MARK: - Pictures
 
-    /// Every display's menu bar window, photographed: an empty list without permission to, or
-    /// if macOS has renamed the window.
+    /// Every display's menu bar, photographed: an empty list without permission to, or if macOS
+    /// has renamed the window. On macOS 27 every item is drawn into the "Menubar" window. On
+    /// macOS 26.6 that window has none of them: each item has a window of its own at status
+    /// level, Control Center's whichever app the item is. So each picture is one photograph of
+    /// the menu bar's frame with the "Menubar" window and whatever is at status level over it,
+    /// and nothing else, the cover above them included: the menu bar as it shows, either way,
+    /// in ~20 ms however many items there are. Each item's window photographed alone and drawn
+    /// in by hand cost ~15 ms an item, which a full menu bar would spend past the menu's budget.
     static func photograph() async throws -> [MenuBarPicture] {
         guard CGPreflightScreenCaptureAccess() else { return [] }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let layer = Int(CGWindowLevelForKey(.mainMenuWindow))
+        let barLayer = Int(CGWindowLevelForKey(.mainMenuWindow))
+        let itemLayer = Int(CGWindowLevelForKey(.statusWindow))
+        func centre(_ rect: CGRect) -> CGPoint { CGPoint(x: rect.midX, y: rect.midY) }
         var pictures: [MenuBarPicture] = []
-        for window in content.windows where window.title == menuBarTitle && window.windowLayer == layer {
-            let filter = SCContentFilter(desktopIndependentWindow: window)
+        for bar in content.windows where bar.title == menuBarTitle && bar.windowLayer == barLayer {
+            guard let display = content.displays.first(where: { $0.frame.contains(centre(bar.frame)) }) else { continue }
+            let items = content.windows.filter { $0.windowLayer == itemLayer && bar.frame.contains(centre($0.frame)) }
+            let filter = SCContentFilter(display: display, including: [bar] + items)
             let scale = CGFloat(SCShareableContent.info(for: filter).pointPixelScale)
             let config = SCStreamConfiguration()
-            config.width = Int((window.frame.width * scale).rounded())
-            config.height = Int((window.frame.height * scale).rounded())
+            config.sourceRect = bar.frame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+            config.width = Int((bar.frame.width * scale).rounded())
+            config.height = Int((bar.frame.height * scale).rounded())
             config.showsCursor = false
             config.captureResolution = .best
-            config.ignoreShadowsSingleWindow = true
+            // Clear where there is no window, as a window photographed alone is. A colour made
+            // with CGColor(red:green:blue:alpha:) here trapped in ScreenCaptureKit's copy of
+            // the configuration (macOS 26.6); the constant does not.
+            config.backgroundColor = CGColor.clear
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            if let picture = picture(of: image, frame: window.frame, scale: scale) { pictures.append(picture) }
+            if let picture = picture(of: image, frame: bar.frame, scale: scale) { pictures.append(picture) }
         }
         return pictures
     }

@@ -1008,7 +1008,9 @@ bar with the app's menu open and row 1's submenu beside it.
 pictures, for a menu: each app's items are its `AXExtrasMenuBar`'s children (the system's,
 `MenuBarAgent`'s, each inside an `AXHostingView` group), and their pictures are cut from the one
 window the window server draws every item into on macOS 27 (layer 24, "Menubar"; no item has a
-window of its own any more), which ScreenCaptureKit photographs under the cover. Every cut shares
+window of its own any more), which ScreenCaptureKit photographs under the cover. On macOS 26 each
+item still has a window of its own at status level, and the photograph takes those with it, so
+the picture is the menu bar as it shows either way. Every cut shares
 the band all items draw in, so they keep their sizes relative to each other; one in a single
 colour is drawn as a mask in the menu's own (`.template`), one with colours of its own as it is.
 The items are in the menu bar's order, and in `lines` as many as fit `line-width` points of the

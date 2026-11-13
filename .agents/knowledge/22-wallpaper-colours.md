@@ -174,13 +174,24 @@ muted slots are its own greys.
 
 ### The capture
 
-`PaletteCapture.captured(info:)` filters ScreenCaptureKit's windows to the one owned by
-`com.apple.WindowManager` and titled "Wallpaper" that overlaps the display most (confirmed on
-this machine: one per display, at the display's full frame, layer desktop − 1), and photographs
+`PaletteCapture.captured(info:)` filters ScreenCaptureKit's windows to the wallpaper's that
+overlaps the display most, and photographs
 it alone at 320 pixels wide in Display P3. Not finding it, while capture is allowed, warns once
 and falls back to the file; capture failing falls back too. `--source capture` takes no file,
 `--source wallpaper` takes no capture. Files are thumbnailed off the main actor and kept by URL
 (at most eight, for a shuffling wallpaper). Under the same six-second deadline as the strip.
+
+The wallpaper's window is one per display, at the display's full frame, layer desktop − 1, but
+its owner and title moved between releases (`PaletteCapture.windows`):
+
+| macOS | Owner | Title |
+|---|---|---|
+| 27.2 | `com.apple.WindowManager` | "Wallpaper" |
+| 26.6 | `com.apple.dock` | "Wallpaper-" (taken as a prefix) |
+
+Missing one quietly costs more than the aerial: the file is read whole, while the screen shows it
+cropped to the display, so the same still on both measured slightly differently (dominant
+`#bd987a` from the file, `#c19874` from the screen, a 16:9 picture on a 16:10 display).
 
 `BarController.captureBackdrops` measures each display after its strip, when the round was asked
 for by an event (`lookAgain`) or the strip came back new, never while locked (the round does not

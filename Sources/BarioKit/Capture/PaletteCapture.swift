@@ -9,10 +9,20 @@ import ScreenCaptureKit
 /// widget is a palette's worth of grey.
 @MainActor
 public final class PaletteCapture {
-    /// The window WindowManager draws a display's wallpaper in, as macOS 27.2 has it. Not API:
-    /// if a later macOS renames it, the file stands in and the capture says so once.
-    static let owner = "com.apple.WindowManager"
-    static let title = "Wallpaper"
+    /// The window a display's wallpaper is drawn in, which is not API. macOS 27.2 has
+    /// WindowManager draw it, titled "Wallpaper"; macOS 26.6 has the Dock, titled "Wallpaper-",
+    /// taken as a prefix since the dash looks like the start of a name with more to come. If a
+    /// later macOS renames it, the file stands in and the capture says so once.
+    nonisolated static let windows: [(owner: String, title: String, prefix: Bool)] = [
+        ("com.apple.WindowManager", "Wallpaper", false),
+        ("com.apple.dock", "Wallpaper-", true),
+    ]
+
+    /// Whether a window with this owner and title is a display's wallpaper.
+    nonisolated static func isWallpaper(owner: String?, title: String?) -> Bool {
+        guard let owner, let title else { return false }
+        return windows.contains { $0.owner == owner && ($0.prefix ? title.hasPrefix($0.title) : title == $0.title) }
+    }
 
     /// Wallpaper files, thumbnailed once each.
     private var thumbnails: [URL: CGImage] = [:]
@@ -37,7 +47,9 @@ public final class PaletteCapture {
                     warnedNoWindow = true
                     warn("no wallpaper window on \(info.name) to measure colours from, so they come from the "
                          + "wallpaper file, which misses dynamic desktops and aerials; macOS may have renamed "
-                         + "the window (\(PaletteCapture.owner), \"\(PaletteCapture.title)\")")
+                         + "the window ("
+                         + PaletteCapture.windows.map { "\($0.owner), \"\($0.title)\"" }.joined(separator: "; ")
+                         + ")")
                 }
             case .failure(let error)?:
                 warn("could not photograph the wallpaper on \(info.name): \(error)")
@@ -63,8 +75,8 @@ public final class PaletteCapture {
             return shared.isNull ? 0 : shared.width * shared.height
         }
         guard let window = content.windows
-            .filter({ $0.windowLayer < normal && $0.owningApplication?.bundleIdentifier == owner
-                      && $0.title == title && overlap($0) > 0 })
+            .filter({ $0.windowLayer < normal && overlap($0) > 0
+                      && isWallpaper(owner: $0.owningApplication?.bundleIdentifier, title: $0.title) })
             .max(by: { overlap($0) < overlap($1) }) else { return nil }
 
         let config = SCStreamConfiguration()

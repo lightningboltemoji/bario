@@ -31,7 +31,7 @@ click on an item whose on-click is `menu` (or `bario menu <item>`)
 | `Support/AppMenuReader.swift` | the Accessibility side: reading `AXMenuBar` with timeouts and a deadline, `press`, finding a stale item again by its titles |
 | `Modules/SystemModules.swift` | `FrontAppModule.menu` (reads, keeps the read for `press`) and `onEvent("press")` |
 | `Support/MenuExtras.swift` | the menu bar's other items, pure: `MenuExtra`, names, `hide`, the state with its `lines`, cutting pictures from a `MenuBarPicture` |
-| `Support/MenuExtrasReader.swift` | their Accessibility side and the photograph: `AXExtrasMenuBar` of every app at once, bario's own on the main thread, `press`, the "Menubar" window, PNGs |
+| `Support/MenuExtrasReader.swift` | their Accessibility side and the photograph: `AXExtrasMenuBar` of every app at once, bario's own on the main thread, `press`, the "Menubar" window and 26's item windows, PNGs |
 | `Modules/MenuExtrasModule.swift` | `menuWillOpen` (reads, photographs, writes the pictures under `~/Library/Caches/bario/menu-extras/<item>`), `press` |
 
 ## Rules that are easy to break
@@ -127,13 +127,24 @@ the same read, so they agree. Pressing is detached from the actor with a 1 s wai
 
 `menu-extras` lists every app's status item and the system's own, read through Accessibility as
 its menu opens (`menuWillOpen`), with pictures cut from the window server's "Menubar" window. See
-DESIGN.md §8. Measured on macOS 27:
+DESIGN.md §8. Measured on macOS 27, with 26.6's differences after:
 
 - **Asking every app is cheap once.** ~130 ms the first time (the messages to each app are set up
   then), ~3 ms after; the start's poll pays the first. The photograph is ~30 ms with its listing.
 - **No item has a window.** All of them are drawn into one window per display, layer 24, titled
   "Menubar", owned by the window server; `SCContentFilter(desktopIndependentWindow:)` photographs
   it under the cover, transparent around black (or white) pictures.
+- **On macOS 26.6 every item has.** The "Menubar" window is there but blank where the items are;
+  each item is a window of its own at status level (layer 25, just under the cover), all of them
+  owned by Control Center whichever app the item is ("Item-0", "BentoBox-0", "Clock"). So
+  `photograph` takes one display photograph of the menu bar's frame with only the "Menubar"
+  window and those over it (`SCContentFilter(display:including:)`, a clear background): the same
+  picture on both, ~20 ms however many items. Each window photographed alone was ~15 ms an
+  item, past the menu's 250 ms with a full menu bar. Missing them leaves every item its app's
+  icon. `backgroundColor` built with `CGColor(red:…)` trapped in ScreenCaptureKit; `.clear` is fine.
+- **Control Center on 26.6 lists items it does not show:** no title, description or identifier,
+  no size, below the bottom of the screen. They would be rows called "System" with Control
+  Center's icon; an item with no size is left out.
 - **A picture's file is named for its bytes.** `CoreTextMetrics` caches an icon's size by path,
   so a changed picture needs a new path; files no item shows go at the next read.
 - **bario's own item is the main thread's.** Accessibility asked of this process calls straight
