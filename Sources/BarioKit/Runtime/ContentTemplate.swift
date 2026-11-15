@@ -54,6 +54,10 @@ public struct ContentTemplate: Sendable, Hashable {
     /// Without a slot anywhere in the tree it is plain content, decoded once from `plain`.
     public var hasSlots: Bool { root.hasSlots }
 
+    /// Every slot in the tree, those under `each` and `if` included: what of its state a module
+    /// is asked to show, and how.
+    public var slots: [FormatString.Slot] { root.slots }
+
     /// The tree with its escapes undone, `{{` as `{`: what plain content is.
     public var plain: JSONValue { root.fill { _ in nil } }
 
@@ -105,6 +109,17 @@ extension ContentTemplate.Piece {
         case .value, .format, .action, .each, .when: return true
         case .array(let items): return items.contains { $0.hasSlots }
         case .object(let fields): return fields.values.contains { $0.hasSlots }
+        }
+    }
+
+    var slots: [FormatString.Slot] {
+        switch self {
+        case .literal: return []
+        case .value(let name): return [FormatString.Slot(name: name, spec: nil)]
+        case .format(let format), .action(let format): return format.slots
+        case .array(let items): return items.flatMap(\.slots)
+        case .object(let fields): return fields.values.flatMap(\.slots)
+        case .each(_, let children), .when(_, let children): return children.flatMap(\.slots)
         }
     }
 

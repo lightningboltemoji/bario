@@ -221,6 +221,35 @@ struct ModuleTests {
         #expect(text.count == 5 && text.contains(":"))
     }
 
+    @Test("a clock's content block gives each text its own pattern, and ticks to the finest")
+    func clockContent() async throws {
+        let json = #"""
+            {"row": {"children": [
+              {"text": "{now:yyyy}", "class": "date"},
+              {"text": "{now:HH:mm:ss}", "class": "time"}
+            ]}}
+            """#
+        let template = try ContentTemplate(JSONDecoder().decode(JSONValue.self, from: Data(json.utf8)))
+        let store = StateStore()
+        let clock = ClockModule(context: ModuleContext(item: "clock", template: template, store: store))
+        let poll = await clock.poll()
+        #expect(poll.every == 1)
+        await store.merge(poll.patch!, at: "clock")
+
+        let result = try await clock.render(await store.reader(for: "clock"))
+        let texts = result.content?.children.compactMap { child -> String? in
+            if case .text(let text) = child.kind { return text } else { return nil }
+        }
+        #expect(texts?.count == 2)
+        #expect(texts?.first?.count == 4 && texts?.first?.allSatisfy(\.isNumber) == true)
+        #expect(texts?.last?.count == 8)
+
+        let minutes = try ContentTemplate(.object(["text": "{now:EEE} {now:HH:mm}"]))
+        let quiet = ClockModule(context: ModuleContext(item: "clock", format: "HH:mm:ss",
+                                                       template: minutes, store: store))
+        #expect(await quiet.poll().every == 60)
+    }
+
     @Test("a data item renders what was pushed to it")
     func data() async throws {
         let store = StateStore()

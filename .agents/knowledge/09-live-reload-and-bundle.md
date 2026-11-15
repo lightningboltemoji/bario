@@ -65,6 +65,11 @@ executable gets no arguments and launchd (pid 1) as its parent, and `main.swift`
 still works from the binary inside it, which is what makes `bario set …` from a shell script
 talk to the same process.
 
+`make app` signs with the self-signed `bario` certificate (login keychain locally, the `production`
+secrets in CI), so grants survive `make install` and swaps between a release and a local build.
+Under the hardened runtime that comes with it, TCC refuses Core Audio's microphone check. That's
+harmless, but reading input levels would need the `com.apple.security.device.audio-input` entitlement.
+
 ## Tests
 
 `FileWatcher` against a real file: a write fires, a rename-into-place fires, a delete then

@@ -80,12 +80,20 @@ public actor DataModule: Module {
 ///
 /// The alignment is the whole point: a clock that ticks half a second late looks broken. The
 /// granularity comes from the format — a pattern with seconds in it ticks every second.
+///
+/// A `content` block wins over the format, as it does for every module, and its `{now:…}`
+/// slots each take a pattern of their own, so the date and the time can be two texts styled
+/// apart: `text "{now:EEE, MMM d}" class="date"`. It ticks every second if any of them shows
+/// seconds. Those patterns format in the system's time zone and locale, as a date slot does
+/// anywhere; `timezone` and `locale` are the format's.
 public actor ClockModule: Module {
     private let context: ModuleContext
     private let template: FormatString?
+    private let contentTemplate: ContentTemplate?
     private let datePattern: String
     private let timeZone: TimeZone
     private let locale: Locale
+    private let ticksEverySecond: Bool
 
     public init(context: ModuleContext) {
         self.context = context
@@ -101,6 +109,10 @@ public actor ClockModule: Module {
         }
         self.timeZone = context.string("timezone").flatMap(TimeZone.init(identifier:)) ?? .current
         self.locale = context.string("locale").map(Locale.init(identifier:)) ?? .autoupdatingCurrent
+        self.contentTemplate = context.template
+        let patterns = context.template.map { $0.slots.filter { $0.name == "now" }.compactMap(\.spec) }
+            ?? [datePattern]
+        self.ticksEverySecond = patterns.contains(where: ClockModule.patternHasSeconds)
     }
 
     public func poll() async -> PollResult {
@@ -109,12 +121,16 @@ public actor ClockModule: Module {
                           every: ticksEverySecond ? 1 : 60)
     }
 
-    private var ticksEverySecond: Bool {
-        ClockModule.patternHasSeconds(datePattern)
-    }
-
     public func render(_ state: StateReader) async throws -> RenderResult {
         let now = state.value("now")?.asDate ?? Date()
+        if let content = context.content {
+            return RenderResult(content: content)
+        }
+        if let contentTemplate {
+            return RenderResult(content: try contentTemplate.render { path in
+                path == "now" ? .number(now.timeIntervalSince1970) : state.value(path)
+            })
+        }
         if let template {
             return RenderResult(content: template.render { path in
                 path == "now" ? .string(self.string(for: now)) : state.value(path)
