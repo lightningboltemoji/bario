@@ -261,6 +261,33 @@ struct FrameLoopTests {
         #expect(other?.map(\.style.opacity) == [1, 1])
     }
 
+    @Test("a bar that splits around a real notch wears notched there, and only there")
+    func notched() async throws {
+        let h = try Harness(#"item "a" module="echo-test"; item "b" module="echo-test" unless="notched""#,
+                            css: "item { opacity: 1 } bar.notched item { opacity: 0.4 }", bars: 2)
+        await h.start()
+        for bar in h.loop.bars { h.loop.setBackdrop(FrameLoopTests.checker, for: bar.id) }
+        await h.settle()
+        let (left, right) = (h.surfaces[0], h.surfaces[1])
+        #expect(left.presentations.last?.scene.allItems.map(\.name) == ["a", "b"], "no notch yet")
+
+        var display = h.loop.bars[0].display
+        display.notch = CGRect(x: 150, y: 861, width: 100, height: 39)
+        h.loop.updateBar(1, display: display, menuBarShown: true)
+        await h.settle()
+        let notched = left.presentations.last?.scene.allItems
+        #expect(notched?.map(\.name) == ["a"])
+        #expect(notched?.map(\.style.opacity) == [0.4])
+        let plain = right.presentations.last?.scene.allItems
+        #expect(plain?.map(\.name) == ["a", "b"])
+        #expect(plain?.map(\.style.opacity) == [1, 1])
+
+        // A bar that ignores the notch is laid out as on a plain display, so it does not wear it.
+        h.loop.config = try ConfigLoader.parse(#"bar { notch "ignore"; item "a" module="echo-test"; item "b" module="echo-test" unless="notched" }"#)
+        await h.settle()
+        #expect(left.presentations.last?.scene.allItems.map(\.name) == ["a", "b"])
+    }
+
     @Test("an if-room bar shows over a full screen app only where the app leaves it room")
     func fullscreenIfRoom() async throws {
         let h = try Harness(#"height 30; fullscreen "if-room"; item "a" module="echo-test""#, bars: 2)

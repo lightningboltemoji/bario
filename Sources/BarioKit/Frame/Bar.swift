@@ -99,10 +99,17 @@ public final class Bar {
         }
     }
 
-    /// The modes the bar wears: every bar's, and `fullscreen` while it is over a full screen
-    /// app, which is the one that differs from display to display.
+    /// Whether the bar splits around a real notch on its display.
+    var notched: Bool { config?.avoidsNotch(on: display) ?? false }
+
+    /// The modes the bar wears: every bar's, `fullscreen` while it is over a full screen app,
+    /// and `notched` while it splits around a real notch. Those two differ from display to
+    /// display.
     func modes(_ modes: Set<String>) -> Set<String> {
-        fullscreen ? modes.union(["fullscreen"]) : modes
+        var modes = modes
+        if fullscreen { modes.insert("fullscreen") }
+        if notched { modes.insert("notched") }
+        return modes
     }
 
     /// The part of the bar over the real menu bar, in screen coordinates. A bar taller than the

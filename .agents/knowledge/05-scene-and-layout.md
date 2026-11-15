@@ -85,9 +85,10 @@ splits on a plain display too, at a gap-wide stand-in centred on the screen, so 
 stays on its own side of the centre whatever its width. `notch "if-present"` splits only at a
 real notch and is dropped elsewhere, which is how to pick the notch's side for an item that is
 centred on a plain display. `bar { notch "ignore" }` treats the display as plain: `scene.notch`
-is nil, `.always` still splits at the centre, `.ifPresent` does nothing. The bar-level policy
-and the marker share a node name; the loader tells them apart by argument (`"avoid"` /
-`"ignore"` versus none or `"if-present"`).
+is nil, `.always` still splits at the centre, `.ifPresent` does nothing. A bar that splits
+around a real notch wears the built-in mode `notched` (doc 21), so the config and stylesheet can
+tell the two kinds of display apart. The bar-level policy and the marker share a node name;
+the loader tells them apart by argument (`"avoid"` / `"ignore"` versus none or `"if-present"`).
 
 ## Vertical placement
 

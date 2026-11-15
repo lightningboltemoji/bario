@@ -77,9 +77,9 @@ public enum ConfigLoader {
     private static func check(_ config: Config) throws {
         var modes: Set<String> = []
         for mode in config.modes {
-            if ModeConfig.builtIn.contains(mode.name) {
-                throw KDLError("\"\(mode.name)\" is bario's own mode, on while a full screen app has "
-                               + "the display, so no mode node declares it", at: mode.position)
+            if let meaning = ModeConfig.builtIn[mode.name] {
+                throw KDLError("\"\(mode.name)\" is bario's own mode, \(meaning), "
+                               + "so no mode node declares it", at: mode.position)
             }
             if !modes.insert(mode.name).inserted {
                 throw KDLError("there are two modes called \"\(mode.name)\"", at: mode.position)
@@ -88,7 +88,7 @@ public enum ConfigLoader {
         let items = config.bars.flatMap(\.items).flatMap(\.flattened)
         for item in items {
             for name in [item.when, item.unless].compactMap({ $0 })
-            where !modes.contains(name) && !ModeConfig.builtIn.contains(name) {
+            where !modes.contains(name) && ModeConfig.builtIn[name] == nil {
                 let known = modes.isEmpty ? "there are none" : "the ones that exist are "
                     + modes.sorted().map { "\"\($0)\"" }.joined(separator: ", ")
                 throw KDLError("\(item.name) names a mode \"\(name)\" that no mode node declares; \(known)",

@@ -86,6 +86,12 @@ public struct BarConfig: Sendable, Equatable {
         guard display.notch != nil || menuBarStays else { return false }
         return height(on: display) <= Double(display.menuBarWindowHeight ?? display.menuBarHeight)
     }
+
+    /// Whether the bar splits around a real notch on `display`, as layout does: there is one,
+    /// and the bar avoids it. Such a bar wears `notched`. DESIGN.md §6.
+    public func avoidsNotch(on display: DisplayInfo) -> Bool {
+        notch == .avoid && (display.notch?.width ?? 0) > 1
+    }
 }
 
 /// The probe's knobs, moved into config. DESIGN.md §8.
@@ -164,10 +170,12 @@ public struct ModeConfig: Sendable, Equatable {
     public var hold: Double = 0
     public var position: KDLPosition = .start
 
-    /// Modes bario turns on itself, which `when` and `unless` can name without a mode node.
-    /// `fullscreen` is the one that differs from bar to bar: it is on for a bar while a full
-    /// screen app has its display.
-    public static let builtIn: Set<String> = ["fullscreen"]
+    /// Modes bario turns on itself, which `when` and `unless` can name without a mode node,
+    /// each with when it is on. They are the ones that differ from bar to bar.
+    public static let builtIn: [String: String] = [
+        "fullscreen": "on for a bar while a full screen app has its display",
+        "notched": "on for a bar while it splits around its display's notch",
+    ]
 
     public init(name: String, position: KDLPosition = .start) {
         self.name = name

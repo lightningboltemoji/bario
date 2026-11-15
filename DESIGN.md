@@ -381,6 +381,21 @@ monitor and puts it left of the notch on the MacBook.
 `bar { notch "ignore" }` treats every display as plain, so nothing avoids the notch and only
 a bare `notch` marker splits the bar.
 
+A bar that splits around a real notch wears `notched`, a mode bario turns on itself, so the one
+config can differ where the notch is and where it is not. Under `notch "ignore"` no bar wears
+it. On a plain display, say, something can stand where the notch would be:
+
+```kdl
+item "clock" module="clock"
+item "seam" module="data" unless="notched"
+notch
+item "wifi" module="wifi"
+```
+
+```css
+#seam { width: 1pt; margin: 10pt 0; background: rgba(255, 255, 255, 0.3); }
+```
+
 ### Modes
 
 A bar can change its arrangement, not just its looks. A **mode** is a named condition over the
@@ -411,8 +426,8 @@ notch
 brings in has its content the moment it appears. A path's first value is not a change, so
 starting up turns nothing on. Items that stay in both arrangements slide to their new places;
 the ones that come and go transition in and out (section 7). Modes are the same on every bar,
-but for `fullscreen`, which bario turns on for a bar while a full screen app has its display
-(below).
+but for two that bario turns on itself, bar by bar: `fullscreen`, while a full screen app has
+the bar's display (below), and `notched`, while the bar splits around a real notch (above).
 
 ### Multiple displays
 

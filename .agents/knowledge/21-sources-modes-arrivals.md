@@ -59,6 +59,13 @@ The style stage takes the modes. They are classes on the `bar` style node, and
 A mode decides layout only: an item it hides still renders, so it has content the moment it
 shows. `--shot` and `--diagnose` take `--mode <name>` to hold one on.
 
+Two modes are bario's own, in `ModeConfig.builtIn` with what each means (a mode node may not
+declare one, and `when`/`unless` may name one undeclared). They differ from bar to bar, so they
+are not in `FrameLoop.modes`: `Bar.modes(_:)` adds them to the shared set at styling.
+`fullscreen` is on while a full screen app has the bar's display; `notched` while the bar splits
+around a real notch (`BarConfig.avoidsNotch(on:)`, the same test layout makes: a notch wider
+than 1pt and `notch "avoid"`). `updateBar` restyles when either flips.
+
 ## Arriving and leaving
 
 `@starting-style` rules carry `StyleRule.starting` and take part in no cascade but

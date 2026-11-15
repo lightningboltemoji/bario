@@ -296,17 +296,19 @@ public final class FrameLoop {
     }
 
     /// A display resized, its menu bar hid or showed, or a full screen app took it or gave it
-    /// back. That last changes the bar's classes, so it restyles.
+    /// back. That last changes the bar's classes, so it restyles, as does a notch coming or
+    /// going.
     public func updateBar(_ id: CGDirectDisplayID, display: DisplayInfo, menuBarShown: Bool,
                           fullscreen: Bool = false) {
         guard let bar = bars.first(where: { $0.id == id }),
               bar.display != display || bar.menuBarShown != menuBarShown
                 || bar.fullscreen != fullscreen else { return }
+        let config = config.bar(for: display)
         let restyle = bar.fullscreen != fullscreen
+            || bar.notched != (config?.avoidsNotch(on: display) ?? false)
         bar.display = display
         bar.menuBarShown = menuBarShown
         bar.fullscreen = fullscreen
-        let config = config.bar(for: display)
         if config != bar.config || restyle {
             bar.config = config
             invalidate(.style, bar: id)
