@@ -252,29 +252,50 @@ public final class Compositor {
                             context: walk.context, factory: &factory)
 
         var sublayers = record.chrome.layers
+        // A group's items reach past its box unless it says otherwise. One that clips them
+        // holds them as an item holds its content, so a leaving item, or one that has arrived
+        // while the group is still growing to it, shows only inside the group.
+        let clipsChildren = !item.children.isEmpty && item.style.overflow.clips
         if let content = item.content, box.width > 0, box.height > 0 {
             // Content never spills out of its bubble. It matters most while a bubble grows:
             // its content already has the size it was measured at, and would otherwise show
             // across the neighbours the bubble has not reached.
-            let clip = record.clip ?? factory.make()
-            record.clip = clip
-            clip.place(box)
-            assign(clip, \.masksToBounds, true)
-            Outline(item.style.borderRadius, item.style.cornerShape, in: box)
-                .apply(to: clip, in: box, mask: &record.clipMask, factory: &factory)
+            let clip = clipLayer(for: record, in: box, style: item.style)
             let style = contrasted(item.style, in: item.frame, walk: walk)
             clip.updateSublayers([apply(content, path: [], inheriting: style, item: name,
                                         walk: &walk, report: &report)])
+            sublayers.append(clip)
+        } else if clipsChildren {
+            let clip = clipLayer(for: record, in: box, style: item.style)
+            var children: [CALayer] = []
+            for child in item.children {
+                children.append(apply(child, walk: &walk, report: &report))
+            }
+            clip.updateSublayers(children)
             sublayers.append(clip)
         } else {
             record.clip = nil
             record.clipMask = nil
         }
-        for child in item.children {
-            sublayers.append(apply(child, walk: &walk, report: &report))
+        if !clipsChildren {
+            for child in item.children {
+                sublayers.append(apply(child, walk: &walk, report: &report))
+            }
         }
         record.layer.updateSublayers(sublayers)
         return record.layer
+    }
+
+    /// The layer an item's content, or a clipping group's items, are held in: its box, with its
+    /// rounded corners.
+    private func clipLayer(for record: ItemRecord, in box: CGRect, style: Style) -> CALayer {
+        let clip = record.clip ?? factory.make()
+        record.clip = clip
+        clip.place(box)
+        assign(clip, \.masksToBounds, true)
+        Outline(style.borderRadius, style.cornerShape, in: box)
+            .apply(to: clip, in: box, mask: &record.clipMask, factory: &factory)
+        return clip
     }
 
     // MARK: - Nodes

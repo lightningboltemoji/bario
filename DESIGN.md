@@ -572,7 +572,7 @@ Properties:
 
 | group | properties |
 |---|---|
-| box | `padding`, `margin`, `gap`, `border` (width, color), `border-width` (per side, as `padding`), `border-radius` (per corner), `width`, `min-width`, `max-width`, `opacity` |
+| box | `padding`, `margin`, `gap`, `border` (width, color), `border-width` (per side, as `padding`), `border-radius` (per corner), `width`, `min-width`, `max-width`, `opacity`, `overflow` (`visible`, or `hidden`/`clip`: a group's items clipped to its box) |
 | background | `background`: a colour, a gradient, `backdrop` (the captured desktop, i.e. an invisible bar) or `backdrop blur(20pt) saturate(1.2)` |
 | text | `font` (family, size, weight, e.g. `12pt "SF Pro Text" medium`, `system-ui`, `monospace`), `color`, `font-weight`, `letter-spacing`, `text-transform` |
 | icon | `icon-size`, `icon-color`, `icon-weight` (SF Symbol weight), `icon-rendering` (`monochrome`, `hierarchical`, `palette`, `multicolor`) |
@@ -627,6 +627,12 @@ still slide to make room, and it can transition in (below). The items in a group
 include the group's movement. And while a bubble resizes, its content keeps the size it was
 measured at, stays centred in the bubble, and is clipped to it, so a bubble that is growing
 never paints its new content across the neighbours it has not reached yet.
+
+A group's items are not clipped to it unless it says `overflow: clip` (or `hidden`; nothing
+scrolls). Then they are held in its box and its rounded corners as an item's content is. That is
+how two items that take turns, one leaving as the other arrives, can share one bubble: the
+group is the bubble, and it grows or shrinks between them as one, while what leaves or arrives
+at a size the group has not reached yet shows only inside it.
 
 ### Arriving and leaving
 

@@ -385,6 +385,32 @@ struct CompositorTests {
         #expect((border.mask as? CAShapeLayer)?.path == border.path)
     }
 
+    @Test("a group's items reach past it, unless overflow clips them to its box and corners")
+    func groupOverflow() throws {
+        let items = #"group "g" { item "a" module="text"; item "b" module="text" }"#
+        let css = "#g { margin: 2pt; border-radius: 6pt; background: red }"
+        commit(try scene(items, css: css))
+        let open = try #require(compositor.item(.item("g")))
+        #expect(open.clip == nil)
+        let a = try #require(compositor.layer(for: .item("a")))
+        #expect(a.superlayer === open.layer)
+
+        commit(try scene(items, css: css + " #g { overflow: clip }"))
+        let record = try #require(compositor.item(.item("g")))
+        let clip = try #require(record.clip)
+        #expect(clip.masksToBounds)
+        #expect(clip.cornerRadius == 6)
+        #expect(clip.frame == record.layer.bounds.insetBy(dx: 2, dy: 2), "the box: the frame less its margin")
+        #expect(compositor.layer(for: .item("a")) === a, "the same layers, held in the clip")
+        #expect(a.superlayer === clip)
+        #expect(compositor.layer(for: .item("b"))?.superlayer === clip)
+
+        // Back to visible: the clip goes and the items are the group's own again.
+        commit(try scene(items, css: css))
+        #expect(compositor.item(.item("g"))?.clip == nil)
+        #expect(a.superlayer === record.layer)
+    }
+
     // MARK: The bar's height
 
     @Test("a photograph stops at the bottom of the menu bar; a colour fills the whole bar")

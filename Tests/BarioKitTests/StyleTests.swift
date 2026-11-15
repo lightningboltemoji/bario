@@ -214,6 +214,7 @@ struct StyleTests {
           min-width: 20pt; max-width: 80pt; width: 40pt;
           opacity: 0.8;
           gap: 3pt;
+          overflow: clip;
           background: backdrop blur(20pt) saturate(1.2);
           font: 12pt "SF Pro Text" medium;
           letter-spacing: 0.5pt;
@@ -235,6 +236,9 @@ struct StyleTests {
         #expect(resolved.width == 40)
         #expect(resolved.opacity == 0.8)
         #expect(resolved.gap == 3)
+        #expect(resolved.overflow == .clip)
+        #expect(resolved.overflow.clips)
+        #expect(!Style.initial.overflow.clips, "a group shows what reaches past it unless told")
         #expect(resolved.background == .backdrop(Backdrop(blur: 20, saturate: 1.2)))
         #expect(resolved.font == FontSpec(family: .named("SF Pro Text"), weight: 500, size: 12))
         #expect(resolved.letterSpacing == 0.5)

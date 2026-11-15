@@ -104,7 +104,11 @@ layer tree and never draws; `BarCover` is the window-backed `BarSurface`.
   that flips every frame, and at end-of-turn pacing it would spin the CPU.
 
 - **Content is clipped to its bubble.** While a bubble grows its content already has its final
-  size; without the clip it paints across its neighbours for the first few frames.
+  size; without the clip it paints across its neighbours for the first few frames. A group's
+  items are clipped to it only with `overflow: clip` (or `hidden`): `ItemRecord.clip` then holds
+  the items' layers rather than content, the same layer and mask (`Compositor.clipLayer`). It
+  is what lets two items that take turns share one bubble, the group, without the one leaving
+  or arriving showing past it while it resizes. Tested in `CompositorTests.groupOverflow`.
 - **A backdrop identical to the last is not new.** The capture of an unchanged desktop compares
   bytes, invalidates nothing and returns false, and that false is what ends the controller's
   run of captures while the desktop is changing.

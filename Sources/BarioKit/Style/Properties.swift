@@ -79,6 +79,15 @@ public enum TextTransform: String, Sendable, Hashable, CaseIterable {
     case none, uppercase, lowercase, capitalize
 }
 
+/// What a group does with items that reach past its box: show them, or clip them to its box and
+/// its rounded corners, as an item always clips its content. `hidden` and `clip` are the same
+/// here, since nothing scrolls.
+public enum Overflow: String, Sendable, Hashable, CaseIterable {
+    case visible, hidden, clip
+
+    public var clips: Bool { self != .visible }
+}
+
 /// DESIGN.md §13: an invisible bar with bare text needs contrast handling. `auto` asks the
 /// painter to sample the backdrop under the item and pick light or dark.
 public enum Contrast: String, Sendable, Hashable, CaseIterable {
@@ -352,6 +361,7 @@ public enum StyleProperty: String, Sendable, CaseIterable {
     case width
     case opacity
     case gap
+    case overflow
     case background
     case font
     case fontFamily = "font-family"

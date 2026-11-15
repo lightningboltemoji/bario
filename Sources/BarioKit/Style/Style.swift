@@ -16,6 +16,7 @@ public struct Style: Sendable, Hashable {
     public var width: Double?
     public var opacity: Double = 1
     public var gap: Double = 0
+    public var overflow: Overflow = .visible
 
     // background
     public var background: Background = .none
@@ -110,6 +111,7 @@ public struct Style: Sendable, Hashable {
         case .width: width = try CSSValue.length(value, at: position)
         case .opacity: opacity = min(1, max(0, try CSSValue.number(value, at: position)))
         case .gap: gap = try CSSValue.length(value, at: position)
+        case .overflow: overflow = try CSSValue.keyword(value, Overflow.self, at: position)
         case .background: background = try CSSValue.background(value, at: position)
         case .font: font = try CSSValue.font(value, base: font, at: position)
         case .fontFamily: font.family = try CSSValue.fontFamily(value, at: position)
