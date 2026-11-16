@@ -37,7 +37,7 @@ struct DisplayListTests {
         #expect(value.cap == .round)
 
         guard case .text(let text) = list.ops[2] else { Issue.record("not text"); return }
-        #expect(text.text == "70")
+        #expect(text.runs == [.text("70")])
         #expect(text.align == .center)
         #expect(text.font == "9pt monospace")
         #expect(text.at == CGPoint(x: 14, y: 12))
@@ -81,6 +81,53 @@ struct DisplayListTests {
         #expect(nested.ops.count == 1)
         guard case .transform(let matrix) = list.ops[6] else { Issue.record("not a transform"); return }
         #expect(matrix.tx == 5)
+    }
+
+    @Test("a text op's runs are strings and icons, in order")
+    func textRuns() throws {
+        let list = try parse("""
+        [
+          { "text": ["80", { "icon": "bolt.fill" }, "%"], "at": [0, 0] },
+          { "text": [{ "icon": { "file": "~/x.png" } }], "at": [0, 0] },
+          { "text": ["80", { "bolt": 1 }], "at": [0, 0] },
+          { "text": { "icon": "bolt.fill" }, "at": [0, 0] }
+        ]
+        """)
+        guard case .text(let text) = list.ops[0] else { Issue.record("not text"); return }
+        #expect(text.runs == [.text("80"), .icon(.symbol("bolt.fill")), .text("%")])
+        guard case .text(let file) = list.ops[1] else { Issue.record("not text"); return }
+        #expect(file.runs == [.icon(.file("~/x.png"))])
+        #expect(list.problems.count == 2)
+        #expect(list.problems[0].contains("a string or {\"icon\": …}"))
+        #expect(list.problems[1].contains("a string or a list of runs"))
+    }
+
+    @Test("an icon slot in a canvas's text op fills to runs, and an empty one to none")
+    func templateRuns() throws {
+        let template = try ContentTemplate(JSONValue(parsing: """
+        { "row": { "children": [
+          { "text": "{pct}{power-icon}" },
+          { "canvas": { "width": 30, "ops": [
+            { "text": "{pct}{power-icon}", "at": [0, 0] },
+            { "group": [{ "text": "{power-icon}", "at": [0, 0] }] },
+            { "text": "{pct}%", "at": [0, 0] }
+          ] } }
+        ] } }
+        """))
+        func children(_ state: [String: JSONValue]) -> [JSONValue] {
+            template.root.fill { state[$0] }["row"]?["children"]?.arrayValue ?? []
+        }
+        let plugged = children(["pct": 80, "power-icon": "bolt.fill"])
+        let ops = plugged[1]["canvas"]?["ops"]?.arrayValue ?? []
+        #expect(ops[0]["text"] == ["80", ["icon": "bolt.fill"]])
+        #expect(ops[1]["group"]?.arrayValue?.first?["text"] == [["icon": "bolt.fill"]])
+        // No icon slot, so a string as ever.
+        #expect(ops[2]["text"] == "80%")
+        let battery = children(["pct": 80, "power-icon": nil])
+        #expect(battery[1]["canvas"]?["ops"]?.arrayValue?.first?["text"] == ["80"])
+
+        // A text node is not a text op: its icon slots are still spelled out.
+        #expect(plugged[0]["text"] == "80bolt.fill")
     }
 
     @Test("one bad op is dropped with a reason, the rest still draw")
@@ -209,6 +256,21 @@ struct CanvasPaintTests {
         // In bar coordinates the canvas top is y≈22 and its bottom y≈2; "L" is wide at its base,
         // which is *lower* on screen.
         #expect(ink(yRange: 4...9) > ink(yRange: 15...20))
+    }
+
+    @Test("an inline symbol is laid out with the text and takes its colour")
+    func inlineSymbol() throws {
+        // Ended at the canvas's right edge: the square is last, so it is what reaches x 38, and
+        // the "1" before it pushes nothing past it. Red, the op's colour, not the item's blue.
+        let image = try paint("""
+        [{"text": ["1", {"icon": "square.fill"}], "at": [38, 10], "align": "end",
+          "font": "16pt system-ui", "color": "rgb(255,0,0)"}]
+        """, css: "item { color: rgb(0, 0, 255) }")
+        #expect(pixel(image, 31, 13).isClose(to: Offscreen.Pixel(r: 1, g: 0, b: 0, a: 1)))
+        // The "1" sits left of the square, and nothing is drawn at the start of the canvas.
+        let one = stride(from: 14.0, to: 24, by: 0.5).map { pixel(image, $0, 13).a }.max() ?? 0
+        #expect(one > 0.5)
+        #expect(pixel(image, 4, 13).a == 0)
     }
 
     @Test("a group's transform does not leak out of it")

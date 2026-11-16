@@ -61,7 +61,7 @@ public enum CanvasOp: Sendable {
         if let paint = fields["stroke"] {
             return .stroke(try CanvasPaint.parse(paint), try CanvasPath.parse(fields["path"]))
         }
-        if let text = fields["text"]?.stringValue {
+        if let text = fields["text"] {
             return .text(try CanvasText.parse(text: text, fields: fields))
         }
         if let image = fields["image"] {
@@ -220,19 +220,40 @@ public struct CanvasPath: Sendable {
     }
 }
 
+/// One line, placed by `at` and aligned as a whole. `text` is a string, or runs of strings and
+/// `{"icon": …}` symbols laid out together on one baseline, so a symbol beside a number moves
+/// with the number's width: `["80", {"icon": "bolt.fill"}]`.
 public struct CanvasText: Sendable {
-    public var text: String
+    public enum Run: Sendable, Equatable {
+        case text(String)
+        /// At the font's size and weight, in the text's colour.
+        case icon(IconSpec)
+    }
+
+    public var runs: [Run]
     public var at: CGPoint
     public var align: Align = .start
     public var valign: String = "middle"
     public var font: String?
     public var color: String?
 
-    static func parse(text: String, fields: [String: JSONValue]) throws -> CanvasText {
+    static func parse(text: JSONValue, fields: [String: JSONValue]) throws -> CanvasText {
         guard let at = fields["at"]?.arrayValue, at.count == 2 else {
             throw CanvasError("a text op needs \"at\": [x, y]")
         }
-        var op = CanvasText(text: text,
+        let runs: [Run]
+        if let string = text.stringValue {
+            runs = [.text(string)]
+        } else if let list = text.arrayValue {
+            runs = try list.map { run in
+                if let string = run.stringValue { return .text(string) }
+                if let icon = run["icon"] { return .icon(try IconSpec.parse(canvas: icon)) }
+                throw CanvasError("a text run is a string or {\"icon\": …}, not \(run.jsonText.prefix(30))")
+            }
+        } else {
+            throw CanvasError("text is a string or a list of runs")
+        }
+        var op = CanvasText(runs: runs,
                             at: CGPoint(x: at[0].doubleValue ?? 0, y: at[1].doubleValue ?? 0))
         if let align = fields["align"]?.stringValue {
             switch align {
@@ -259,16 +280,7 @@ public struct CanvasImage: Sendable {
     public var rect: CGRect
 
     static func parse(image: JSONValue, fields: [String: JSONValue]) throws -> CanvasImage {
-        let icon: IconSpec
-        if let name = image.stringValue {
-            icon = name.contains("/") || name.hasPrefix("~") ? .file(name) : .symbol(name)
-        } else if let file = image["file"]?.stringValue {
-            icon = .file(file)
-        } else if let symbol = image["symbol"]?.stringValue {
-            icon = .symbol(symbol)
-        } else {
-            throw CanvasError("an image op takes an SF Symbol name or {\"file\": …}")
-        }
+        let icon = try IconSpec.parse(canvas: image)
 
         if let rect = fields["rect"]?.arrayValue, rect.count == 4 {
             return CanvasImage(icon: icon, rect: CGRect(x: rect[0].doubleValue ?? 0,
@@ -284,5 +296,18 @@ public struct CanvasImage: Sendable {
                                                     y: at[1].doubleValue ?? 0,
                                                     width: size[0].doubleValue ?? 0,
                                                     height: size[1].doubleValue ?? 0))
+    }
+}
+
+extension IconSpec {
+    /// An image op's `image` and a text run's `icon`: an SF Symbol name, a path (anything with a
+    /// `/` or starting `~`), or `{"symbol": …}` / `{"file": …}`.
+    static func parse(canvas value: JSONValue) throws -> IconSpec {
+        if let name = value.stringValue {
+            return name.contains("/") || name.hasPrefix("~") ? .file(name) : .symbol(name)
+        }
+        if let file = value["file"]?.stringValue { return .file(file) }
+        if let symbol = value["symbol"]?.stringValue { return .symbol(symbol) }
+        throw CanvasError("an icon is an SF Symbol name or {\"file\": …}")
     }
 }

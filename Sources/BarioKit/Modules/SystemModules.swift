@@ -230,6 +230,8 @@ public actor BatteryModule: Module {
             "charging": .bool(charging),
             "plugged": .bool(plugged),
             "icon": .string(Symbols.battery(percent: percent, charging: charging, plugged: plugged)),
+            // On its own, for beside a number: `{pct}%{power-icon}`. Nothing on battery.
+            "power-icon": plugged ? .string("bolt.fill") : .null,
         ]
         // -1 means "still estimating"; a bubble reading "-1 min" is worse than no bubble.
         let key = charging || plugged ? kIOPSTimeToFullChargeKey : kIOPSTimeToEmptyKey

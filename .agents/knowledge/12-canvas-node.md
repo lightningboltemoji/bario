@@ -5,13 +5,27 @@ a `canvas` node holding a vector display list, which the host paints with CoreGr
 it is resolution independent and Retina is free.
 
 ```json
-{ "canvas": { "width": 28, "ops": [
-    { "stroke": { "color": "var(--track)", "width": 3 },
-      "path": [["arc", 14, 12, 9, 0, 360]] },
-    { "stroke": { "color": "currentColor", "width": 3, "cap": "round" },
-      "path": [["arc", 14, 12, 9, -90, 162]] },
-    { "text": "70", "at": [14, 12], "align": "center", "font": "9pt monospace" }
-] } }
+{
+  "canvas": {
+    "width": 28,
+    "ops": [
+      {
+        "stroke": { "color": "var(--track)", "width": 3 },
+        "path": [["arc", 14, 12, 9, 0, 360]]
+      },
+      {
+        "stroke": { "color": "currentColor", "width": 3, "cap": "round" },
+        "path": [["arc", 14, 12, 9, -90, 162]]
+      },
+      {
+        "text": "70",
+        "at": [14, 12],
+        "align": "center",
+        "font": "9pt monospace"
+      }
+    ]
+  }
+}
 ```
 
 Because a display list is data, it moves through every channel the content tree already uses:
@@ -20,16 +34,16 @@ cached like every other render, so it costs nothing while idle.
 
 ## The op set
 
-| op | shape |
-|---|---|
-| `fill` | `{ "fill": <paint>, "path": [...] }` |
-| `stroke` | `{ "stroke": <paint>, "path": [...] }` — paint may add `width`, `cap`, `join`, `dash` |
-| `text` | `{ "text": "70", "at": [x, y], "align": "start\|center\|end", "valign": "top\|middle\|bottom\|baseline", "font": "9pt monospace", "color": … }` |
-| `image` | `{ "image": "gear" \| {"file": …}, "rect": [x, y, w, h] }` or `at` + `size` |
-| `clip` | `{ "clip": [...] }` — a path, for the rest of the group |
-| `transform` | `{ "transform": [a,b,c,d,tx,ty] }` or `{ "translate": …, "rotate": deg, "scale": … }` |
-| `opacity` | `{ "opacity": 0.5 }` — for the rest of the group |
-| `group` | `{ "group": [ops…] }` — saved and restored state around nested ops |
+| op          | shape                                                                                                                                                                                                 |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fill`      | `{ "fill": <paint>, "path": [...] }`                                                                                                                                                                  |
+| `stroke`    | `{ "stroke": <paint>, "path": [...] }` — paint may add `width`, `cap`, `join`, `dash`                                                                                                                 |
+| `text`      | `{ "text": "70", "at": [x, y], "align": "start\|center\|end", "valign": "top\|middle\|bottom\|baseline", "font": "9pt monospace", "color": … }` — `text` may be runs, `["80", {"icon": "bolt.fill"}]` |
+| `image`     | `{ "image": "gear" \| {"file": …}, "rect": [x, y, w, h] }` or `at` + `size`                                                                                                                           |
+| `clip`      | `{ "clip": [...] }` — a path, for the rest of the group                                                                                                                                               |
+| `transform` | `{ "transform": [a,b,c,d,tx,ty] }` or `{ "translate": …, "rotate": deg, "scale": … }`                                                                                                                 |
+| `opacity`   | `{ "opacity": 0.5 }` — for the rest of the group                                                                                                                                                      |
+| `group`     | `{ "group": [ops…] }` — saved and restored state around nested ops                                                                                                                                    |
 
 Path commands are arrays: `["move", x, y]`, `["line", x, y]`,
 `["curve", c1x, c1y, c2x, c2y, x, y]`, `["quad", cx, cy, x, y]`, `["arc", cx, cy, r, from, to]`,
@@ -70,7 +84,7 @@ layout.
 ## Theming reaches it
 
 This is what makes a display list feel native rather than pasted on (§9, "what makes them feel
-native"). Every colour in an op is a CSS colour *string*, resolved against the node's own
+native"). Every colour in an op is a CSS colour _string_, resolved against the node's own
 resolved style: `currentColor` is that node's `color`, `var(--track)` is whatever cascaded to
 it, `accent` is the user's accent, `system(labelColor)` follows the appearance. Fonts are the
 CSS `font` shorthand over the node's font as a base, so `"9pt monospace"` and plain

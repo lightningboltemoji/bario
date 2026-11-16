@@ -128,7 +128,7 @@ The initial set, chosen because each one replaces something the cover is hiding:
 |---|---|---|
 | `front-app` | `NSWorkspace.frontmostApplication` + activation notification; its menu is the app's menu bar, through Accessibility (§8) | `name`, `bundle-id`, `icon` |
 | `clock` | timer aligned to the next second/minute | `now` |
-| `battery` | IOKit `IOPSCopyPowerSourcesInfo`, on change notification | `pct`, `charging`, `time-remaining` |
+| `battery` | IOKit `IOPSCopyPowerSourcesInfo`, on change notification | `pct`, `charging`, `time-remaining`, `power-icon` |
 | `wifi` | CoreWLAN | `ssid`, `rssi`, `on`; SSID needs Location permission on macOS 14+, degrade to `rssi` only |
 | `volume` | CoreAudio default output device listener | `level`, `muted` |
 | `net` | `getifaddrs` counters on an interval | `rx`, `tx`, rolling history for `graph` |
@@ -1069,8 +1069,8 @@ A render result may contain a `canvas` node carrying a display list:
 ```
 
 The op set is small and vector: `move`, `line`, `curve`, `arc`, `close`, `rect`,
-`round-rect`, `fill`, `stroke`, `text`, `image` (SF Symbol or file), `clip`, `transform`,
-`opacity`, `group`. The host rasterizes it with CoreGraphics into the node's own layer, at the
+`round-rect`, `fill`, `stroke`, `text` (a string, or runs of text and symbols laid out as one
+line), `image` (SF Symbol or file), `clip`, `transform`, `opacity`, `group`. The host rasterizes it with CoreGraphics into the node's own layer, at the
 display's scale, so it is resolution independent and Retina is free. Coordinates are points,
 origin top-left of the node's frame, `height` defaults to the bar's content height.
 

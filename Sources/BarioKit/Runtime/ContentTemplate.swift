@@ -22,7 +22,8 @@ import Foundation
 /// (or `if "!ssid"`) keeps what is inside it while the value is truthy. A slot whose
 /// name starts with `/` reads from the root of the store rather than the item's state, and
 /// one filled into an `on-…` action is single-quoted, so a value is one argument whatever is in
-/// it.
+/// it. In a canvas's text op an icon slot is the symbol, as in a format: `text "{pct}{power-icon}"`
+/// fills to runs, `["80", {"icon": "bolt.fill"}]`, drawn as one line.
 public struct ContentTemplate: Sendable, Hashable {
     indirect enum Piece: Sendable, Hashable {
         case literal(JSONValue)
@@ -31,6 +32,8 @@ public struct ContentTemplate: Sendable, Hashable {
         case format(FormatString)
         /// An action whose slots are filled quoted.
         case action(FormatString)
+        /// A canvas text op's format with an icon slot in it: runs of text and symbols.
+        case runs(FormatString)
         case array([Piece])
         case object([String: Piece])
         /// Children repeated for every element of the list at a path.
@@ -74,27 +77,31 @@ public struct ContentTemplate: Sendable, Hashable {
         }
     }
 
-    private static func compile(_ json: JSONValue, key: String? = nil) throws -> Piece {
+    /// `canvas` is whether this is inside a canvas node, where `text` is a text op's.
+    private static func compile(_ json: JSONValue, key: String? = nil, canvas: Bool = false) throws -> Piece {
         switch json {
         case .string(let text) where text.contains("{") || text.contains("}"):
             let format = try FormatString.parse(text)
             // `{{` alone is a literal brace, and stays a literal.
             if format.isPlainText { return .literal(.string(format.string { _ in nil })) }
             if let key, key.hasPrefix("on-") { return .action(format) }
+            if canvas, key == "text", format.slots.contains(where: \.isIcon) { return .runs(format) }
             if format.pieces.count == 1, case .slot(let slot) = format.pieces[0], slot.spec == nil {
                 return .value(slot.name)
             }
             return .format(format)
         case .array(let items):
-            return .array(try items.map { try compile($0) })
+            return .array(try items.map { try compile($0, canvas: canvas) })
         case .object(let fields):
             if fields.count == 1, let (word, body) = fields.first, word == "each" || word == "if",
                let path = body["path"]?.stringValue {
-                let children = try (body["children"]?.arrayValue ?? []).map { try compile($0) }
+                let children = try (body["children"]?.arrayValue ?? []).map { try compile($0, canvas: canvas) }
                 return word == "each" ? .each(path, children) : .when(path, children)
             }
             var pieces: [String: Piece] = [:]
-            for (name, value) in fields { pieces[name] = try compile(value, key: name) }
+            for (name, value) in fields {
+                pieces[name] = try compile(value, key: name, canvas: canvas || name == "canvas")
+            }
             return .object(pieces)
         default:
             return .literal(json)
@@ -106,7 +113,7 @@ extension ContentTemplate.Piece {
     var hasSlots: Bool {
         switch self {
         case .literal: return false
-        case .value, .format, .action, .each, .when: return true
+        case .value, .format, .action, .runs, .each, .when: return true
         case .array(let items): return items.contains { $0.hasSlots }
         case .object(let fields): return fields.values.contains { $0.hasSlots }
         }
@@ -116,7 +123,7 @@ extension ContentTemplate.Piece {
         switch self {
         case .literal: return []
         case .value(let name): return [FormatString.Slot(name: name, spec: nil)]
-        case .format(let format), .action(let format): return format.slots
+        case .format(let format), .action(let format), .runs(let format): return format.slots
         case .array(let items): return items.flatMap(\.slots)
         case .object(let fields): return fields.values.flatMap(\.slots)
         case .each(_, let children), .when(_, let children): return children.flatMap(\.slots)
@@ -130,6 +137,7 @@ extension ContentTemplate.Piece {
         case .value(let name): return lookup(name).flatMap { $0.isNull ? nil : $0 } ?? .string("")
         case .format(let format): return .string(format.string(lookup))
         case .action(let format): return .string(format.string(lookup, quoted: true))
+        case .runs(let format): return .array(format.runs(lookup))
         case .array(let items): return .array(items.flatMap { $0.expand(lookup) })
         case .object(let fields): return .object(fields.mapValues { $0.fill(lookup) })
         case .each, .when: return .array(expand(lookup))
@@ -177,6 +185,27 @@ extension FormatString {
                 return quoted ? FormatString.shellQuoted(text) : text
             }
         }.joined()
+    }
+
+    /// A canvas text op's runs: text, with each icon slot a `{"icon": …}` between, and an empty
+    /// one left out, as `render` leaves it out of a row.
+    func runs(_ lookup: (String) -> JSONValue?) -> [JSONValue] {
+        var runs: [JSONValue] = []
+        var text = ""
+        for piece in pieces {
+            switch piece {
+            case .literal(let literal):
+                text += literal
+            case .slot(let slot) where slot.isIcon:
+                guard let symbol = lookup(slot.name)?.stringValue, !symbol.isEmpty else { continue }
+                if !text.isEmpty { runs.append(.string(text)); text = "" }
+                runs.append(.object(["icon": .string(symbol)]))
+            case .slot(let slot):
+                text += FormatString.format(lookup(slot.name), spec: slot.spec)
+            }
+        }
+        if !text.isEmpty { runs.append(.string(text)) }
+        return runs
     }
 
     /// `'it'\''s'`: one word to `/bin/sh` and to `Action.split` alike.

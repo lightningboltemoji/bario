@@ -77,17 +77,47 @@ public struct CanvasPainter {
         }
     }
 
+    /// A text op's runs, end to end on one baseline: each string a line of its own, each icon a
+    /// symbol, so the op is measured, aligned and coloured whole.
     private func draw(_ op: CanvasText, ctx: CGContext) {
         let spec = op.font.flatMap { font(from: $0) } ?? style.font
         let font = CoreTextMetrics.font(for: spec)
+        let ink = color(op.color ?? "currentColor")
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor(cgColor: color(op.color ?? "currentColor")) ?? .labelColor,
+            .foregroundColor: NSColor(cgColor: ink) ?? .labelColor,
         ]
-        let line = CTLineCreateWithAttributedString(
-            NSAttributedString(string: op.text, attributes: attributes))
-        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-        let width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+        // An inline symbol is sized as an icon node is, by `icon-size` and `icon-weight` where
+        // the stylesheet sets them, and otherwise by this text's font rather than the node's.
+        var iconStyle = style
+        iconStyle.iconSize = style.iconSize ?? spec.size
+        iconStyle.iconWeight = style.iconWeight ?? spec.weight
+        let iconPoint = iconStyle.effectiveIconSize
+
+        enum Laid { case line(CTLine), image(NSImage, IconSpec) }
+        var laid: [(Laid, width: CGFloat)] = []
+        var ascent: CGFloat = 0, descent: CGFloat = 0
+        for run in op.runs {
+            switch run {
+            case .text(let text):
+                let line = CTLineCreateWithAttributedString(
+                    NSAttributedString(string: text, attributes: attributes))
+                var lineAscent: CGFloat = 0, lineDescent: CGFloat = 0, leading: CGFloat = 0
+                let width = CTLineGetTypographicBounds(line, &lineAscent, &lineDescent, &leading)
+                ascent = max(ascent, lineAscent)
+                descent = max(descent, lineDescent)
+                laid.append((.line(line), width))
+            case .icon(let icon):
+                guard let image = CoreTextMetrics.image(for: icon, style: iconStyle) else { continue }
+                laid.append((.image(image, icon), CanvasPainter.inlineSize(image, icon, point: iconPoint).width))
+            }
+        }
+        // Symbols alone are placed by the font's line, as they would be beside its text.
+        if ascent == 0 && descent == 0 {
+            ascent = font.ascender
+            descent = -font.descender
+        }
+        let width = laid.reduce(0) { $0 + $1.width }
 
         var x = op.at.x
         switch op.align {
@@ -103,32 +133,63 @@ public struct CanvasPainter {
         default: y += (ascent - descent) / 2      // middle
         }
 
-        ctx.saveGState()
-        // The CTM is flipped, so the glyphs need flipping back or they draw mirrored.
-        ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        ctx.textPosition = CGPoint(x: x, y: y)
-        CTLineDraw(line, ctx)
-        ctx.restoreGState()
+        for (piece, advance) in laid {
+            switch piece {
+            case .line(let line):
+                ctx.saveGState()
+                // The CTM is flipped, so the glyphs need flipping back or they draw mirrored.
+                ctx.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+                ctx.textPosition = CGPoint(x: x, y: y)
+                CTLineDraw(line, ctx)
+                ctx.restoreGState()
+            case .image(let image, let icon):
+                // A symbol's alignment rectangle starts at its baseline, which goes on the
+                // text's (y runs down here). A file has none, so it is centred on the line.
+                let size = CanvasPainter.inlineSize(image, icon, point: iconPoint)
+                let top: CGFloat
+                if case .symbol = icon {
+                    top = y + image.alignmentRect.minY - size.height
+                } else {
+                    top = y - ascent + (ascent + descent - size.height) / 2
+                }
+                draw(image, icon: icon, in: CGRect(x: x, y: top, width: size.width, height: size.height),
+                     tint: ink, ctx: ctx)
+            }
+            x += advance
+        }
+    }
+
+    /// A symbol at its own size, as an icon node draws it; a file scaled to the point size, as
+    /// an icon node's is.
+    private static func inlineSize(_ image: NSImage, _ icon: IconSpec, point: Double) -> CGSize {
+        guard case .file = icon, image.size.height > 0 else { return image.size }
+        return CGSize(width: image.size.width * point / image.size.height, height: point)
     }
 
     private func draw(_ op: CanvasImage, ctx: CGContext) {
         guard let image = CoreTextMetrics.image(for: op.icon, style: style) else { return }
-        var box = op.rect
+        draw(image, icon: op.icon, in: op.rect,
+             tint: resolver.resolve(style.effectiveIconColor).cgColor, ctx: ctx)
+    }
+
+    /// A monochrome symbol is a mask filled with `tint`; anything else draws as it is.
+    private func draw(_ image: NSImage, icon: IconSpec, in rect: CGRect, tint: CGColor, ctx: CGContext) {
+        var box = rect
         // The current context, as an icon node's does, so the symbol is chosen at the raster's
         // scale; without one it is the main screen's, scaled up and blurred in a 6x `--shot`.
         guard let cgImage = image.cgImage(forProposedRect: &box, context: NSGraphicsContext.current,
                                           hints: nil) else { return }
         ctx.saveGState()
         // Undo the flip for this one draw so the image is not upside down.
-        ctx.translateBy(x: 0, y: op.rect.midY)
+        ctx.translateBy(x: 0, y: rect.midY)
         ctx.scaleBy(x: 1, y: -1)
-        ctx.translateBy(x: 0, y: -op.rect.midY)
-        if style.iconRendering == .monochrome, case .symbol = op.icon {
-            ctx.clip(to: op.rect, mask: cgImage)
-            ctx.setFillColor(resolver.resolve(style.effectiveIconColor).cgColor)
-            ctx.fill(op.rect)
+        ctx.translateBy(x: 0, y: -rect.midY)
+        if style.iconRendering == .monochrome, case .symbol = icon {
+            ctx.clip(to: rect, mask: cgImage)
+            ctx.setFillColor(tint)
+            ctx.fill(rect)
         } else {
-            ctx.draw(cgImage, in: op.rect)
+            ctx.draw(cgImage, in: rect)
         }
         ctx.restoreGState()
     }
