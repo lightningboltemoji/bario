@@ -594,28 +594,28 @@ public struct BatteryEnergy: Sendable, Equatable {
         self.plugged = plugged
     }
 
-    /// `data` is the battery's `BatteryData`, which is where macOS 27 keeps the raw capacities.
-    init?(data: [String: Any], millivolts: Int?, plugged: Bool) {
-        guard let full = data["AppleRawMaxCapacity"] as? Int,
-              let remaining = data["AppleRawCurrentCapacity"] as? Int,
-              let millivolts, full > 0, millivolts > 0 else { return nil }
+    /// `battery` is the battery's own properties in the IORegistry. macOS 27 keeps the raw
+    /// capacities inside its `BatteryData`, and macOS 26 and earlier keep them among the
+    /// properties themselves, so they are looked for in one and then the other.
+    init?(battery: [String: Any]) {
+        let data = battery["BatteryData"] as? [String: Any] ?? [:]
+        func raw(_ key: String) -> Int? { (data[key] ?? battery[key]) as? Int }
+        guard let full = raw("AppleRawMaxCapacity"), let remaining = raw("AppleRawCurrentCapacity"),
+              let millivolts = battery["Voltage"] as? Int, full > 0, millivolts > 0 else { return nil }
         let volts = Double(millivolts) / 1000
         self.init(full: Double(full) / 1000 * volts, remaining: Double(remaining) / 1000 * volts,
-                  plugged: plugged)
+                  plugged: battery["ExternalConnected"] as? Bool ?? false)
     }
 
-    /// Nil on a Mac with no battery, or one that keeps its capacities elsewhere.
+    /// Nil on a Mac with no battery, or one that keeps its capacities somewhere else again.
     @Sendable public static func read() -> BatteryEnergy? {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
         guard service != IO_OBJECT_NULL else { return nil }
         defer { IOObjectRelease(service) }
-        func property(_ name: String) -> Any? {
-            IORegistryEntryCreateCFProperty(service, name as CFString, kCFAllocatorDefault, 0)?
-                .takeRetainedValue()
-        }
-        return BatteryEnergy(data: property("BatteryData") as? [String: Any] ?? [:],
-                             millivolts: property("Voltage") as? Int,
-                             plugged: property("ExternalConnected") as? Bool ?? false)
+        var properties: Unmanaged<CFMutableDictionary>?
+        guard IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+              let battery = properties?.takeRetainedValue() as? [String: Any] else { return nil }
+        return BatteryEnergy(battery: battery)
     }
 }
 

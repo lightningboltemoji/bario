@@ -657,13 +657,21 @@ struct PowerTests {
 
     @Test("a battery's energy is its milliamp-hours at its voltage")
     func energy() throws {
-        let data: [String: Any] = ["AppleRawMaxCapacity": 5659, "AppleRawCurrentCapacity": 2717]
-        let energy = try #require(BatteryEnergy(data: data, millivolts: 12195, plugged: true))
-        #expect(abs(energy.full - 69.0) < 0.1)
-        #expect(abs(energy.remaining - 33.1) < 0.1)
-        #expect(energy.plugged)
-        #expect(BatteryEnergy(data: [:], millivolts: 12195, plugged: true) == nil)
-        #expect(BatteryEnergy(data: data, millivolts: nil, plugged: true) == nil)
+        let capacities: [String: Any] = ["AppleRawMaxCapacity": 5659, "AppleRawCurrentCapacity": 2717]
+        let plugged: [String: Any] = ["Voltage": 12195, "ExternalConnected": true]
+        // macOS 27 keeps the raw capacities in `BatteryData`; macOS 26 keeps them beside it.
+        let nested = plugged.merging(["BatteryData": capacities]) { $1 }
+        let beside = plugged.merging(capacities) { $1 }
+            .merging(["BatteryData": ["DesignCapacity": 6075]]) { $1 }
+        for battery in [nested, beside] {
+            let energy = try #require(BatteryEnergy(battery: battery))
+            #expect(abs(energy.full - 69.0) < 0.1)
+            #expect(abs(energy.remaining - 33.1) < 0.1)
+            #expect(energy.plugged)
+        }
+        #expect(BatteryEnergy(battery: plugged) == nil)
+        #expect(BatteryEnergy(battery: capacities) == nil, "no voltage")
+        #expect(BatteryEnergy(battery: beside.merging(["ExternalConnected": false]) { $1 })?.plugged == false)
     }
 
     @Test("with no reading there is no bubble, and it comes back with one")
